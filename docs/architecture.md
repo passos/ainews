@@ -32,7 +32,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 | `Q_INGEST` | Queue | 采集 → 正文 → 分析，可并发 |
 | `Q_GROUP` | Queue，`max_concurrency = 1` | 归组，批内顺序处理 |
 | `Q_GENERATE` | Queue | 事件产物、报告、watch、Ask、发现 |
-| `Q_DLQ` | Queue | 三条队列共用的死信队列 |
+| `Q_DLQ` | Queue | 三条队列共用的死信队列；它的消费者把消息存进 `dlq_messages` 表，后台从表里查看和重放（Worker 不能直接列出队列里的消息） |
 | `V_EVENTS` | Vectorize，1024 维 | 事件召回，元数据 `industry_id` |
 | `V_CHUNKS` | Vectorize，1024 维 | 正文分块，Ask 和论断证据用 |
 | `AI` | Workers AI | Jev、嵌入、`toMarkdown()` |
@@ -40,8 +40,8 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 
 ### 变量与密钥
 
-- 变量：`SITE_URL`、`ADMIN_EMAIL`、`ACCESS_TEAM_DOMAIN`、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`。
-- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`CF_AI_API_TOKEN`、`JINA_API_KEY`。`CLOUDFLARE_ACCOUNT_ID` 只给部署用。
+- 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics，可为空）。
+- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #2 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_ACCOUNT_ID` 只给部署用。
 - 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
 
@@ -56,6 +56,8 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 | `/`、`/s/$section`、`/e/$eventId`、`/digest/$section/$date`、`/w/$watch` | 完整 SSR，次要区块流式 | loader 调 `publication/` 的 server function |
 | `/rss/*.xml` | server route，纯文本 | `publication/` |
 | `/admin/*` | `ssr: 'data-only'` | `admin/` 的 server function，先过 Access 中间件 |
+
+server function 的请求路径是 `/_serverFn/*`，不在 Access 保护的 `/admin*` 之下，公开页面也用它，所以不能整段交给 Access。后台 server function 的鉴权：先读 `Cf-Access-Jwt-Assertion` 请求头，没有就读 `CF_Authorization` cookie，两者做同样的完整校验（#3）。Zero Trust 应用要关闭 "Cookie Path Attribute"，否则 cookie 只在 `/admin` 下发送。
 
 - search params 一律用 schema 校验（分页、板块、读者档位 `audience=student|educator|professional`）。
 - 只在服务端运行的代码放在 `src/server/**`，用 `createServerFn` 暴露；组件里不出现 `env`。
@@ -107,17 +109,18 @@ tests/
 
 ### 模型槽位（存在 settings 表，后台可改）
 
-| 槽位 | 默认 | 计费渠道 |
-|---|---|---|
-| `judge` | `typesafe/jev`（`env.AI.run`） | Workers AI |
-| `embed` | `@cf/baai/bge-m3` | Workers AI |
-| `write` | `gemini-3.8-flash` | AI Gateway Unified Billing |
-| `reason` | `claude-sonnet-5.5` | AI Gateway Unified Billing |
+| 槽位 | 默认模型 id |
+|---|---|
+| `judge` | `typesafe/jev` |
+| `embed` | `@cf/baai/bge-m3` |
+| `write` | `google/gemini-3.8-flash` |
+| `reason` | `anthropic/claude-sonnet-5.5` |
 
+- 所有槽位都用 `env.AI.run(model, input, { gateway: { id: AI_GATEWAY_ID } })` 调用。模型页的代码示例对这几个模型都用 `env.AI.run`（**已验证**，`google/gemini-3.8-flash` 页面）。
+- 计费渠道按槽位存在 settings 里，由 #2 的冒烟测试填：哪些从 AI Gateway 预充的 credits 扣，哪些按 Workers AI 计费，现在**未知**。如果走 binding 不行、只能走 REST，冒烟脚本停下报告，不在实现里临时改契约。
 - Jev：结构化评估模型，输入 `state` 加一组 `noul` / `choice` / `score` 问题，输出概率和置信度；上下文 32,000 token；输入 $0.042 / 1M token，输出免费（**已验证**，模型目录页）。超过上下文时截断正文，只送标题、摘要和开头部分。
-- 模型目录里有 `gemini-3.8-flash`、`claude-sonnet-5.5` 和 OpenAI 的 `gpt-5.5` 等（**已验证**）。替换成 OpenAI 等效模型只改槽位。
-- **假设**：Unified Billing 调用的端点、请求格式，以及 `CF_AI_API_TOKEN` 就是网关鉴权 token。M0 用一次真实调用核实（#2）。
-- **假设**：Workers AI 的费用不从 AI Gateway 预充的 credits 里扣。所以账本和预算按渠道分开。
+- 模型目录里也有 OpenAI 的 `gpt-5.5` 等（**已验证**）。换成 OpenAI 等效模型只改槽位。
+- 金额一律存整数微美元（1 USD = 1,000,000）。
 
 ## 5. 队列与状态
 
@@ -131,8 +134,9 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
                     Q_GENERATE : artifacts · claims · watch · digest · ask · discover
 ```
 
-- 每篇文章在 `articles.stage` 记录阶段（`collected → body_ready → analyzed → grouped`）和 `stage_updated_at`。消息只带 id；消费者从库里读状态，重复投递时直接跳过已完成的阶段。
-- cron 每 10 分钟扫一次卡住的行（阶段超过 30 分钟没变），重新入队。DLQ 里的消息在后台可以查看和重放。
+- 每篇文章在 `articles.stage` 记录阶段（`collected → body_ready → analyzed → grouped`，没入选的停在 `dropped`）和 `stage_updated_at`。消息只带 `kind` 和 id；消费者按 `kind` 分发，从库里读状态，重复投递时直接跳过已完成的阶段。
+- cron 每 10 分钟扫一次卡住的行（阶段超过 30 分钟没变），重新入队：`collected`、`body_ready` 回 `Q_INGEST`，`analyzed` 进 `Q_GROUP`。`dropped` 和 `grouped` 是终态。
+- 入选文章由 #10 发进 `Q_GROUP`。DLQ 里的消息在后台查看和重放（见第 1 节 `Q_DLQ`）。
 - 每个消费者按最坏情况的批次定 `max_batch_size`：一次调用共享 15 分钟墙钟时间和 CPU 上限。
 
 ## 6. 幂等、并发与预算
@@ -140,7 +144,8 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **模型调用账本** `llm_calls`：`logical_key` 唯一，状态 `pending → in_flight → completed | failed | unknown`，带 `lease_expires_at`。租约过期的行可以用条件 `UPDATE` 接管；调用已发出、结果没落库的标 `unknown`，后台人工核账。承诺的是"不重复发起、可以恢复"，不是"恰好一次付费"。
 - **预算预留**：调用前用一条条件语句预留 `UPDATE budgets SET reserved = reserved + ? WHERE day = ? AND channel = ? AND reserved + spent + ? <= cap`。影响行数为 0 就不调用。AI Gateway 的 spend limit 是最终一致的，只作外层兜底（**已验证**："Spend limits are eventually consistent"）。
 - **归组**：`Q_GROUP` 并发 1，批内 `for…of` 顺序处理，不用 `Promise.all`。候选事件 = Vectorize 召回 ∪ D1 里 30 分钟内新建的事件（Vectorize 索引是异步的）。`event_articles.article_id` 唯一。
-- **事件 revision**：已批准的文章并入事件时，`events.revision + 1`。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
+- **预算渠道**：`workers_ai`、`gateway`、`jina`。
+- **事件 revision**：事件里"已批准文章的集合"变化时，`events.revision + 1`：已批准的文章并入事件，或事件里的文章被批准、被拒绝、被下线。所有板块上线时都是审核模式，大多数文章是先归组、后批准的，所以批准和拒绝的同一个 `batch()` 里也要加 revision（#10 提供语句，#8 调用）。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
 - **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。
 
@@ -157,10 +162,11 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 
 | 档 | 做法 |
 |---|---|
-| 0 | RSS 的 `content:encoded` |
-| 1 | `fetch` 带 `Accept: text/markdown`，响应是 markdown 才用 |
-| 2 | `fetch` HTML 或 PDF → `env.AI.toMarkdown()`（支持 PDF，**已验证**） |
+| 0 | RSS 的 `content:encoded`；信源可以设 `summaryIsBody`，直接把 RSS 摘要当正文（arXiv 用这个） |
+| 1+2 | 一次 `fetch`，`Accept: text/markdown, text/html;q=0.9`：返回 markdown 就直接用（第 1 档）；返回 HTML 或 PDF 就交给 `env.AI.toMarkdown()`（第 2 档，支持 PDF，**已验证**） |
 | 3 | Jina Reader：全局开关 `THIRD_PARTY_READER_ENABLED`，并且信源单独打开时才用 |
+
+第 1 档只对在 Cloudflare 上开了 Markdown for Agents 的站点有效。arXiv 和 MIT Technology Review 都返回 HTML（**已验证**，细化 #5 时实测），所以 1、2 档合成一次请求，不多发一次。arXiv 的 robots.txt 要求 `Crawl-delay: 15`。
 
 - 需要浏览器渲染才能抓到的信源不收（使用者决定）。信源发现阶段就把它们过滤掉。
 - 每个信源探测一次后记下 `fetch_rung`，连续失败 3 次重新探测；每篇文章记下实际用的档。
@@ -175,7 +181,8 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | `sources` | `(industry_id, feed_url)` 唯一；`kind rss\|html`、`fetch_rung`、`jina_enabled`、健康指标、`status active\|paused\|candidate` |
 | `articles` | `canonical_url` 唯一；`stage`、原文发布时间、抓取时间、`fetch_rung`、`body_sha` |
 | `analyses` | `article_id` + `prompt_version` 唯一；五维分数、内容类型、证据标签、总分 |
-| `reviews` | `(article_id, body_sha)` 唯一 |
+| `reviews` | `(article_id, body_sha)` 唯一；`body_sha` 不能为空，没有正文时用摘要文本的 hash |
+| `dlq_messages` | 死信消息原文、来源队列、失败次数、重放状态 |
 | `events` / `event_articles` | `event_articles.article_id` 唯一；`events.revision` |
 | `event_artifacts` | 见第 6 节的键 |
 | `claims` / `claim_evidence` | 证据 = `(article_id, body_sha, quote, start, end, stance)` |
@@ -188,9 +195,11 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | `corrections` | 公开更正 |
 | `llm_calls` / `budgets` / `settings` | 见第 6 节 |
 
+**已知限制**：`canonical_url` 在所有板块之间唯一，一篇文章只属于最先采到它的信源所在的板块，只按那个板块的配置分析。同一篇文章同时出现在两个板块的信源里时，第二个板块看不到它。以后如果需要，再把分析结果改成按 `(article_id, industry_id)` 存。
+
 ## 10. 测试、CI 与合并
 
-- Vitest + `@cloudflare/vitest-pool-workers`；模型、Jina、外部网站都用本地假服务。
-- CI（GitHub Actions）：`typecheck`、`lint`、`test`、`build`。main 的 ruleset 要求 CI 通过；只允许 squash 合并；开启 auto-merge；合并后删除分支。
-- 合并到 main 后由 GitHub Actions 执行迁移和 `wrangler deploy`。
+- Vitest + `@cloudflare/vitest-plugin`（原 `@cloudflare/vitest-pool-workers` 已改名并弃用，**已验证**，npm）；模型、Jina、外部网站都用本地假服务。CI 里没有 Cloudflare 凭证也必须能跑测试。
+- CI（GitHub Actions，`ci.yml`）：`typecheck`、`lint`、`test`、`build`。main 的 ruleset 要求 CI 通过；只允许 squash 合并；开启 auto-merge；合并后删除分支。
+- 同一个 `ci.yml` 里的 `deploy` job：只在 main 上、CI 通过后执行迁移和 `wrangler deploy`。
 - 一个 issue 一个分支、一个 PR。PR 正文写 `Closes #n`。
