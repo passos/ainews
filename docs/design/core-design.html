@@ -1,0 +1,679 @@
+<title>ainews 核心设计稿</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a wire-desk spec sheet. One dense column, mono labels mark each section, decisions are inline controls. */
+:root {
+  --bg: #f4f5f8;
+  --panel: #ffffff;
+  --ink: #14161b;
+  --muted: #586070;
+  --line: #d6dae2;
+  --hot: #d1145a;
+  --hot-soft: #fbe3ec;
+  --v1: #0f7a57;
+  --v1-soft: #ddf3ea;
+  --later: #a8660b;
+  --later-soft: #fbefd9;
+  --out: #6b7180;
+  --out-soft: #eceef2;
+  --diagram-fill: #fafbfc;
+  --f-display: "Bricolage Grotesque", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --f-body: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --panel: #171a20; --ink: #e8eaef; --muted: #9aa1ae; --line: #2a2f39;
+    --hot: #ff4f8e; --hot-soft: #3a1626; --v1: #3fcb95; --v1-soft: #12301f; --later: #e8b25a; --later-soft: #33270f;
+    --out: #8a90a0; --out-soft: #23262d; --diagram-fill: #1b1e25; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --panel: #171a20; --ink: #e8eaef; --muted: #9aa1ae; --line: #2a2f39;
+  --hot: #ff4f8e; --hot-soft: #3a1626; --v1: #3fcb95; --v1-soft: #12301f; --later: #e8b25a; --later-soft: #33270f;
+  --out: #8a90a0; --out-soft: #23262d; --diagram-fill: #1b1e25; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.6 var(--f-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; display: grid; gap: 22px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 21px; font-weight: 800; }
+h3 { font-size: 15px; font-weight: 700; font-family: var(--f-body); }
+p { margin: 0; max-width: 72ch; }
+code, .mono { font-family: var(--f-mono); font-size: 12.5px; }
+.label { font: 600 11px/1 var(--f-mono); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.label b { color: var(--hot); font-weight: 600; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px 20px; display: grid; gap: 12px; min-width: 0; }
+section > header { display: grid; gap: 6px; }
+.hero { background: transparent; border: none; padding: 0; gap: 10px; }
+.hero .lede { font-size: 16px; max-width: 78ch; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font: 600 11px/1 var(--f-mono); padding: 5px 8px; border: 2px solid var(--ink); border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tag.hot { border-color: var(--hot); color: var(--hot); box-shadow: 0 0 0 3px var(--hot-soft); }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.diff { border: 2px solid var(--ink); border-radius: 6px; padding: 12px 14px; display: grid; gap: 6px; background: var(--panel); }
+.diff .k { font: 600 11px/1 var(--f-mono); color: var(--hot); letter-spacing: 0.08em; text-transform: uppercase; }
+.diff p { font-size: 13px; color: var(--muted); }
+.diff p strong { color: var(--ink); }
+@media (max-width: 760px) { .grid3 { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 11px/1.3 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--bg); position: sticky; top: 0; }
+tr:last-child td { border-bottom: none; }
+td.dim { color: var(--muted); }
+tr.group td { background: var(--bg); font: 600 11px/1.3 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); padding-block: 8px; }
+tr.group td span { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; font-family: var(--f-body); margin-left: 8px; }
+
+/* segmented control */
+.seg { display: inline-flex; border: 2px solid var(--ink); border-radius: 5px; overflow: hidden; white-space: nowrap; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { font: 600 11px/1 var(--f-mono); padding: 6px 8px; cursor: pointer; letter-spacing: 0.04em; color: var(--muted); border-right: 1px solid var(--line); }
+.seg label:last-of-type { border-right: none; }
+.seg label:hover { color: var(--ink); background: var(--bg); }
+.seg input:focus-visible + label { outline: 2px solid var(--hot); outline-offset: -2px; }
+.seg input[value="v1"]:checked + label { background: var(--v1); color: var(--panel); }
+.seg input[value="later"]:checked + label { background: var(--later); color: var(--panel); }
+.seg input[value="out"]:checked + label { background: var(--out); color: var(--panel); }
+td.ctl { width: 1%; }
+.changed { display: inline-block; font: 600 10px/1 var(--f-mono); color: var(--hot); margin-left: 6px; letter-spacing: 0.05em; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* invariants */
+.inv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 0; border: 1px solid var(--line); border-radius: 4px; }
+.inv > div { padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.inv > div:nth-last-child(-n+2) { border-bottom: none; }
+.inv > div:nth-child(odd) { font-weight: 600; border-right: 1px solid var(--line); }
+.inv > div:nth-child(even) { color: var(--muted); }
+@media (max-width: 760px) { .inv { grid-template-columns: 1fr; } .inv > div:nth-child(odd) { border-right: none; border-bottom: none; padding-bottom: 0; } .inv > div:nth-last-child(2) { border-bottom: none; } }
+
+/* diagrams */
+.dia { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--diagram-fill); }
+.dia svg { display: block; min-width: 880px; width: 100%; height: auto; }
+svg text { font-family: var(--f-body); fill: var(--ink); }
+svg .t-mono { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); letter-spacing: 0.04em; }
+svg .t-title { font-size: 13px; font-weight: 700; }
+svg .t-sub { font-size: 11px; fill: var(--muted); }
+svg .box { fill: var(--panel); stroke: var(--ink); stroke-width: 1.5; }
+svg .box-strong { fill: var(--panel); stroke: var(--ink); stroke-width: 2.5; }
+svg .box-hot { fill: var(--hot-soft); stroke: var(--hot); stroke-width: 2; }
+svg .box-dim { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .region { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+svg .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+svg .edge-hot { stroke: var(--hot); stroke-width: 1.8; fill: none; }
+svg .arrow { fill: var(--muted); }
+svg .arrow-hot { fill: var(--hot); }
+svg .paid { fill: var(--hot); }
+svg .hover-g:hover .box, svg .hover-g:hover .box-strong { stroke: var(--hot); }
+.notes { display: grid; gap: 6px; font-size: 13px; color: var(--muted); padding-left: 18px; margin: 0; }
+.notes li strong { color: var(--ink); }
+
+/* evidence pill */
+.ev { font: 600 10px/1 var(--f-mono); padding: 3px 6px; border-radius: 3px; letter-spacing: 0.05em; white-space: nowrap; }
+.ev.ok { background: var(--v1-soft); color: var(--v1); }
+.ev.inf { background: var(--later-soft); color: var(--later); }
+.ev.asm { background: var(--hot-soft); color: var(--hot); }
+
+/* entities */
+.ents { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.ent { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; display: grid; gap: 3px; min-width: 0; }
+.ent .n { font: 600 12.5px/1.2 var(--f-mono); }
+.ent .n.new { color: var(--hot); }
+.ent .c { font-size: 12px; color: var(--muted); }
+
+/* questions */
+.qs { display: grid; gap: 10px; }
+.q { border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; display: grid; gap: 8px; }
+.q .why { font-size: 12.5px; color: var(--muted); }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 4px; cursor: pointer; font-size: 13px; }
+.opt:hover { border-color: var(--ink); }
+.opt input { margin: 3px 0 0; accent-color: var(--hot); }
+.opt:has(input:checked) { border-color: var(--hot); background: var(--hot-soft); }
+.opt .rec { font: 600 10px/1 var(--f-mono); color: var(--hot); letter-spacing: 0.05em; margin-left: 6px; }
+.opt small { display: block; color: var(--muted); font-size: 12px; }
+.q input[type="text"], textarea { width: 100%; font: 13px/1.5 var(--f-body); padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); }
+.q input[type="text"]:focus, textarea:focus { outline: none; border-color: var(--hot); }
+
+/* export */
+.export { border: 2px solid var(--hot); box-shadow: 0 0 0 4px var(--hot-soft); }
+.bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button { font: 600 12px/1 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 10px 14px; border-radius: 4px; border: 2px solid var(--hot); background: var(--hot); color: var(--panel); cursor: pointer; }
+button.ghost { background: transparent; color: var(--ink); border-color: var(--ink); }
+button:hover { filter: brightness(1.08); }
+button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+#out { min-height: 160px; font: 12px/1.5 var(--f-mono); }
+#copy-status { font-size: 12px; color: var(--muted); }
+.next { font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<section class="hero">
+  <div class="label"><b>ainews</b> · 核心设计稿 · v0.2 · 2026-10-22 · 待确认 · 新增：Newsren 需求、正文抓取梯</div>
+  <h1>多行业热点站：自己找信源、自己写日报</h1>
+  <p class="lede">参考 AIHOT 的主干（采集 → 模型筛选与写作 → 归组成事件 → 日报 → 网站与 RSS），搬到 Cloudflare 上：一个 Worker、D1、Queues、AI Gateway、Browser Run。一个管理员可以在后台增加行业，每个行业的信源可以手动添加，也可以让 AI 搜索、探测、评估后列为候选。</p>
+  <p class="lede"><strong>和 Newsren 计划书的关系：</strong>计划书的方向是"面向读者的研究代理"。ainews v1 做它的 Stage 1，再加上 Stage 2 的<strong>批量版</strong>：Brief 和分读者解释在文章入选时就生成好，读者不会触发模型调用。要不要往前一步，看 Q11、Q12。</p>
+  <div class="tags">
+    <span class="tag">Worker</span><span class="tag">D1</span><span class="tag">Queues</span><span class="tag">Cron Triggers</span><span class="tag">AI Gateway</span><span class="tag">Browser Run</span><span class="tag">Web Search API</span><span class="tag hot">前提：Workers Paid $5/月</span>
+  </div>
+</section>
+
+<section>
+  <header><div class="label">01 · 与 AIHOT 的三个根本差异</div></header>
+  <div class="grid3">
+    <div class="diff"><span class="k">行业 = 运行期数据</span><p>AIHOT 的 <code>industry/</code>（分类、提示词、门槛、示范信源）是部署期代码，一个部署一个行业。ainews 把它们变成 D1 里按 <code>industry_id</code> 分区的行，<strong>在后台新建和编辑</strong>，评分提示词是数据，不是代码。</p></div>
+    <div class="diff"><span class="k">三进程 + Postgres → 一个 Worker</span><p>web / api / worker 三个进程和 pg-boss 队列，变成一个 Worker 的三个入口：<code>fetch</code>（网站、RSS、后台）、<code>scheduled</code>（定时）、<code>queue</code>（采集、分析、归组）。<strong>D1 没有锁和交互式事务</strong>，串行化另找办法（见 06）。</p></div>
+    <div class="diff"><span class="k">信源可由 AI 发现</span><p>AIHOT 的信源由人写进 <code>sources.json</code>。ainews 增加发现流程：起草搜索词 → Web Search API → 探测 RSS 或列表页 → 抽样评估 → <strong>进候选列表，管理员批准后才开始抓取</strong>。</p></div>
+  </div>
+</section>
+
+<section>
+  <header>
+    <div class="label">02 · Newsren 需求对照</div>
+    <h2>计划书里的要求，放进这个框架后怎么落地</h2>
+    <p>来源：<code>docs/Newsren_Plan.md</code>。有四处和 v0.1 的约束直接冲突，用粉色标出。每处都给了默认处理方式，最后由你定。</p>
+  </header>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Newsren 要求</th><th>和 v0.1 的关系</th><th>处理</th></tr></thead>
+    <tbody>
+      <tr><td>Stage 1：批准的信源、去重、四个板块、引用、AI 摘要</td><td class="dim">v0.1 已覆盖</td><td>Technology / Education / Industry / Finance 作为 4 个<strong>种子行业</strong>，在界面上叫"板块"。本页下文"行业"和"板块"同义</td></tr>
+      <tr><td>每条内容保留来源、发布时间、抓取时间（§6）</td><td class="dim">新增，代价很小</td><td>每篇文章记来源、原文时间、抓取时间、<strong>用了第几档抓取</strong>（见 07）</td></tr>
+      <tr><td>标出证据类型：预印本还是同行评审；公告、试点、回测、实盘还是监管结论；预测还是事实</td><td class="dim">新增，属于提示词数据</td><td>写进每个板块的评分和摘要提示词，结果存成标签。不需要新表</td></tr>
+      <tr><td><span class="ev asm">冲突</span> 发布前人工审核（§6、金融 guardrails）</td><td>AIHOT 过了门槛就自动发布</td><td><code>industries.publish_mode</code> 取 <code>auto</code> 或 <code>review</code>，Finance 固定为 <code>review</code>；后台加审核队列</td></tr>
+      <tr><td><span class="ev asm">冲突</span> AI Story Brief、按学生 / 教师 / 专业人士解释、Ask Newsren</td><td>"读者打开页面不触发模型调用"</td><td>Brief 和三档解释在<strong>文章入选时生成好</strong>，读者只读结果。Ask 是读者主动发起的付费调用，见 <strong>Q11</strong></td></tr>
+      <tr><td><span class="ev asm">冲突</span> Follow a Topic、个性化简报、邮件</td><td>只有一个管理员，公开内容匿名</td><td>默认：管理员建关注主题（watch），每个 watch 有一个公开页和 RSS，读者用 RSS 订阅，不开读者账号。见 <strong>Q12</strong></td></tr>
+      <tr><td><span class="ev asm">冲突</span> 不做未经批准的抓取和无限制浏览（§6）</td><td>和你要的"第三方免费抓取"有关</td><td>写成不变量：正文抓取只对<strong>已批准的信源</strong>和<strong>每个板块的一手来源白名单</strong>运行（见 04）</td></tr>
+      <tr><td>主要论断要有证据支撑（§6）</td><td class="dim">v1 只能做到条目级</td><td>v1 只给每篇文章标证据类型；论断级证据（每个论断对应原文片段）放到"以后"。<strong>这一条 v1 达不到计划书的要求</strong></td></tr>
+      <tr><td>Stage 3：时间线、主题追踪、变化检测</td><td class="dim">归组已经有一半</td><td>事件时间线放 v1（首次出现、新进展）；主题追踪放"以后"</td></tr>
+      <tr><td>Stage 4：邮件简报、课堂材料、行业影响报告、财报 / 融资追踪</td><td class="dim">都要额外的提示词和数据源</td><td>全部放"以后"；SEC EDGAR、arXiv 做成"API 型信源"</td></tr>
+      <tr><td>§8 商业模式、§9 指标</td><td class="dim">不影响架构</td><td><code>llm_calls</code> 已经记了每篇、每次调用的成本；可信度和成本看板放"以后"</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="scope">
+  <header>
+    <div class="label">03 · Scope · 逐条决定</div>
+    <h2>每一项选 v1 / 以后 / 不做</h2>
+    <p>默认选中的是我的推荐。改动的行会标 <span class="changed">已改</span>，最后在页底一键复制给我。</p>
+  </header>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--v1)"></i>v1：第一版就做</span>
+    <span><i class="dot" style="background:var(--later)"></i>以后：设计时留位置，不实现</span>
+    <span><i class="dot" style="background:var(--out)"></i>不做：不留代码和表</span>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>能力</th><th>说明</th><th>决定</th></tr></thead>
+    <tbody id="scope-body"></tbody>
+  </table></div>
+</section>
+
+<section>
+  <header>
+    <div class="label">04 · 继承的不变量</div>
+    <h2>AIHOT 里对所有站都成立的规则，原样保留</h2>
+  </header>
+  <div class="inv">
+    <div>读者打开页面不触发模型调用</div><div>模型只在 <code>queue</code> 与 <code>scheduled</code> 入口里调用。<code>fetch</code> 入口的代码路径不 import 模型模块，用一条架构测试扫 import 来守住。如果 Q11 选了做 Ask，提问也只是进队列，由 <code>queue</code> 入口回答。</div>
+    <div>抓取只对批准过的地址</div><div>正文抓取梯（见 07）只抓已批准的信源，加上每个板块一手来源白名单里的域名。读者提交的 URL 不抓，也不做无限制浏览。</div>
+    <div>所有公开出口只从一个读取层读</div><div><code>src/publication/</code> 是网站页面、RSS（以及以后的 API）唯一的读入口，只读 <code>published_items</code> 投影表和 <code>events</code>、<code>reports</code>。</div>
+    <div>付费调用幂等，有预算熔断</div><div><code>llm_calls</code> 表以 <code>logical_key</code>（任务 + 输入版本 + 模型 + 提示词版本）唯一。状态为 unknown 的调用不自动重发。AI Gateway spend limit 是硬上限，应用内每日预算检查是软上限。</div>
+    <div>安全阀只有设成 true 才打开</div><div><code>COLLECT_ENABLED</code>、<code>MODEL_CALLS_ENABLED</code>、<code>DISCOVERY_ENABLED</code>、<code>BROWSER_RUN_ENABLED</code>、<code>THIRD_PARTY_READER_ENABLED</code> 默认关。测试只连本地假服务，不访问外部网络。</div>
+    <div>信源只展示摘要和原文链接</div><div>正文可以抓来做分析，保存方式见 Q14。页面上只展示摘要和原文链接。<code>sources.fulltext</code> 默认 0，只有来源明确允许时才展示全文。</div>
+    <div>公开内容匿名，后台只允许管理员</div><div>管理员和访客看到的公开页面一样。后台入口见问题 Q2。</div>
+  </div>
+</section>
+
+<section>
+  <header>
+    <div class="label">05 · 系统组成</div>
+    <h2>一个 Worker，三个入口</h2>
+  </header>
+  <div class="dia">
+    <svg viewBox="0 0 960 400" role="img" aria-label="系统组成图：读者和管理员访问 Worker；Worker 读写 D1，经 Queues 处理任务，经 AI Gateway 调用模型和 Web Search；采集访问信源网站。">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker>
+        <marker id="ahh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow-hot"/></marker>
+      </defs>
+      <!-- clients -->
+      <g class="hover-g"><rect x="20" y="40" width="150" height="56" rx="4" class="box"/><text x="34" y="64" class="t-title">读者 / RSS 阅读器</text><text x="34" y="83" class="t-sub">匿名、只读、可缓存</text></g>
+      <g class="hover-g"><rect x="20" y="130" width="150" height="56" rx="4" class="box"/><text x="34" y="154" class="t-title">管理员（1 人）</text><text x="34" y="173" class="t-sub">后台：行业、信源、候选</text></g>
+      <rect x="20" y="206" width="150" height="26" rx="3" class="box-dim"/><text x="32" y="223" class="t-mono">ACCESS 或密码（Q2）</text>
+      <!-- worker region -->
+      <rect x="220" y="20" width="330" height="360" rx="6" class="region"/>
+      <text x="234" y="40" class="t-mono">WORKER · ainews</text>
+      <g class="hover-g"><rect x="240" y="56" width="290" height="70" rx="4" class="box-strong"/><text x="254" y="78" class="t-title">fetch</text><text x="254" y="97" class="t-sub">公开页面（SSR）· RSS · 后台页面与接口</text><text x="254" y="114" class="t-mono">只读 publication/ · 不调模型</text></g>
+      <g class="hover-g"><rect x="240" y="146" width="290" height="70" rx="4" class="box-strong"/><text x="254" y="168" class="t-title">scheduled（Cron）</text><text x="254" y="187" class="t-sub">挑到期信源入队 · 补队 · 写日报</text><text x="254" y="204" class="t-mono">*/5 * * * * · 0 22 * * *</text></g>
+      <g class="hover-g"><rect x="240" y="236" width="290" height="124" rx="4" class="box-strong"/><text x="254" y="258" class="t-title">queue consumer</text><text x="254" y="277" class="t-sub">fetch：抓列表 · 正文抓取梯</text><text x="254" y="295" class="t-sub">analyze：预筛 → 评分 → 摘要</text><text x="254" y="313" class="t-sub">group：归组（并发 1）</text><text x="254" y="331" class="t-sub">discover：信源发现</text><circle cx="512" cy="291" r="4" class="paid"/><circle cx="512" cy="309" r="4" class="paid"/><circle cx="512" cy="327" r="4" class="paid"/></g>
+      <!-- storage -->
+      <g class="hover-g"><rect x="600" y="56" width="150" height="70" rx="4" class="box"/><text x="614" y="80" class="t-title">D1</text><text x="614" y="99" class="t-sub">全部业务表</text><text x="614" y="116" class="t-mono">单库 ≤ 10 GB</text></g>
+      <g class="hover-g"><rect x="600" y="166" width="150" height="70" rx="4" class="box"/><text x="614" y="190" class="t-title">Queues</text><text x="614" y="209" class="t-sub">4 条队列 + 死信队列</text><text x="614" y="226" class="t-mono">至少一次投递</text></g>
+      <g class="hover-g"><rect x="600" y="276" width="150" height="84" rx="4" class="box-hot"/><text x="614" y="300" class="t-title">AI Gateway</text><text x="614" y="319" class="t-sub">日志 · 成本 · spend limit</text><text x="614" y="336" class="t-sub">缓存 · 重试</text><text x="614" y="352" class="t-mono">所有付费请求经过这里</text></g>
+      <!-- external -->
+      <g class="hover-g"><rect x="800" y="236" width="140" height="44" rx="4" class="box"/><text x="812" y="255" class="t-title">模型</text><text x="812" y="271" class="t-sub">Workers AI / Claude / GPT</text></g>
+      <g class="hover-g"><rect x="800" y="300" width="140" height="44" rx="4" class="box"/><text x="812" y="319" class="t-title">Web Search API</text><text x="812" y="335" class="t-sub">Beta · Exa 等</text></g>
+      <g class="hover-g"><rect x="800" y="56" width="140" height="70" rx="4" class="box"/><text x="812" y="80" class="t-title">信源网站</text><text x="812" y="99" class="t-sub">RSS / 列表页 / 正文</text><text x="812" y="116" class="t-mono">梯 0–2 档直接 fetch</text></g>
+      <g class="hover-g"><rect x="800" y="140" width="140" height="70" rx="4" class="box"/><text x="812" y="162" class="t-title">正文渲染</text><text x="812" y="180" class="t-sub">梯 3：Jina（默认关）</text><text x="812" y="198" class="t-sub">梯 4：Browser Run</text></g>
+      <!-- edges -->
+      <path d="M170 68 H240" class="edge" marker-end="url(#ah)"/>
+      <path d="M170 158 H205 V100 H240" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 91 H600" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 181 H565 V110 H600" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 196 H600" class="edge" marker-end="url(#ah)"/>
+      <path d="M600 226 H565 V270 H530" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 300 H575 V126 H600" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 318 H600" class="edge-hot" marker-end="url(#ahh)"/>
+      <path d="M750 300 H775 V258 H800" class="edge-hot" marker-end="url(#ahh)"/>
+      <path d="M750 330 H775 V322 H800" class="edge-hot" marker-end="url(#ahh)"/>
+      <path d="M530 268 H560 V20 H870 V56" class="edge" marker-end="url(#ah)"/>
+      <path d="M530 252 H588 V146 H800" class="edge" marker-end="url(#ah)"/>
+      <circle cx="30" cy="388" r="4" class="paid"/><text x="40" y="392" class="t-mono">= 付费步骤，必经 llm_calls 与 AI Gateway</text>
+    </svg>
+  </div>
+  <ul class="notes">
+    <li><strong>为什么不拆多个 Worker：</strong>单管理员、规模小（见 Q8），一个 Worker 部署和回滚都简单。三个入口之间的边界靠目录和架构测试守，不靠进程。</li>
+    <li><strong>Workflows 暂不用：</strong>每篇文章的步骤都能在一条 queue 消息里做完，幂等由 <code>llm_calls</code> 保证。信源发现若超出单次 15 分钟，再换成 Workflow。</li>
+    <li><strong>前端框架</strong>（Hono JSX SSR 还是 React Router）属于架构选型，scope 确认后再做跨家族评审。</li>
+  </ul>
+</section>
+
+<section>
+  <header>
+    <div class="label">06 · 两条主流程</div>
+    <h2>内容流水线与信源发现</h2>
+  </header>
+  <div class="dia">
+    <svg viewBox="0 0 960 330" role="img" aria-label="流程图：上排为内容流水线，从定时挑信源到归组和日报；下排为信源发现，从行业描述到管理员批准。">
+      <defs>
+        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker>
+      </defs>
+      <text x="20" y="26" class="t-mono">A · 内容流水线（每个行业独立门槛与提示词）</text>
+      <g class="hover-g"><rect x="20" y="40" width="110" height="62" rx="4" class="box"/><text x="30" y="62" class="t-title">Cron */5</text><text x="30" y="80" class="t-sub">挑到期信源</text><text x="30" y="95" class="t-mono">next_fetch_at</text></g>
+      <g class="hover-g"><rect x="150" y="40" width="110" height="62" rx="4" class="box"/><text x="160" y="62" class="t-title">抓取解析</text><text x="160" y="80" class="t-sub">RSS / 列表页</text><text x="160" y="95" class="t-mono">Q:fetch</text></g>
+      <g class="hover-g"><rect x="280" y="40" width="110" height="62" rx="4" class="box"/><text x="290" y="62" class="t-title">去重入库</text><text x="290" y="80" class="t-sub">URL 规范化</text><text x="290" y="95" class="t-mono">UNIQUE url_hash</text></g>
+      <g class="hover-g"><rect x="410" y="40" width="110" height="62" rx="4" class="box-hot"/><text x="420" y="62" class="t-title">预筛</text><text x="420" y="80" class="t-sub">便宜模型</text><text x="420" y="95" class="t-mono">Q:analyze</text></g>
+      <g class="hover-g"><rect x="540" y="40" width="110" height="62" rx="4" class="box-hot"/><text x="550" y="62" class="t-title">评分</text><text x="550" y="80" class="t-sub">5 维加权</text><text x="550" y="95" class="t-mono">≥ 行业门槛</text></g>
+      <g class="hover-g"><rect x="670" y="40" width="110" height="62" rx="4" class="box-hot"/><text x="680" y="62" class="t-title">摘要 + Brief</text><text x="680" y="80" class="t-sub">三档解释（可选）</text><text x="680" y="95" class="t-mono">→ 发布或待审</text></g>
+      <g class="hover-g"><rect x="800" y="40" width="140" height="62" rx="4" class="box-hot"/><text x="810" y="62" class="t-title">归组成事件</text><text x="810" y="80" class="t-sub">对比近 72h 事件</text><text x="810" y="95" class="t-mono">Q:group 并发 1</text></g>
+      <path d="M130 71 H150" class="edge" marker-end="url(#ah2)"/><path d="M260 71 H280" class="edge" marker-end="url(#ah2)"/><path d="M390 71 H410" class="edge" marker-end="url(#ah2)"/><path d="M520 71 H540" class="edge" marker-end="url(#ah2)"/><path d="M650 71 H670" class="edge" marker-end="url(#ah2)"/><path d="M780 71 H800" class="edge" marker-end="url(#ah2)"/>
+      <path d="M465 102 V126 H440" class="edge" marker-end="url(#ah2)"/><text x="330" y="130" class="t-mono">不相关 → 停，不再付费</text>
+      <path d="M595 102 V146 H570" class="edge" marker-end="url(#ah2)"/><text x="436" y="150" class="t-mono">低于门槛 → 只留记录</text>
+      <g class="hover-g"><rect x="800" y="122" width="140" height="50" rx="4" class="box-hot"/><text x="810" y="143" class="t-title">Cron 每日</text><text x="810" y="161" class="t-sub">Top N 事件 + 导语</text></g>
+      <path d="M870 102 V122" class="edge" marker-end="url(#ah2)"/>
+      <line x1="20" y1="192" x2="940" y2="192" class="region"/>
+      <text x="20" y="218" class="t-mono">B · 信源发现（管理员触发或新建行业时触发）</text>
+      <g class="hover-g"><rect x="20" y="232" width="110" height="62" rx="4" class="box"/><text x="30" y="254" class="t-title">行业描述</text><text x="30" y="272" class="t-sub">管理员输入</text><text x="30" y="287" class="t-mono">+ 种子信源</text></g>
+      <g class="hover-g"><rect x="150" y="232" width="110" height="62" rx="4" class="box-hot"/><text x="160" y="254" class="t-title">起草配置</text><text x="160" y="272" class="t-sub">分类 · 噪声例子</text><text x="160" y="287" class="t-mono">管理员改后保存</text></g>
+      <g class="hover-g"><rect x="280" y="232" width="110" height="62" rx="4" class="box-hot"/><text x="290" y="254" class="t-title">生成搜索词</text><text x="290" y="272" class="t-sub">8–15 条</text><text x="290" y="287" class="t-mono">中英各半</text></g>
+      <g class="hover-g"><rect x="410" y="232" width="110" height="62" rx="4" class="box-hot"/><text x="420" y="254" class="t-title">Web Search</text><text x="420" y="272" class="t-sub">每条 ≤ 10 结果</text><text x="420" y="287" class="t-mono">Q:discover</text></g>
+      <g class="hover-g"><rect x="540" y="232" width="110" height="62" rx="4" class="box"/><text x="550" y="254" class="t-title">探测</text><text x="550" y="272" class="t-sub">找 RSS · 试列表</text><text x="550" y="287" class="t-mono">无模型调用</text></g>
+      <g class="hover-g"><rect x="670" y="232" width="110" height="62" rx="4" class="box-hot"/><text x="680" y="254" class="t-title">抽样评估</text><text x="680" y="272" class="t-sub">最近 10 条打分</text><text x="680" y="287" class="t-mono">相关 · 原创 · 频率</text></g>
+      <g class="hover-g"><rect x="800" y="232" width="140" height="62" rx="4" class="box-strong"/><text x="810" y="254" class="t-title">候选列表</text><text x="810" y="272" class="t-sub">管理员批准才启用</text><text x="810" y="287" class="t-mono">source_candidates</text></g>
+      <path d="M130 263 H150" class="edge" marker-end="url(#ah2)"/><path d="M260 263 H280" class="edge" marker-end="url(#ah2)"/><path d="M390 263 H410" class="edge" marker-end="url(#ah2)"/><path d="M520 263 H540" class="edge" marker-end="url(#ah2)"/><path d="M650 263 H670" class="edge" marker-end="url(#ah2)"/><path d="M780 263 H800" class="edge" marker-end="url(#ah2)"/>
+      <circle cx="30" cy="318" r="4" class="paid"/><text x="40" y="322" class="t-mono">粉色框 = 付费步骤</text>
+    </svg>
+  </div>
+  <h3>D1 上的幂等与串行化靠什么</h3>
+  <p>AIHOT 靠 Postgres 的 <code>FOR UPDATE</code>、advisory lock 和"事务内入队"。D1 没有这些，只有 <code>batch()</code>（原子性待核实）。ainews 的对应做法：</p>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>要保证的事</th><th>AIHOT</th><th>ainews</th></tr></thead>
+    <tbody>
+      <tr><td>同一篇文章不入库两次</td><td class="dim">identity_key UNIQUE</td><td><code>articles.url_hash</code> UNIQUE + <code>INSERT … ON CONFLICT DO NOTHING</code></td></tr>
+      <tr><td>同一次模型调用不付两次钱</td><td class="dim">receipts + FOR UPDATE</td><td><code>llm_calls.logical_key</code> UNIQUE：先插 pending，抢到的才调用；命中 completed 直接用结果</td></tr>
+      <tr><td>同一新事件不被建两次</td><td class="dim">group 队列并发 1</td><td>group 队列 <code>max_concurrency: 1</code>，同样的做法</td></tr>
+      <tr><td>写库和入队不丢</td><td class="dim">enqueue(tx) 同事务</td><td>D1 与 Queues 无共享事务：先写状态，再发消息；Cron 每 5 分钟补发卡在中间状态的条目</td></tr>
+      <tr><td>预算不超</td><td class="dim">advisory lock 串行检查</td><td>AI Gateway spend limit（最终一致，短时并发可略超）+ 入队前查当日已花费</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <header>
+    <div class="label">07 · 正文抓取梯</div>
+    <h2>从便宜到贵逐档试，每个信源记住能用的那一档</h2>
+    <p>RSS 常常只给标题和一两句话，而 Brief、证据标签和以后的 Ask 都要正文。新信源批准时先探测一次，把最便宜的可用档写进 <code>sources.fetch_rung</code>。连续失败 3 次就重新探测。每篇文章记下实际用的档，作为溯源信息。</p>
+  </header>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>档</th><th>做法</th><th>成本</th><th>限制与依据</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0</strong></td><td>RSS 的 <code>content:encoded</code> 已带全文</td><td>0</td><td class="dim">只有部分信源提供</td></tr>
+      <tr><td><strong>1</strong></td><td><code>fetch(url, {headers: {Accept: "text/markdown"}})</code>，响应的 <code>content-type</code> 是 <code>text/markdown</code> 就直接用</td><td>0</td><td class="dim">只对开了 Markdown for Agents 的 Cloudflare 站点生效（Pro 及以上套餐），HTML 上限 6 MiB <span class="ev ok">已验证</span>；新闻站里的命中率 <span class="ev asm">未知</span></td></tr>
+      <tr><td><strong>2</strong></td><td><code>fetch</code> 拿 HTML，再交给 <code>env.AI.toMarkdown()</code>，可以用 <code>cssSelector</code> 只取正文</td><td>文档原文：大多数格式免费</td><td class="dim">不执行 JS <span class="ev ok">已验证</span></td></tr>
+      <tr><td><strong>3</strong></td><td>第三方 reader：Jina <code>r.jina.ai</code>（Firecrawl 做备选）</td><td>免费额度内为 0</td><td class="dim">Jina：不带 key 20 RPM；新 key 送 1,000 万 token；带 key 的 RPM，表格写 500、FAQ 写 100，<strong>按 100 规划</strong>。Firecrawl：每月 1,000 credits，2 个并发。数字来自第三方页面 2026-10-22 的原文，可能变动。<strong>要抓的 URL 会发给第三方</strong>。开关默认关，见 Q13</td></tr>
+      <tr><td><strong>4</strong></td><td>Browser Run <code>env.BROWSER.quickAction("markdown", {url, gotoOptions: {waitUntil: "networkidle2"}})</code>，渲染 JS 后转 Markdown</td><td>Paid 含 10 小时/月，超出部分 $0.09/小时</td><td class="dim">compat date ≥ 2026-03-24；Paid 30 次/秒；超时 60 秒；Free 每 10 秒 1 次、每天 10 分钟；始终表明自己是 bot，不绕过反爬；响应头 <code>X-Browser-Ms-Used</code> 给出每次用时 <span class="ev ok">已验证</span></td></tr>
+    </tbody>
+  </table></div>
+  <ul class="notes">
+    <li><strong>Browser Run 能撑多少页：</strong>10 小时 = 36,000 秒。按每页 5 秒算，每月约 7,000 页不额外花钱。<span class="ev asm">假设</span>：每页 5 秒是估的，上线后用 <code>X-Browser-Ms-Used</code> 的实测值替换。</li>
+    <li><strong>robots.txt：</strong>Browser Run 只有 <code>/crawl</code> 写明遵守 robots.txt，<code>/markdown</code> 文档没写；Jina 要显式开启。所以第 1–4 档统一由我们自己先读 robots.txt，被禁止就停下，并把信源标成"只用 RSS"。<span class="ev asm">假设</span>：<code>/markdown</code> 本身不检查 robots.txt。</li>
+    <li><strong>为什么第 3 档排在第 4 档前面：</strong>在免费额度内它不花钱。代价是多一个外部依赖，而且 URL 会交给第三方。如果你更在意只用 Cloudflare，Q13 选"不接"，梯子就变成 0 → 1 → 2 → 4。</li>
+    <li><strong>付费步骤：</strong>第 4 档和模型调用一样，用时记进 <code>llm_calls</code> 同一张账本（类型 <code>browser</code>），一起受每日预算约束。</li>
+  </ul>
+</section>
+
+<section>
+  <header>
+    <div class="label">08 · AIHOT → ainews 对照</div>
+  </header>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>AIHOT</th><th>ainews</th></tr></thead>
+    <tbody>
+      <tr><td class="dim"><code>industry/taxonomy.ts</code>、<code>selection.ts</code>、<code>prompts/*.md</code></td><td><code>industries</code>、<code>categories</code>、<code>industry_prompts</code> 表，后台编辑，带版本号（提示词版本进 logical_key）</td></tr>
+      <tr><td class="dim"><code>industry/sources.json</code></td><td><code>sources</code> 表 + <code>source_candidates</code> 表</td></tr>
+      <tr><td class="dim"><code>site/models.ts</code> → 环境变量 → settings 三级</td><td>代码默认 → <code>settings</code> 表两级，每个能力（预筛、评分、摘要、归组、日报、发现）一个模型 id</td></tr>
+      <tr><td class="dim"><code>LLM_BASE_URL</code>（OpenAI 兼容）</td><td>AI Gateway：<code>env.AI.run()</code> 或 <code>/ai/v1/chat/completions</code></td></tr>
+      <tr><td class="dim">pg-boss 队列 + worker 定时器</td><td>Queues（fetch / analyze / group / discover + DLQ）+ Cron Triggers</td></tr>
+      <tr><td class="dim">Fastify api + React Router web + Caddy</td><td>同一 Worker 的 <code>fetch</code> 入口 + 静态资源，边缘缓存由 Cloudflare 提供</td></tr>
+      <tr><td class="dim"><code>publications</code> 投影 + <code>selected_ledger</code> 账本</td><td>保留投影 <code>published_items</code>；账本随 v1 同步 API 一起删</td></tr>
+      <tr><td class="dim">embeddings 召回 + 模型判定归组</td><td>v1：同行业近 72 小时事件标题列表交给模型判定；以后：Vectorize 召回（Q5）</td></tr>
+      <tr><td class="dim">网页信源的详情页抓取（<code>detail.maxFetches</code>）+ <code>site_fulltext</code></td><td>正文抓取梯（07），<code>sources.fetch_rung</code> 记住档位；展示开关 <code>sources.fulltext</code> 保留</td></tr>
+      <tr><td class="dim"><code>admin_sessions</code> + 密码登录</td><td>Cloudflare Access 或密码 + 签名 Cookie（Q2）</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <header>
+    <div class="label">09 · 数据实体（只列表名和职责）</div>
+    <p>粉色是 AIHOT 没有、为多行业和信源发现新增的表。列定义留到 spec 阶段。</p>
+  </header>
+  <div class="ents">
+    <div class="ent"><span class="n new">industries</span><span class="c">板块：名称、描述、输出语言、门槛、日报时间、发布模式、免责声明</span></div>
+    <div class="ent"><span class="n new">primary_domains</span><span class="c">每个板块的一手来源白名单（arXiv、EDGAR、公司新闻稿域名）；“追到一手来源”做的时候再建（以后）</span></div>
+    <div class="ent"><span class="n new">article_bodies</span><span class="c">正文 Markdown、抓取档、抓取时间；保存方式见 Q14</span></div>
+    <div class="ent"><span class="n new">explanations</span><span class="c">事件的 Brief 和三档解释，按提示词版本存</span></div>
+    <div class="ent"><span class="n new">categories</span><span class="c">每个行业自己的分类标签</span></div>
+    <div class="ent"><span class="n new">industry_prompts</span><span class="c">每行业每步骤的提示词，带版本</span></div>
+    <div class="ent"><span class="n">sources</span><span class="c">信源：类型、地址、频率、状态、健康指标</span></div>
+    <div class="ent"><span class="n new">source_candidates</span><span class="c">AI 发现的候选：证据、样本得分、待批准</span></div>
+    <div class="ent"><span class="n new">discovery_runs</span><span class="c">一次发现：搜索词、结果数、花费</span></div>
+    <div class="ent"><span class="n">articles</span><span class="c">抓到的条目：标题、链接、摘要、处理状态</span></div>
+    <div class="ent"><span class="n">analyses</span><span class="c">预筛、评分、摘要的结果，按输入版本</span></div>
+    <div class="ent"><span class="n">llm_calls</span><span class="c">付费调用账本（模型和 Browser Run）：logical_key、状态、用量、成本</span></div>
+    <div class="ent"><span class="n">published_items</span><span class="c">公开投影：读取层只读这张表</span></div>
+    <div class="ent"><span class="n">events</span><span class="c">事件 + 事件与文章的关联</span></div>
+    <div class="ent"><span class="n">reports</span><span class="c">日报（以后：周报、月报）</span></div>
+    <div class="ent"><span class="n">overrides</span><span class="c">人工覆盖：置顶、撤下、改分类</span></div>
+    <div class="ent"><span class="n">settings</span><span class="c">模型选择、预算、开关</span></div>
+  </div>
+</section>
+
+<section>
+  <header>
+    <div class="label">10 · 平台约束</div>
+    <p>今天（2026-10-22）从 Cloudflare 官方文档查到的数字。标签：<span class="ev ok">已验证</span> 文档原文；<span class="ev inf">推断</span> 由已验证事实推出；<span class="ev asm">假设</span> 没查到，实现前要核实。</p>
+  </header>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>约束</th><th>对设计的影响</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr><td>Cron 的 CPU 时间：Free 10 ms；Paid 30 s（间隔 &lt; 1 h）</td><td>Free 上解析 RSS 都不够，必须 Workers Paid</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Queue consumer 单次 wall time 15 min；子请求 Paid 10,000/次</td><td>一条消息做完一篇文章的全部步骤没问题</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Queues Free 每天 10,000 次操作，保留 24 h</td><td>4 板块 × 40 信源 × 每 30 分钟 ≈ 7,680 次抓取/天，每条消息约 3 次操作，超过 Free</td><td><span class="ev inf">推断</span></td></tr>
+      <tr><td>Browser Run：Paid 含 10 小时/月，之后 $0.09/小时；按天累计秒数、按月四舍五入到小时；因 <code>waitForTimeout</code> 失败的请求不计费</td><td>第 4 档可以作为常规手段，不只是兜底</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Browser Run Quick Actions：Paid 30 次/秒，Free 每 10 秒 1 次；浏览器超时 60 秒；Worker 绑定 <code>quickAction()</code> 需要 compat date ≥ 2026-03-24</td><td>Free 上第 4 档基本不能用，又一个必须 Paid 的理由</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Markdown for Agents：只在 Pro / Business / Enterprise 站点开启时生效，HTML ≤ 6 MiB</td><td>第 1 档是"碰上了就省钱"，不能当主路</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Workers AI <code>toMarkdown()</code>：大多数格式免费，图片转换可能消耗 Neurons</td><td>第 2 档只传 HTML，不传图片</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Jina Reader 带 key 的速率：同一页面上 500 RPM 和 100 RPM 两个数字矛盾</td><td>按 100 RPM 规划，并用队列限流</td><td><span class="ev ok">已验证</span>（矛盾本身）</td></tr>
+      <tr><td>D1 单库 10 GB；Free 每天写 10 万行（2026-09-01 起超限即失败）；Paid 每月含 5,000 万行写</td><td>只存摘要的话，单库够用多年；长期存正文会超限，见 Q14。Paid 写入额度充足</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>D1 不支持交互式事务，<code>batch()</code> 原子执行</td><td>见 06 的幂等表；实现前读 D1 batch 文档确认原子性</td><td><span class="ev inf">推断</span>（django-cf 文档写明 D1 无事务）</td></tr>
+      <tr><td>AI Gateway spend limit（2026-06 上线），最终一致</td><td>做硬上限，但短时并发可略超，应用内再查一次</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Web Search API：Beta（2026-10-02），每次 ≤ 10 条结果，查询 ≤ 1,024 字符，从 AI Gateway credits 扣费</td><td>信源发现依赖 Beta 接口；接口变动时只影响发现，不影响主流水线</td><td><span class="ev ok">已验证</span></td></tr>
+      <tr><td>Access 可一键保护整个 workers.dev 域名</td><td>只保护 <code>/admin</code>：建一个自托管应用，把路径作为应用域名（Workers 文档举例 <code>example.com/login</code>）</td><td><span class="ev ok">已验证</span>（2026-10-22 补查）</td></tr>
+      <tr><td>Vectorize：价格页写"仅 Paid"，限额页又列了 Free 数值</td><td>文档互相矛盾，按 Paid 规划；v1 不用</td><td><span class="ev ok">已验证</span>（矛盾本身）</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="questions">
+  <header>
+    <div class="label">11 · 需要你决定的问题</div>
+    <h2>这些我不替你定</h2>
+    <p>默认选中的是我的推荐。Q1 最影响设计；Q11–Q14 是 v0.2 新增的问题。</p>
+  </header>
+  <div class="qs" id="q-body"></div>
+</section>
+
+<section class="export">
+  <header>
+    <div class="label"><b>12</b> · 把决定发给我</div>
+    <p>点按钮生成文本并复制，粘贴回对话即可。浏览器会记住你的勾选。</p>
+  </header>
+  <textarea id="note" rows="3" placeholder="其他补充（可选）：比如想先盯的信源、不想要的东西"></textarea>
+  <div class="bar">
+    <button id="copy-decisions" type="button">生成并复制</button>
+    <button id="reset" class="ghost" type="button">恢复推荐</button>
+    <span id="copy-status" role="status"></span>
+  </div>
+  <textarea id="out" readonly aria-label="生成的决定文本"></textarea>
+  <p class="next">确认之后：① 把架构选型（前端框架、Workflows 与否、队列划分）交跨家族评审；② 写 spec 到 <code>docs/specs/</code>；③ 搭脚手架。</p>
+</section>
+
+</div>
+
+<script>
+(function () {
+  const SCOPE = [
+    { g: "继承 AIHOT 主干" },
+    { id: "rss", name: "采集 RSS / Atom", d: "按信源频率定时抓取，增量游标", rec: "v1" },
+    { id: "htmllist", name: "采集网页列表页", d: "没有 RSS 的站：转 Markdown 后用便宜模型抽出条目列表。AI 发现的信源很多没有 RSS", rec: "v1" },
+    { id: "jsrender", name: "JS 渲染页面", d: "抓取梯第 4 档：Browser Run /markdown。Paid 每月含 10 小时", rec: "v1" },
+    { id: "ladder", name: "正文抓取梯", d: "第 0–2 档免费，第 4 档 Browser Run，第 3 档第三方 reader 见 Q13；每个信源记住能用的档", rec: "v1" },
+    { id: "dedupe", name: "去重", d: "URL 规范化 + 哈希唯一；跨信源同一事件交给归组", rec: "v1" },
+    { id: "prefilter", name: "预筛", d: "便宜模型先拦掉明显无关的，不再付评分的钱", rec: "v1" },
+    { id: "score", name: "评分与门槛", d: "保留 AIHOT 结构：内容类型、五维加权、噪声压制、安全边界；门槛按行业设", rec: "v1" },
+    { id: "summary", name: "摘要与标题改写", d: "只给入选条目写，按行业输出语言", rec: "v1" },
+    { id: "grouping", name: "事件归组", d: "多个来源报道同一件事合并成一个事件，事件页列出所有来源", rec: "v1" },
+    { id: "daily", name: "日报", d: "规则选当日 Top N 事件，模型写一段导语", rec: "v1" },
+    { id: "weekly", name: "周报 / 月报", d: "模型写的长文，成本更高", rec: "later" },
+    { id: "site", name: "公开网站", d: "首页时间线、行业页、事件页、日报页、原文链接", rec: "v1" },
+    { id: "feed", name: "RSS 输出", d: "每个行业一个 feed，加日报 feed", rec: "v1" },
+    { id: "override", name: "人工覆盖", d: "后台置顶、撤下、改分类、改门槛结果", rec: "v1" },
+    { id: "llmlog", name: "模型调用账本", d: "llm_calls：幂等、成本、失败原因，后台可查", rec: "v1" },
+    { g: "新增能力" },
+    { id: "industry", name: "多行业", d: "后台增删行业；每个行业独立的分类、提示词、门槛、信源、日报", rec: "v1" },
+    { id: "bootstrap", name: "AI 起草行业配置", d: "输入一段行业描述，模型起草分类、什么重要、什么是噪声的例子；管理员改后保存", rec: "v1" },
+    { id: "discover", name: "AI 发现信源", d: "搜索 → 探测 → 抽样评估 → 候选列表，管理员批准后启用", rec: "v1" },
+    { id: "autoapprove", name: "候选自动启用", d: "评估过线的候选不经人工直接开始抓取（会花钱）", rec: "later" },
+    { id: "health", name: "信源健康监测", d: "失败率、产出率、入选率；长期无产出时建议停用", rec: "v1" },
+    { id: "rediscover", name: "定期重新发现", d: "每周自动补搜一次新信源，结果进候选列表", rec: "later" },
+    { id: "calibrate", name: "门槛校准", d: "管理员标注样本，按标注重算门槛（AIHOT docs/selection.md 的做法）", rec: "later" },
+    { id: "search", name: "站内搜索", d: "D1 FTS5 全文索引标题和摘要", rec: "later" },
+    { id: "email", name: "日报邮件", d: "用 Cloudflare Email Service 把日报发到管理员邮箱", rec: "later" },
+    { g: "Newsren 功能", note: "来自 docs/Newsren_Plan.md，对照见 02" },
+    { id: "verticals", name: "四个种子板块", d: "Technology / Education / Industry / Finance，部署后就有，可以在后台改", rec: "v1" },
+    { id: "provenance", name: "条目级溯源", d: "来源、原文时间、抓取时间、抓取档，事件页可展开查看", rec: "v1" },
+    { id: "evlabels", name: "证据类型标签", d: "预印本 / 同行评审；公告 / 试点 / 回测 / 实盘 / 监管结论；预测 / 事实。写在各板块的提示词里", rec: "v1" },
+    { id: "brief", name: "Story Brief", d: "四段：发生了什么、新在哪里、有什么证据、接下来看什么。入选时生成", rec: "v1" },
+    { id: "explain", name: "三档解释", d: "学生 / 教师 / 专业人士。只给过了更高“深度门槛”的事件生成，控制成本", rec: "v1" },
+    { id: "review", name: "发布前审核", d: "每个板块可选自动发布或人工审核；Finance 固定为审核", rec: "v1" },
+    { id: "findisclaimer", name: "金融安全边界", d: "每个 Finance 页面都显示免责声明；提示词禁止买卖建议和目标价；业绩说法必须标回测或实盘", rec: "v1" },
+    { id: "timeline", name: "事件时间线", d: "事件页按时间列出首次报道和后续进展", rec: "v1" },
+    { id: "primary", name: "追到一手来源", d: "顺着报道里的链接抓白名单域名上的原始文件（论文、公告、财报），用来定证据标签", rec: "later" },
+    { id: "ask", name: "Ask Newsren", d: "读者就某个事件提问，回答只用已抓到的来源。形式见 Q11", rec: "later" },
+    { id: "watch", name: "Follow a Topic", d: "关注主题，只在有实质进展时更新。形式见 Q12", rec: "later" },
+    { id: "claims", name: "论断级证据", d: "每个主要论断对应原文片段；计划书 §6 的完整要求", rec: "later" },
+    { id: "learning", name: "课堂材料", d: "讨论题、测验、课堂活动（News-to-Learning 的完整版）", rec: "later" },
+    { id: "impact", name: "行业影响报告", d: "影响分析、供应链涟漪图，明确标成假设", rec: "later" },
+    { id: "apisrc", name: "API 型信源", d: "SEC EDGAR、arXiv 适配器；Earnings Decoder、Funding Tracker 依赖它", rec: "later" },
+    { id: "metrics", name: "可信度与成本看板", d: "抽样核查的通过率、更正次数、每篇 / 每次调用的成本", rec: "later" },
+    { g: "AIHOT 有，建议去掉", note: "你说的“模型排行榜等无关内容”，我按这个范围理解" },
+    { id: "leaderboard", name: "模型排行榜", d: "与行业热点无关", rec: "out" },
+    { id: "xwechat", name: "X / 微信公众号信源", d: "依赖 SocialData、Dajiala 等付费第三方", rec: "out" },
+    { id: "hotsignal", name: "讨论帖热度信号", d: "hot_signal 信源和热度排行", rec: "out" },
+    { id: "feishu", name: "飞书推送", d: "", rec: "out" },
+    { id: "indexnow", name: "IndexNow 提交", d: "", rec: "out" },
+    { id: "ledger", name: "精选账本 + 增量同步 API", d: "selected_ledger 与 /api/v1 快照增量", rec: "out" },
+    { id: "publicapi", name: "公开 JSON API", d: "只读接口，给别的程序用", rec: "later" },
+    { id: "mcp", name: "MCP / Agent Markdown", d: "让 Agent 读取内容的出口", rec: "later" },
+    { id: "modules", name: "模块插件系统", d: "单站自用，不需要扩展插口", rec: "out" },
+    { id: "feedback", name: "访客反馈", d: "", rec: "out" },
+    { id: "translate", name: "全文翻译", d: "标题和摘要直接按输出语言写，不另译全文", rec: "out" },
+    { id: "imgproxy", name: "图片代理 / OG 图", d: "", rec: "out" },
+    { id: "multiadmin", name: "多管理员 / 角色", d: "", rec: "out" },
+  ];
+  const STATES = [["v1", "v1"], ["later", "以后"], ["out", "不做"]];
+
+  const QS = [
+    { id: "q1", t: "Q1 · 网站给谁看？", why: "决定缓存策略、RSS 是否公开、后台怎么保护。", opts: [
+      ["public", "公开阅读，只有后台需要登录", "像 AIHOT：任何人能看页面和订阅 RSS", true],
+      ["private", "全站私有，只有我能看", "整个站点放在 Access 后面，RSS 也要认证"],
+    ]},
+    { id: "q2", t: "Q2 · 后台怎么登录？", why: "密码方案在 workers.dev 上没有未知项。Access 只保护 /admin 需要自定义域名，这一点还没核实（见 10）。", opts: [
+      ["password", "后台用密码 + 签名 Cookie", "workers.dev 即可；要自己写登录、限速和会话", true],
+      ["access-domain", "有自己的域名接入 Cloudflare：Access 只保护 /admin", "零登录代码，邮箱一次性验证码登录；实现前先核实路径级保护"],
+      ["access-all", "全站私有：Access 一键保护整个 workers.dev", "配合 Q1 选“全站私有”"],
+    ]},
+    { id: "q3", t: "Q3 · 输出语言？", why: "决定提示词写法，以及要不要翻译步骤。Newsren 计划书是英文写的，读者可能主要读英文，请按实际读者来选。", opts: [
+      ["zh", "统一中文", "英文来源的标题和摘要也写成中文", true],
+      ["en", "统一英文", "中文来源的标题和摘要也写成英文"],
+      ["source", "跟随原文语言", ""],
+      ["per-industry", "每个行业单独设置", "多一个行业字段，提示词按语言分支"],
+    ]},
+    { id: "q4", t: "Q4 · AI 发现的信源怎么启用？", why: "每个启用的信源都会持续花抓取和评分的钱。", opts: [
+      ["approve", "全部进候选列表，我批准后才启用", "", true],
+      ["auto", "评估过线的自动启用，我事后可以停用", "省事，但成本不受控"],
+    ]},
+    { id: "q5", t: "Q5 · 事件归组用什么召回候选事件？", why: "Vectorize 召回更准，但多一个组件和一份嵌入费用。", opts: [
+      ["llm", "v1 只用模型：把同行业近 72 小时的事件标题交给模型判定", "规模小时足够；事件多了再换", true],
+      ["vectorize", "v1 就上 Vectorize + 嵌入", ""],
+    ]},
+    { id: "q6", t: "Q6 · 模型怎么付费？", why: "决定要不要管理多家 API key。", opts: [
+      ["unified", "AI Gateway Unified Billing：预付 credits，一个账单", "Claude、GPT、Workers AI 都从这里扣", true],
+      ["byok", "BYOK：用我自己的 Anthropic / OpenAI key，存在 Gateway", ""],
+      ["workers-ai", "只用 Workers AI 托管的模型", "最便宜，写作质量可能差一些"],
+    ]},
+    { id: "q7", t: "Q7 · 报告节奏？", why: "周报月报由模型写长文，成本和提示词工作量都更大。", opts: [
+      ["daily", "v1 只做日报", "", true],
+      ["daily-weekly", "日报 + 周报", ""],
+      ["all", "日报 + 周报 + 月报", ""],
+    ]},
+    { id: "q8", t: "Q8 · 预期规模？", why: "决定 Cron 频率、队列划分，以及 v1 归组方案是否够用。", opts: [
+      ["s", "≤ 5 个板块，每个 ≤ 50 个信源", "4 个种子板块，再加 1 个", true],
+      ["m", "5–10 个板块", ""],
+      ["l", "10 个以上", "需要重新评估队列和归组设计"],
+    ]},
+    { id: "q9", t: "Q9 · 站名？", why: "AGENTS.md 规定站名由你定；不要用 AIHOT 的名字和 Logo。", text: "比如：The Newsren" },
+    { id: "q10", t: "Q10 · 先跑通哪个板块，以及你已知的必盯信源？", why: "用来做第一轮端到端验证和门槛校准。", text: "比如：Technology；必盯 arXiv cs.AI、MIT Technology Review" },
+    { id: "q11", t: "Q11 · Ask Newsren 做成什么形式？", why: "Ask 是读者主动发起、要花钱的模型调用，和“读者不触发模型调用”冲突。任何人都能刷，所以要防滥用。", opts: [
+      ["none", "v1 不做；Brief 和三档解释在入选时生成好", "读者路径上没有模型调用，成本可预测", true],
+      ["admin", "v1 只在后台给管理员用", "先验证回答质量，不承担公开刷量的风险"],
+      ["public", "v1 对读者开放：提问进队列，页面轮询取答案", "要加 Turnstile、每日硬预算、按（事件, 问题）缓存；fetch 入口仍然不调模型"],
+    ]},
+    { id: "q12", t: "Q12 · Follow a Topic 做成什么形式？", why: "个性化和邮件需要读者身份，会打破“单管理员、公开内容匿名”。", opts: [
+      ["rss", "管理员建关注主题，每个主题有公开页和 RSS", "读者用 RSS 订阅；不开读者账号", true],
+      ["accounts", "开读者账号（邮箱登录），每人有自己的关注和邮件", "多一套用户、会话、退订和隐私条款；超出单管理员范围"],
+    ]},
+    { id: "q13", t: "Q13 · 抓取梯要不要接第三方免费 reader（第 3 档）？", why: "免费额度内不花钱，但要抓的 URL 会发给第三方，额度也随时可能变。", opts: [
+      ["jina", "接 Jina Reader，全局开关默认关，可以按信源单独打开", "Browser Run 额度紧张或渲染失败时用", true],
+      ["jina-fc", "接 Jina，Firecrawl 做备选", "两个第三方，适配和监控工作翻倍"],
+      ["none", "不接，只用 Cloudflare", "梯子变成 0 → 1 → 2 → 4"],
+    ]},
+    { id: "q14", t: "Q14 · 抓到的正文存在哪里？", why: "Brief、证据标签和以后的 Ask 都要正文。4 板块 × 40 信源 × 每天 20 篇 × 约 10 KB ≈ 每天 32 MB，一年约 12 GB，超过 D1 单库 10 GB（推断）。", opts: [
+      ["d1-ttl", "存在 D1，保留 30 天，到期只留摘要", "约 1 GB，不加组件；30 天后不能再对旧文章提问", true],
+      ["r2", "存在 R2，长期保留", "多一个组件，费用很低；以后做 Ask 和论断级证据更方便"],
+      ["none", "不存，分析完就丢", "最省；以后要用正文只能重新抓"],
+    ]},
+  ];
+
+  const KEY = "ainews-scope-v2";
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { saved = {}; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(collect())); } catch (e) {} };
+
+  const body = document.getElementById("scope-body");
+  for (const row of SCOPE) {
+    const tr = document.createElement("tr");
+    if (row.g) {
+      tr.className = "group";
+      tr.innerHTML = `<td colspan="3">${row.g}${row.note ? `<span>${row.note}</span>` : ""}</td>`;
+      body.appendChild(tr); continue;
+    }
+    const cur = (saved.scope && saved.scope[row.id]) || row.rec;
+    const seg = STATES.map(([v, l]) => {
+      const id = `s-${row.id}-${v}`;
+      return `<input type="radio" name="s-${row.id}" id="${id}" value="${v}"${cur === v ? " checked" : ""}><label for="${id}">${l}</label>`;
+    }).join("");
+    tr.innerHTML = `<td><strong>${row.name}</strong><span class="changed" data-for="${row.id}" hidden>已改</span></td><td class="dim">${row.d || "—"}</td><td class="ctl"><div class="seg" role="radiogroup" aria-label="${row.name}">${seg}</div></td>`;
+    body.appendChild(tr);
+  }
+
+  const qb = document.getElementById("q-body");
+  for (const q of QS) {
+    const div = document.createElement("div");
+    div.className = "q";
+    let inner = `<h3>${q.t}</h3><p class="why">${q.why}</p>`;
+    if (q.text) {
+      const v = (saved.q && saved.q[q.id]) || "";
+      inner += `<input type="text" id="${q.id}" placeholder="${q.text}" value="${v.replace(/"/g, "&quot;")}">`;
+    } else {
+      const cur = (saved.q && saved.q[q.id]) || q.opts.find(o => o[3])[0];
+      inner += `<div class="opts">` + q.opts.map(([v, l, s, rec]) =>
+        `<label class="opt" for="${q.id}-${v}"><input type="radio" name="${q.id}" id="${q.id}-${v}" value="${v}"${cur === v ? " checked" : ""}><span>${l}${rec ? `<span class="rec">推荐</span>` : ""}${s ? `<small>${s}</small>` : ""}</span></label>`
+      ).join("") + `</div>`;
+    }
+    div.innerHTML = inner;
+    qb.appendChild(div);
+  }
+  const note = document.getElementById("note");
+  note.value = saved.note || "";
+
+  function collect() {
+    const scope = {}, q = {};
+    for (const r of SCOPE) if (r.id) { const c = document.querySelector(`input[name="s-${r.id}"]:checked`); scope[r.id] = c ? c.value : r.rec; }
+    for (const x of QS) {
+      if (x.text) q[x.id] = document.getElementById(x.id).value.trim();
+      else { const c = document.querySelector(`input[name="${x.id}"]:checked`); q[x.id] = c ? c.value : ""; }
+    }
+    return { scope, q, note: note.value.trim() };
+  }
+  function refreshMarks() {
+    const { scope } = collect();
+    for (const r of SCOPE) if (r.id) document.querySelector(`.changed[data-for="${r.id}"]`).hidden = scope[r.id] === r.rec;
+  }
+  function render() {
+    const { scope, q, note: n } = collect();
+    const label = Object.fromEntries(STATES);
+    const lines = ["ainews scope 决定（* = 改了推荐）", ""];
+    for (const st of ["v1", "later", "out"]) {
+      lines.push(`## ${label[st]}`);
+      for (const r of SCOPE) if (r.id && scope[r.id] === st) lines.push(`- ${r.name}${scope[r.id] !== r.rec ? " *" : ""}`);
+      lines.push("");
+    }
+    lines.push("## 问题");
+    for (const x of QS) {
+      let a;
+      if (x.text) a = q[x.id] || "（未填）";
+      else { const o = x.opts.find(o => o[0] === q[x.id]); a = o ? o[1] + (o[3] ? "" : " *") : "（未选）"; }
+      lines.push(`- ${x.t} ${a}`);
+    }
+    if (n) { lines.push("", "## 补充", n); }
+    return lines.join("\n");
+  }
+  document.addEventListener("change", () => { refreshMarks(); save(); });
+  document.addEventListener("input", (e) => { if (e.target.matches("input[type=text], #note")) save(); });
+  refreshMarks();
+
+  const out = document.getElementById("out"), status = document.getElementById("copy-status");
+  document.getElementById("copy-decisions").addEventListener("click", () => {
+    out.value = render();
+    navigator.clipboard.writeText(out.value).then(
+      () => { status.textContent = "已复制，粘贴回对话即可"; },
+      () => { out.focus(); out.select(); status.textContent = "浏览器不允许自动复制，文本已选中，请手动复制"; }
+    );
+  });
+  document.getElementById("reset").addEventListener("click", () => {
+    for (const r of SCOPE) if (r.id) document.getElementById(`s-${r.id}-${r.rec}`).checked = true;
+    for (const x of QS) if (!x.text) document.getElementById(`${x.id}-${x.opts.find(o => o[3])[0]}`).checked = true;
+    refreshMarks(); save(); status.textContent = "已恢复为推荐选项";
+  });
+})();
+</script>
