@@ -1,0 +1,112 @@
+// Configuration reference: https://developers.cloudflare.com/workers/wrangler/configuration/
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ainews-app",
+  "main": "src/server.ts",
+  "account_id": "5ad69dedffa38d8b7ab8ab17e051e410",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  "observability": { "enabled": true },
+  "routes": [{ "pattern": "news.ioenv.com", "custom_domain": true }],
+  "triggers": { "crons": ["*/10 * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ainews",
+      // Filled in from the output of scripts/provision.sh.
+      "database_id": "3b82661e-7c69-4e1c-a1d3-2649a554889b",
+      "migrations_dir": "drizzle/migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "ainews-bodies" }],
+  "queues": {
+    "producers": [
+      { "binding": "Q_INGEST", "queue": "ainews-ingest" },
+      { "binding": "Q_GROUP", "queue": "ainews-group" },
+      { "binding": "Q_GENERATE", "queue": "ainews-generate" },
+      // DLQ producer: used by the admin replay (#9).
+      { "binding": "Q_DLQ", "queue": "ainews-dlq" },
+    ],
+    "consumers": [
+      {
+        "queue": "ainews-ingest",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "ainews-dlq",
+      },
+      {
+        "queue": "ainews-group",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "ainews-dlq",
+        "max_concurrency": 1,
+      },
+      {
+        "queue": "ainews-generate",
+        "max_batch_size": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "ainews-dlq",
+      },
+    ],
+  },
+  "vectorize": [
+    { "binding": "V_EVENTS", "index_name": "ainews-events" },
+    { "binding": "V_CHUNKS", "index_name": "ainews-chunks" },
+  ],
+  "ai": { "binding": "AI" },
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    "SITE_URL": "https://news.ioenv.com",
+    "ADMIN_EMAIL": "simon.jinyu.liu@gmail.com",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "AI_GATEWAY_ID": "ainews",
+    "SEC_USER_AGENT": "Personal News simon.jinyu.liu@gmail.com",
+    "COLLECT_ENABLED": "false",
+    "MODEL_CALLS_ENABLED": "false",
+    "EMAIL_ENABLED": "false",
+    "THIRD_PARTY_READER_ENABLED": "false",
+    "DISCOVERY_ENABLED": "false",
+  },
+  "env": {
+    // Local tests only (vitest, test:ssr). AI, Vectorize and send_email are
+    // left out: they always open a remote proxy session, which needs
+    // Cloudflare credentials. Bindings and vars are not inherited, so they are
+    // repeated here.
+    "test": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ainews",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "drizzle/migrations",
+        },
+      ],
+      "r2_buckets": [{ "binding": "BODIES", "bucket_name": "ainews-bodies" }],
+      "queues": {
+        "producers": [
+          { "binding": "Q_INGEST", "queue": "ainews-ingest" },
+          { "binding": "Q_GROUP", "queue": "ainews-group" },
+          { "binding": "Q_GENERATE", "queue": "ainews-generate" },
+          { "binding": "Q_DLQ", "queue": "ainews-dlq" },
+        ],
+      },
+      "vars": {
+        "SITE_URL": "https://news.ioenv.com",
+        "ADMIN_EMAIL": "simon.jinyu.liu@gmail.com",
+        "ACCESS_TEAM_DOMAIN": "",
+        "ACCESS_AUD": "",
+        "AI_GATEWAY_ID": "ainews",
+        "SEC_USER_AGENT": "Personal News simon.jinyu.liu@gmail.com",
+        "COLLECT_ENABLED": "false",
+        "MODEL_CALLS_ENABLED": "false",
+        "EMAIL_ENABLED": "false",
+        "THIRD_PARTY_READER_ENABLED": "false",
+        "DISCOVERY_ENABLED": "false",
+      },
+    },
+  },
+}

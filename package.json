@@ -1,0 +1,46 @@
+{
+  "name": "ainews-app",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "test": "vitest run",
+    "test:ssr": "CLOUDFLARE_ENV=test vite build && node scripts/smoke-ssr.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.170.46",
+    "@tanstack/react-start": "^1.169.4",
+    "drizzle-orm": "^0.45.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.64.0",
+    "@cloudflare/vitest-plugin": "^1.4.7",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.72.0",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.152.0"
+  }
+}

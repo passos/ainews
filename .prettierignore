@@ -1,0 +1,8 @@
+docs/
+dist/
+.wrangler/
+.tanstack/
+drizzle/migrations/
+src/routeTree.gen.ts
+worker-configuration.d.ts
+package-lock.json
