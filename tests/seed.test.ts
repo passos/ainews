@@ -152,6 +152,13 @@ describe("seed on the test database", () => {
     );
     expect(finance.summaryGuidance).toContain("benchmark");
     expect(finance.summaryGuidance).toContain("source of the figures");
+    // A paper is a preprint or peer reviewed, whichever the material says.
+    const technology = parseAnalysisConfig(
+      rows.find((r) => r.slug === "technology")!.config,
+    )!;
+    expect(technology.summaryGuidance).toContain(
+      "whether it is a preprint or a peer-reviewed publication",
+    );
   });
 
   it("the row with slug FINANCE_SLUG is never auto, even if set to auto", async () => {

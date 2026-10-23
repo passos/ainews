@@ -174,7 +174,7 @@ const technology: AnalysisConfig = {
   labels: ["publication_status", "development_stage", "claim_mode"],
   thresholds: thresholds(60),
   summaryGuidance:
-    "Say what was released, found or announced and by whom, keep the source's own claims apart from independent evaluation, and for a paper say that it is a preprint and name the main limit the authors state.",
+    "Say what was released, found or announced and by whom, keep the source's own claims apart from independent evaluation, and for a paper say whether it is a preprint or a peer-reviewed publication, as the material states, and name the main limit the authors state.",
   guardrails: [],
 };
 
