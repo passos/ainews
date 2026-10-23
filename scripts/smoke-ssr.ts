@@ -1,7 +1,7 @@
 // SSR smoke test against the production build, served by `vite preview`.
 // Usage: npm run build && npm run test:ssr
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 
 const TIMEOUT_MS = 30_000;
@@ -23,6 +23,45 @@ function freePort(): Promise<number> {
 
 if (!existsSync("dist")) {
   console.error("dist/ is missing. Run `npm run build` first.");
+  process.exit(1);
+}
+
+// A server function id from the server build. The TanStack compiler writes
+// `createServerRpc({ id, name, filename }, ...)` for each server function.
+function serverFnId(fnName: string, filename: string): string {
+  const dir = "dist/server/assets";
+  const ids = new Set<string>();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".js")) continue;
+    const source = readFileSync(`${dir}/${name}`, "utf8");
+    const pattern =
+      /\bid:\s*"([^"]+)",\s*name:\s*"([^"]+)",\s*filename:\s*"([^"]+)"/g;
+    for (const m of source.matchAll(pattern)) {
+      if (m[2] === fnName && m[3] === filename) ids.add(m[1]);
+    }
+  }
+  if (ids.size !== 1) {
+    console.error(
+      `FAIL: expected 1 server function id for ${fnName}, found ${ids.size}`,
+    );
+    process.exit(1);
+  }
+  return [...ids][0];
+}
+
+const ADMIN_FN_ID = serverFnId(
+  "getAdminIdentity",
+  "src/server/admin/identity.ts",
+);
+const PUBLIC_FN_ID = serverFnId(
+  "getSiteInfo",
+  "src/server/publication/site.ts",
+);
+const ADMIN_EMAIL: string = JSON.parse(
+  readFileSync("dist/server/wrangler.json", "utf8"),
+).vars.ADMIN_EMAIL;
+if (!ADMIN_EMAIL) {
+  console.error("FAIL: no ADMIN_EMAIL in dist/server/wrangler.json");
   process.exit(1);
 }
 
@@ -96,6 +135,49 @@ async function main() {
   if (!type.includes("text/html")) fail(`GET / content-type is "${type}"`);
   if (!/<!doctype html/i.test(body)) fail("GET / has no <!doctype html>");
   if (!body.includes("Personal News")) fail('GET / has no "Personal News"');
+  const csp = home.headers.get("content-security-policy") ?? "";
+  if (!csp.includes("default-src 'self'")) {
+    fail(`GET / content-security-policy is "${csp}"`);
+  }
+
+  // The test env has empty Access vars, so every admin variant fails closed.
+  // "//admin" is not sent: vite preview parses it as a protocol-relative URL,
+  // so the worker sees http://admin/. "/%2Fadmin" reaches the worker and
+  // decodes to "//admin". tests/edge.test.ts covers "//admin" directly.
+  for (const path of ["/admin", "/Admin", "/%2Fadmin", "/%61dmin"]) {
+    const res = await fetch(`${BASE}${path}`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    await res.text();
+    if (res.status !== 403) fail(`GET ${path} returned ${res.status}`);
+  }
+
+  // An anonymous call to an admin server function goes through the real
+  // TanStack dispatch and accessMiddleware: 403, and no admin data. It sends
+  // the headers a same-origin browser call sends, so TanStack's default CSRF
+  // middleware lets it through and the 403 comes from accessMiddleware.
+  // The public function, called the same way, must return 200: this shows
+  // the 403 is specific to the admin function.
+  const callFn = (id: string) =>
+    fetch(`${BASE}/_serverFn/${id}`, {
+      headers: { "x-tsr-serverfn": "true", "Sec-Fetch-Site": "same-origin" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  const publicFn = await callFn(PUBLIC_FN_ID);
+  await publicFn.text();
+  if (publicFn.status !== 200) {
+    fail(`server function getSiteInfo returned ${publicFn.status}`);
+  }
+  const adminFn = await callFn(ADMIN_FN_ID);
+  const adminBody = await adminFn.text();
+  if (adminFn.status !== 403) {
+    fail(`server function getAdminIdentity returned ${adminFn.status}`);
+  }
+  if (adminBody.includes(ADMIN_EMAIL)) {
+    fail("server function getAdminIdentity leaks ADMIN_EMAIL");
+  }
 
   const bogus = await fetch(`${BASE}/?audience=bogus`, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

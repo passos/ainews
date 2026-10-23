@@ -19,6 +19,9 @@ npm run db:migrate:local   # apply D1 migrations to the local database
 npm run dev                # http://localhost:5173
 ```
 
+Copy `.dev.vars.example` to `.dev.vars`. Without it, `SITE_URL` is the
+production origin and every POST under `vite dev` returns 403 (Origin check).
+
 `npm run dev` uses the production bindings. AI, Vectorize and `send_email`
 always connect to the Cloudflare account, so dev needs a Cloudflare login.
 
