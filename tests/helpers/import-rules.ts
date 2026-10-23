@@ -8,8 +8,11 @@ const IMPORT_PATTERNS = [
   /\bimport\s*["']([^"']+)["']/g,
 ];
 
-const ADMIN_FN_GUARDED =
-  /createServerFn\([^)]*\)\s*\.middleware\(\[\s*accessMiddleware\b/g;
+const ACCESS_FN_FILE = "src/server/admin/fn.ts";
+
+// Relative imports that are not code: CSS, images, `?url` and similar.
+const ASSET =
+  /\?|\.(css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|json|txt|md|html)$/i;
 
 const ROUTE_TARGETS = [
   "src/server/publication/",
@@ -33,7 +36,9 @@ function resolve(
   spec: string,
   files: Map<string, string>,
 ): string | null {
-  const base = posix.normalize(posix.join(posix.dirname(from), spec));
+  // "./x.js" may point at x.ts (TypeScript ESM style).
+  const stripped = spec.replace(/\.(m?js|jsx)$/, "");
+  const base = posix.normalize(posix.join(posix.dirname(from), stripped));
   const candidates = /\.tsx?$/.test(base)
     ? [base]
     : [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`];
@@ -52,12 +57,84 @@ function localImports(file: string, files: Map<string, string>): string[] {
 
 const inDir = (file: string, dir: string) => file.startsWith(dir);
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Local names bound to export `name` by imports whose specifier passes
+// `accept`: `{ name }`, `{ name as x }` and `* as ns` (as "ns.name").
+function localNames(
+  source: string,
+  name: string,
+  accept: (spec: string) => boolean,
+): string[] {
+  const names: string[] = [];
+  const imports =
+    /\bimport\s+(?:type\s+)?([^'";]*?)\s+from\s*["']([^"']+)["']/g;
+  for (const [, clause, spec] of source.matchAll(imports)) {
+    if (!accept(spec)) continue;
+    const ns = /\*\s*as\s+([\w$]+)/.exec(clause);
+    if (ns) names.push(`${ns[1]}.${name}`);
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (!braces) continue;
+    for (const part of braces[1].split(",")) {
+      const [imported, local] = part
+        .trim()
+        .replace(/^type\s+/, "")
+        .split(/\s+as\s+/);
+      if (imported === name) names.push(local ?? imported);
+    }
+  }
+  return names;
+}
+
+// R4 for one admin file: counts server function calls that do not chain
+// `.middleware([accessMiddleware` directly, by the names the file imports.
+function unguardedServerFns(
+  file: string,
+  source: string,
+  files: Map<string, string>,
+): number {
+  // The plain name always counts; aliases count from any import source.
+  const fnNames = new Set([
+    "createServerFn",
+    ...localNames(source, "createServerFn", () => true),
+  ]);
+  const mwNames = localNames(
+    source,
+    "accessMiddleware",
+    (spec) =>
+      spec.startsWith(".") && resolve(file, spec, files) === ACCESS_FN_FILE,
+  );
+  if (file === ACCESS_FN_FILE) mwNames.push("accessMiddleware");
+  let unguarded = 0;
+  for (const fn of fnNames) {
+    const call = `(?<![\\w$.])${escapeRe(fn)}\\s*\\(`;
+    const total = source.match(new RegExp(call, "g"))?.length ?? 0;
+    let guarded = 0;
+    if (mwNames.length > 0) {
+      const mw = mwNames.map(escapeRe).join("|");
+      const pattern = `${call}[^)]*\\)\\s*\\.middleware\\(\\[\\s*(?:${mw})\\b`;
+      guarded = source.match(new RegExp(pattern, "g"))?.length ?? 0;
+    }
+    unguarded += total - guarded;
+  }
+  return unguarded;
+}
+
 export function checkImportRules(files: Map<string, string>): string[] {
   const violations: string[] = [];
 
   for (const [file, source] of files) {
     const isRoute = inDir(file, "src/routes/");
     const isPublication = inDir(file, "src/server/publication/");
+
+    // R0: every relative code import resolves to a file, so R1/R2 cannot
+    // miss one through a spelling the resolver does not understand.
+    for (const spec of specifiers(source)) {
+      if (!spec.startsWith(".") || ASSET.test(spec)) continue;
+      if (!resolve(file, spec, files)) {
+        violations.push(`R0 ${file} cannot resolve ${spec}`);
+      }
+    }
 
     // R1: no path from public code to pipeline/ or providers/. Expansion
     // stops at server/admin/, which is behind Access.
@@ -95,13 +172,16 @@ export function checkImportRules(files: Map<string, string>): string[] {
       }
     }
 
-    // R4: every admin server function has accessMiddleware.
+    // R4: server functions live only in src/server/, and every admin server
+    // function has accessMiddleware.
+    if (!inDir(file, "src/server/") && /\bcreateServerFn\b/.test(source)) {
+      violations.push(`R4 ${file} uses createServerFn outside src/server/`);
+    }
     if (inDir(file, "src/server/admin/")) {
-      const total = source.match(/createServerFn\(/g)?.length ?? 0;
-      const guarded = source.match(ADMIN_FN_GUARDED)?.length ?? 0;
-      if (total !== guarded) {
+      const unguarded = unguardedServerFns(file, source, files);
+      if (unguarded !== 0) {
         violations.push(
-          `R4 ${file} has ${total - guarded} server function(s) without accessMiddleware`,
+          `R4 ${file} has ${unguarded} server function(s) without accessMiddleware`,
         );
       }
     }

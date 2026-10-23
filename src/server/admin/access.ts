@@ -118,3 +118,15 @@ export async function requireAdmin(
     getKey: getKey ?? getJwks(env.ACCESS_TEAM_DOMAIN),
   });
 }
+
+// Body of accessMiddleware (src/server/admin/fn.ts), kept here so tests can
+// call it without the TanStack runtime. Throws a 403 Response on any failure.
+export async function adminOr403(
+  request: Request,
+  env: AccessEnv,
+  getKey?: JWTVerifyGetKey,
+): Promise<{ email: string }> {
+  const admin = await requireAdmin(request, env, getKey);
+  if (!admin) throw new Response("Forbidden", { status: 403 });
+  return admin;
+}

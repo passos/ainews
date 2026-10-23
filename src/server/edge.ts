@@ -72,7 +72,13 @@ export async function handleFetch(
     if (expected === null || origin !== expected) return forbidden();
   }
 
-  const res = await deps.handler(request);
   const serverFn = (normalizePath(pathname) ?? "").startsWith("/_serverfn");
+  let res: Response;
+  try {
+    res = await deps.handler(request);
+  } catch (error) {
+    console.error("handler failed", error);
+    res = new Response("Internal Server Error", { status: 500 });
+  }
   return withHeaders(res, admin || serverFn);
 }

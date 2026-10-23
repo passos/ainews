@@ -8,14 +8,13 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { env } from "cloudflare:workers";
-import { requireAdmin } from "./access";
+import { adminOr403 } from "./access";
 
 // Server function URLs (/_serverFn/...) do not start with /admin, so the edge
 // path check does not cover them. This middleware does the same full check.
 export const accessMiddleware = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
-    const admin = await requireAdmin(getRequest(), env);
-    if (!admin) throw new Response("Forbidden", { status: 403 });
+    const admin = await adminOr403(getRequest(), env);
     return next({ context: { admin } });
   },
 );

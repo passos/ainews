@@ -13,6 +13,11 @@ export const f = createServerFn({ method: "POST" })
   .handler(async () => 1);
 `;
 
+// The real middleware file, so "./fn" resolves in synthetic samples.
+const FN = {
+  "src/server/admin/fn.ts": "export const accessMiddleware = 1;",
+};
+
 describe("R1: public code does not reach pipeline/ or providers/", () => {
   it("reports a route that imports pipeline/", () => {
     const v = checkImportRules(
@@ -57,6 +62,7 @@ describe("R1: public code does not reach pipeline/ or providers/", () => {
         "src/routes/admin/index.tsx": `import { f } from "../../server/admin/x";`,
         "src/server/admin/x.ts": `${GUARDED}import { m } from "../../providers/models";`,
         "src/providers/models.ts": "",
+        ...FN,
       }),
     );
     expect(v).toEqual([]);
@@ -132,6 +138,7 @@ describe("R4: every admin server function uses accessMiddleware", () => {
         "src/server/admin/x.ts": `${GUARDED}
 export const g = createServerFn({ method: "GET" }).handler(async () => 2);
 `,
+        ...FN,
       }),
     );
     expect(v).toEqual([
@@ -141,8 +148,111 @@ export const g = createServerFn({ method: "GET" }).handler(async () => 2);
 
   it("does not report guarded server functions", () => {
     expect(
-      checkImportRules(files({ "src/server/admin/x.ts": GUARDED })),
+      checkImportRules(files({ "src/server/admin/x.ts": GUARDED, ...FN })),
     ).toEqual([]);
+  });
+
+  it("does not report an aliased, guarded server function", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/admin/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+import { accessMiddleware as guard } from "./fn";
+export const f = c({ method: "POST" }).middleware([guard]).handler(async () => 1);
+`,
+        ...FN,
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+
+  it("reports an aliased server function without the middleware", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/admin/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const f = c({ method: "POST" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R4 src/server/admin/x.ts has 1 server function(s) without accessMiddleware",
+    ]);
+  });
+
+  it("reports a namespace-imported server function without the middleware", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/admin/x.ts": `import * as S from "@tanstack/react-start";
+export const f = S.createServerFn({ method: "POST" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R4 src/server/admin/x.ts has 1 server function(s) without accessMiddleware",
+    ]);
+  });
+
+  it("reports a middleware named accessMiddleware that is not from fn.ts", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/admin/x.ts": `import { createServerFn } from "@tanstack/react-start";
+const accessMiddleware = [];
+export const f = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R4 src/server/admin/x.ts has 1 server function(s) without accessMiddleware",
+    ]);
+  });
+
+  it("reports createServerFn outside src/server/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/a.tsx": `import { createServerFn as c } from "@tanstack/react-start";
+export const f = c({ method: "GET" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R4 src/routes/a.tsx uses createServerFn outside src/server/",
+    ]);
+  });
+});
+
+describe("R0: relative code imports resolve", () => {
+  it("resolves a .js specifier to the .ts file and reports the route", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/index.tsx": `import { run } from "../pipeline/queue.js";`,
+        "src/pipeline/queue.ts": "export const run = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/routes/index.tsx reaches src/pipeline/queue.ts via src/routes/index.tsx",
+      "R2 src/routes/index.tsx imports src/pipeline/queue.ts",
+    ]);
+  });
+
+  it("reports a relative import that resolves to no file", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/index.tsx": `import { x } from "../pipeline/gone";`,
+      }),
+    );
+    expect(v).toEqual([
+      "R0 src/routes/index.tsx cannot resolve ../pipeline/gone",
+    ]);
+  });
+
+  it("does not report asset imports", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/index.tsx": `import "./a.css";\nimport u from "./b.svg?url";`,
+      }),
+    );
+    expect(v).toEqual([]);
   });
 });
 
