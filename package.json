@@ -17,7 +17,9 @@
     "test:tz": "TZ=UTC vitest run --project node && TZ=Asia/Shanghai vitest run --project node",
     "test:ssr": "CLOUDFLARE_ENV=test vite build && node scripts/smoke-ssr.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "seed:local": "node --import ./scripts/ts-resolve.mjs scripts/seed.ts --local",
+    "seed:remote": "node --import ./scripts/ts-resolve.mjs scripts/seed.ts --remote"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.46",
