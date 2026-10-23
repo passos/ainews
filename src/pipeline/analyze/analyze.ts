@@ -2,15 +2,18 @@
 // English title and summary for selected articles, then one commit.
 //
 //   MODEL_CALLS_ENABLED -> stage = body_ready -> industry analysis config
-//     -> R2 bodies/{id}/{body_sha}.md -> judge (ledger key analyze:{id}:{v})
-//     -> scoreAnalysis -> selected: write (ledger key write:{id}:{v})
-//     -> one batch(): articles stage (stage condition) + analyses
-//        + auto-approved reviews row (auto industries, valid write only)
+//     -> R2 bodies/{id}/{body_sha}.md -> judge (ledger key
+//        analyze:{id}:{sha16}:{v}) -> scoreAnalysis
+//     -> selected: write (ledger key write:{id}:{sha16}:{v})
+//     -> one batch(), each statement gated on the one before (changes()):
+//        articles stage (stage and body_sha conditions) -> analyses
+//        -> auto-approved reviews row (auto industries, valid write only)
 //
 // A repeated delivery stops at the stage check, or gets both model results
 // from the ledger (no second request). Selected articles go on to Q_GROUP
 // in #11.
 import { isEnabled } from "../../lib/flags";
+import { ResponseParseError } from "../../providers/adapters";
 import { JevInputTooLargeError } from "../../providers/jev";
 import {
   BudgetExceededError,
@@ -47,7 +50,7 @@ export type AnalyzeResult =
       total: number;
       written: boolean;
       approved: boolean;
-      /** False if another delivery moved the stage first. */
+      /** False if another delivery moved the stage or the body changed. */
       advanced: boolean;
     };
 
@@ -65,15 +68,20 @@ interface Row {
   config: string;
 }
 
+/** Slug of the Finance industry. #8's seed must import it, not repeat it. */
+export const FINANCE_SLUG = "finance";
+
 /**
  * Finance is never approved automatically (architecture §7, N§4), whatever
- * publish_mode the admin sets.
+ * publish_mode the admin sets. The slug compare ignores case and spaces.
  */
 export function effectivePublishMode(industry: {
   slug: string;
   publish_mode: "auto" | "review";
 }): "auto" | "review" {
-  return industry.slug === "finance" ? "review" : industry.publish_mode;
+  return industry.slug.trim().toLowerCase() === FINANCE_SLUG
+    ? "review"
+    : industry.publish_mode;
 }
 
 export async function analyzeArticle(
@@ -110,6 +118,8 @@ export async function analyzeArticle(
   const bodyMd = await object.text();
 
   const version = await promptVersion(config);
+  // The body version is part of the keys: a new body is judged again.
+  const keyPart = `${articleId}:${sha.slice(0, 16)}:${version}`;
   const models = createModelClient({
     db: env.DB,
     transport: deps.transport,
@@ -127,7 +137,7 @@ export async function analyzeArticle(
   try {
     // The questions above have exactly these names and types.
     answers = (await models.judge(
-      `analyze:${articleId}:${version}`,
+      `analyze:${keyPart}`,
       state,
       questions,
     )) as unknown as AnalysisAnswers;
@@ -145,7 +155,7 @@ export async function analyzeArticle(
   let written: WriteOutput | null = null;
   if (scored.selected) {
     try {
-      written = await write(models, config, row, bodyMd, articleId, version);
+      written = await write(models, config, row, bodyMd, `write:${keyPart}`);
     } catch (error) {
       // Over budget: the judge answer stays in the ledger, so the sweep
       // retries only the write. In progress: another delivery is writing
@@ -164,19 +174,24 @@ export async function analyzeArticle(
   const stage = scored.selected ? "analyzed" : "dropped";
   const approve =
     scored.selected && written !== null && effectivePublishMode(row) === "auto";
+  // Each statement runs only if the one before changed a row: changes() is
+  // the count of the last completed statement in this batch's transaction.
+  // A delivery that lost the stage (or whose body changed) writes nothing,
+  // even with the same `now`.
   const statements = [
     // Architecture §5: writing stage also writes stage_updated_at and
     // requeue_count.
     env.DB.prepare(
       `UPDATE articles SET stage = ?2, stage_updated_at = ?3, requeue_count = 0
-       WHERE id = ?1 AND stage = 'body_ready'`,
-    ).bind(articleId, stage, now),
+       WHERE id = ?1 AND stage = 'body_ready' AND body_sha = ?4`,
+    ).bind(articleId, stage, now, sha),
     env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type,
          evidence_tags, total_score, created_at, prefilter_relevant,
          prefilter_pass, category, noise_kind, selected, title_en, summary_en,
          jev_raw)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+       WHERE changes() = 1
        ON CONFLICT (article_id, prompt_version) DO NOTHING`,
     ).bind(
       articleId,
@@ -197,20 +212,21 @@ export async function analyzeArticle(
     ),
   ];
   if (approve) {
-    // Only if this batch moved the stage, and for the body version that was
-    // analysed: body_sha is read from the row at commit time.
+    // Only if this batch wrote the analyses row, for the body version that
+    // was analysed.
     statements.push(
       env.DB.prepare(
         `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
          SELECT id, body_sha, 'approved', 'auto', ?3 FROM articles
          WHERE id = ?1 AND body_sha = ?2 AND stage = 'analyzed'
-           AND stage_updated_at = ?3
+           AND changes() = 1
          ON CONFLICT (article_id, body_sha) DO NOTHING`,
       ).bind(articleId, sha, now),
     );
   }
-  const [moved] = await env.DB.batch(statements);
-  const advanced = moved.meta.changes === 1;
+  const results = await env.DB.batch(statements);
+  const advanced = results[0].meta.changes === 1;
+  const approved = approve && results[2]?.meta.changes === 1;
 
   console.log({
     analyze: articleId,
@@ -218,7 +234,7 @@ export async function analyzeArticle(
     total: scored.total,
     selected: scored.selected,
     written: written !== null,
-    approve,
+    approved,
     advanced,
   });
   return {
@@ -227,7 +243,7 @@ export async function analyzeArticle(
     selected: scored.selected,
     total: scored.total,
     written: written !== null,
-    approved: approve && advanced,
+    approved,
     advanced,
   };
 }
@@ -238,12 +254,11 @@ async function write(
   config: AnalysisConfig,
   row: Row,
   bodyMd: string,
-  articleId: number,
-  version: string,
+  key: string,
 ): Promise<WriteOutput | null> {
   const { text } = await models.generateText(
     "write",
-    `write:${articleId}:${version}`,
+    key,
     buildWriteRequest(config, {
       title: row.title,
       summary: row.summary ?? "",
@@ -270,7 +285,10 @@ async function modelError(
   if (
     error instanceof CallUnknownError ||
     error instanceof CallFailedError ||
-    error instanceof JevInputTooLargeError
+    error instanceof JevInputTooLargeError ||
+    // The ledger recorded the failure (billed once); the next delivery
+    // asks again, at most MAX_ATTEMPTS times.
+    error instanceof ResponseParseError
   ) {
     // Stays body_ready; after MAX_REQUEUES the admin sees it (#9).
     return failed(articleId, error.name, error);

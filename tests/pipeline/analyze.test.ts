@@ -8,16 +8,18 @@ import {
   effectivePublishMode,
 } from "../../src/pipeline/analyze/analyze";
 import type { AnalysisConfig } from "../../src/pipeline/analyze/config";
+import { LABELS } from "../../src/pipeline/analyze/labels";
 import { UNTRUSTED } from "../../src/pipeline/analyze/prompts";
 import {
   buildAnalysisRequest,
   promptVersion,
 } from "../../src/pipeline/analyze/questions";
 import type { AnalysisAnswers } from "../../src/pipeline/analyze/score";
-import type { IngestMessage } from "../../src/pipeline/messages";
+import type { IngestMessage, PipelineEnv } from "../../src/pipeline/messages";
 import { runQueue } from "../../src/pipeline/queue";
 import { buildJevInput } from "../../src/providers/jev";
 import type { JevQuestion } from "../../src/providers/jev";
+import { acquire } from "../../src/providers/ledger";
 import {
   choice,
   fakeAnalysisConfig,
@@ -25,7 +27,13 @@ import {
   jevResponse,
 } from "../fixtures/analysis/config";
 import schemaInput from "../fixtures/jev/schema-input.json?raw";
-import { fakeTransport, resetLedger } from "../providers/fakes";
+import {
+  budgetRow,
+  fakeTransport,
+  ledgerRow,
+  resetLedger,
+  TODAY,
+} from "../providers/fakes";
 import type { FakeTransport } from "../providers/fakes";
 import {
   count,
@@ -164,6 +172,11 @@ const reviewRows = (id: number) =>
     .all<{ body_sha: string; decision: string; reviewer: string }>()
     .then((r) => r.results);
 
+/** Ledger key of one model call for the article's body version `sha`. */
+async function keyOf(slot: "analyze" | "write", id: number, sha = SHA) {
+  return `${slot}:${id}:${sha.slice(0, 16)}:${await promptVersion(config)}`;
+}
+
 const run = (
   id: number,
   t: FakeTransport,
@@ -300,20 +313,23 @@ describe("publish mode", () => {
     ]);
   });
 
-  it("finance with publish_mode 'auto' is never approved automatically", async () => {
-    const id = await seedReady(await seedIndustryRow("finance", "auto"));
-    const result = await run(id, models(fakeAnswers(config)));
-    expect(result).toMatchObject({
-      stage: "analyzed",
-      selected: true,
-      written: true,
-      approved: false,
-    });
-    expect(await reviewRows(id)).toEqual([]);
-    expect(
-      effectivePublishMode({ slug: "finance", publish_mode: "auto" }),
-    ).toBe("review");
-  });
+  it.each(["finance", "Finance", " finance "])(
+    "finance (slug %j) with publish_mode 'auto' is never approved automatically",
+    async (slug) => {
+      const id = await seedReady(await seedIndustryRow(slug, "auto"));
+      const result = await run(id, models(fakeAnswers(config)));
+      expect(result).toMatchObject({
+        stage: "analyzed",
+        selected: true,
+        written: true,
+        approved: false,
+      });
+      expect(await reviewRows(id)).toEqual([]);
+      expect(effectivePublishMode({ slug, publish_mode: "auto" })).toBe(
+        "review",
+      );
+    },
+  );
 
   it("review industry: a selected article gets no approved reviews row", async () => {
     const id = await seedReady(await seedIndustryRow("alpha", "review"));
@@ -436,6 +452,8 @@ describe("no analysis", () => {
       stage: "grouped",
       requeue_count: 1,
     });
+    // The analyses insert is gated on the stage write.
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
     expect(await reviewRows(id)).toEqual([]);
   });
 
@@ -458,14 +476,24 @@ describe("no analysis", () => {
     expect(await reviewRows(id)).toEqual([]);
   });
 
-  it("the body changed during the call: the approval does not name the new body", async () => {
+  it("the body changed during the call: nothing is committed, the article stays body_ready", async () => {
     const id = await seedReady(await seedIndustryRow("alpha", "auto"));
     const t = models(fakeAnswers(config), GOOD_WRITE, async () => {
       await env.DB.prepare("UPDATE articles SET body_sha = ?2 WHERE id = ?1")
         .bind(id, "b".repeat(64))
         .run();
     });
-    await run(id, t);
+    expect(await run(id, t)).toMatchObject({
+      status: "ok",
+      advanced: false,
+      approved: false,
+    });
+    expect(await articleRow(id)).toMatchObject({
+      stage: "body_ready",
+      stage_updated_at: NOW - 31 * MIN,
+      body_sha: "b".repeat(64),
+    });
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
     expect(await reviewRows(id)).toEqual([]);
   });
 
@@ -522,6 +550,164 @@ describe("no analysis", () => {
       requeue_count: 2,
     });
   });
+});
+
+describe("races, body versions and retries", () => {
+  it("two deliveries with the same now: the loser commits nothing, even with a valid write", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+    let writes = 0;
+    const t = fakeTransport(async (model) => {
+      if (model === "typesafe/jev") return jevResponse(fakeAnswers(config));
+      writes += 1;
+      if (writes === 1) throw new Error("connection lost");
+      return googleText(GOOD_WRITE);
+    });
+    const base = pipelineEnv(fakeQueue(), ENABLED);
+    // Delivery B has read body_ready; delivery A runs to its commit (write
+    // failed) before B reads the body. Both use the same `now`.
+    const late: PipelineEnv = {
+      ...base,
+      BODIES: {
+        get: async (key: string) => {
+          const first = await analyzeArticle(base, id, NOW, { transport: t });
+          expect(first).toMatchObject({
+            stage: "analyzed",
+            written: false,
+            advanced: true,
+          });
+          return env.BODIES.get(key);
+        },
+      } as unknown as R2Bucket,
+    };
+    const second = await analyzeArticle(late, id, NOW, { transport: t });
+    expect(second).toMatchObject({
+      status: "ok",
+      written: true,
+      advanced: false,
+      approved: false,
+    });
+    expect(jevCalls(t)).toBe(1);
+    expect(writeCalls(t)).toBe(2);
+    expect(await reviewRows(id)).toEqual([]);
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(1);
+    expect(await analysisRow(id)).toMatchObject({
+      selected: 1,
+      title_en: null,
+      summary_en: null,
+    });
+  });
+
+  it("a new body version is judged again: the ledger keys name the body", async () => {
+    const id = await seedReady(await seedIndustryRow("alpha", "review"));
+    const t = models(fakeAnswers(config));
+    await run(id, t);
+    const sha2 = "c".repeat(64);
+    await env.BODIES.put(`bodies/${id}/${sha2}.md`, `${BODY} More.`);
+    await env.DB.prepare(
+      "UPDATE articles SET body_sha = ?2, stage = 'body_ready' WHERE id = ?1",
+    )
+      .bind(id, sha2)
+      .run();
+    await run(id, t);
+    expect(jevCalls(t)).toBe(2);
+    expect(writeCalls(t)).toBe(2);
+    expect((await ledgerRow(await keyOf("analyze", id, sha2)))?.status).toBe(
+      "completed",
+    );
+  });
+
+  it("Jev fits the budget, write does not: deferred with the clock reset; the retry only writes", async () => {
+    // Jev reserves ~60 micro-USD and spends 42 (1,000 input tokens); write
+    // reserves at least 400 x $3.75/1M = 1,500.
+    await resetLedger(1_000);
+    const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+    const t = models(fakeAnswers(config));
+    expect(await run(id, t)).toEqual({
+      status: "deferred",
+      reason: "over_budget",
+    });
+    expect(jevCalls(t)).toBe(1);
+    expect(writeCalls(t)).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
+    expect(await articleRow(id)).toMatchObject({
+      stage: "body_ready",
+      stage_updated_at: NOW,
+      requeue_count: 0,
+    });
+    // Raise the cap in place: resetLedger would also clear the Jev result.
+    await env.DB.prepare(
+      "UPDATE budgets SET cap_micros = 1000000 WHERE day = ?1 AND channel = 'gateway'",
+    )
+      .bind(TODAY)
+      .run();
+    expect(await run(id, t)).toMatchObject({
+      stage: "analyzed",
+      written: true,
+    });
+    expect(jevCalls(t)).toBe(1);
+    expect(writeCalls(t)).toBe(1);
+    expect((await analysisRow(id))?.summary_en).toBe(
+      JSON.parse(GOOD_WRITE).summary,
+    );
+  });
+
+  it.each(["write", "analyze"] as const)(
+    "%s call in progress elsewhere: deferred, no DB write",
+    async (slot) => {
+      const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+      // A live lease held by another delivery.
+      await acquire(env.DB, {
+        logicalKey: await keyOf(slot, id),
+        slot: slot === "write" ? "write" : "judge",
+        model: slot === "write" ? "google/gemini-3.8-flash" : "typesafe/jev",
+        channel: "gateway",
+        now: NOW,
+      });
+      const t = models(fakeAnswers(config));
+      expect(await run(id, t)).toEqual({
+        status: "deferred",
+        reason: "in_progress",
+      });
+      expect(writeCalls(t)).toBe(0);
+      expect(jevCalls(t)).toBe(slot === "write" ? 1 : 0);
+      expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
+      expect(await articleRow(id)).toMatchObject({
+        stage: "body_ready",
+        stage_updated_at: NOW - 31 * MIN,
+        requeue_count: 2,
+      });
+    },
+  );
+
+  it.each([
+    ["noise", { noise: "made_up" }],
+    ["content_type", { contentType: "made_up" }],
+  ] as const)(
+    "Jev returns a %s choice that is not a criterion: failed, billed once, no DB write",
+    async (_name, patch) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+      const t = models(fakeAnswers(config, patch));
+      expect(await run(id, t)).toEqual({
+        status: "failed",
+        reason: "ResponseParseError",
+      });
+      expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
+      expect(await articleRow(id)).toMatchObject({
+        stage: "body_ready",
+        stage_updated_at: NOW - 31 * MIN,
+        requeue_count: 2,
+      });
+      const ledger = await ledgerRow(await keyOf("analyze", id));
+      expect(ledger).toMatchObject({ status: "failed", failures: 1 });
+      expect(ledger?.error).toMatch(/^parse: .*choice/);
+      expect((await budgetRow("gateway"))?.spent_micros).toBe(
+        ledger?.cost_micros,
+      );
+      expect((await budgetRow("gateway"))?.reserved_micros).toBe(0);
+    },
+  );
 });
 
 describe("Jev input", () => {
@@ -582,5 +768,18 @@ describe("promptVersion", () => {
       thresholds: { prefilterMinRelevant: 0.3, select: 61 },
     });
     expect(await promptVersion(other)).not.toBe(await promptVersion(config));
+  });
+
+  it("follows the question texts in labels.ts without a manual bump", async () => {
+    const before = await promptVersion(config);
+    const options = LABELS.claim_mode.options as Record<string, string>;
+    const old = options.fact;
+    options.fact = `${old} Changed.`;
+    try {
+      expect(await promptVersion(config)).not.toBe(before);
+    } finally {
+      options.fact = old;
+    }
+    expect(await promptVersion(config)).toBe(before);
   });
 });

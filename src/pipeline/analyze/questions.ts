@@ -3,14 +3,15 @@
 // Jev bills input tokens only, so one call with all questions is cheapest.
 // models.judge() cuts `state.body` to fit the context (jev.ts).
 //
-// Bump ANALYZE_CODE_VERSION on every change to the questions built here:
-// it is part of the prompt version, so analysed articles keep their rows and
-// only new ones use the new questions.
+// The prompt version hashes the questions and the write request as built, so
+// text changes (here, labels.ts, prompts.ts) need no manual step. Bump
+// ANALYZE_CODE_VERSION for changes the hash cannot see: the state fields,
+// scoring code (score.ts) or how answers are stored.
 import type { JevQuestion, JevState } from "../../providers/jev";
 import { DIMS } from "./config";
 import type { AnalysisConfig, Dim } from "./config";
 import { LABELS } from "./labels";
-import { UNTRUSTED, WRITE_BASE_PROMPT } from "./prompts";
+import { buildWriteRequest, UNTRUSTED } from "./prompts";
 
 export const ANALYZE_CODE_VERSION = 1;
 
@@ -64,7 +65,11 @@ export function buildAnalysisRequest(
         ? null
         : new Date(article.publishedAt).toISOString(),
   };
+  return { state, questions: buildQuestions(config) };
+}
 
+/** The questions depend on the config only, never on the article. */
+export function buildQuestions(config: AnalysisConfig): AnalysisQuestions {
   const questions: AnalysisQuestions = {
     prefilter: {
       type: "choice",
@@ -103,7 +108,7 @@ export function buildAnalysisRequest(
       criteria: { ...LABELS[key].options },
     };
   }
-  return { state, questions };
+  return questions;
 }
 
 function descriptions(
@@ -114,16 +119,22 @@ function descriptions(
   );
 }
 
+/** Article-independent material for the write request. */
+const NO_ARTICLE = { title: "", summary: "", body: "", source: "" };
+
 /**
  * 16 hex characters of sha256 over the code version, the industry's
- * analysis config and the write prompt. A change to any of them gives new
- * articles a new version; analysed articles are not redone.
+ * analysis config (thresholds, weights and caps too), the Jev questions as
+ * sent and the write request without an article. A change to any of them,
+ * including labels.ts, UNTRUSTED or the write prompt, gives new articles a
+ * new version; analysed articles are not redone.
  */
 export async function promptVersion(config: AnalysisConfig): Promise<string> {
   const text = stableJson({
     code: ANALYZE_CODE_VERSION,
     analysis: config,
-    write: WRITE_BASE_PROMPT,
+    questions: buildQuestions(config),
+    write: buildWriteRequest(config, NO_ARTICLE),
   });
   const digest = await crypto.subtle.digest(
     "SHA-256",
