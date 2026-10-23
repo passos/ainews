@@ -1,0 +1,1191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Snapshot of https://www.technologyreview.com/feed/ downloaded 2026-10-23 with User-Agent "PersonalNewsBot/1.0 (+https://news.ioenv.com)". Complete and unchanged except for this comment. --><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+	xmlns:slash="http://purl.org/rss/1.0/modules/slash/"
+	>
+
+<channel>
+	<title>MIT Technology Review</title>
+	<atom:link href="https://www.technologyreview.com/feed/" rel="self" type="application/rss+xml" />
+	<link>https://www.technologyreview.com</link>
+	<description></description>
+	<lastBuildDate>Thu, 22 Oct 2026 21:17:30 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>
+	hourly	</sy:updatePeriod>
+	<sy:updateFrequency>
+	1	</sy:updateFrequency>
+	<generator>https://wordpress.org/?v=7.1.3</generator>
+
+<image>
+	<url>https://wp.technologyreview.com/wp-content/uploads/2024/09/cropped-TR-Logo-Block-Centered-R.png?w=32</url>
+	<title>MIT Technology Review</title>
+	<link>https://www.technologyreview.com</link>
+	<width>32</width>
+	<height>32</height>
+</image> 
+<site xmlns="com-wordpress:feed-additions:1">172986898</site>	<item>
+		<title>Designing an AI serving harness built to last</title>
+		<link>https://www.technologyreview.com/2026/10/22/1146109/designing-an-ai-serving-harness-built-to-last/</link>
+		
+		<dc:creator><![CDATA[Anand Logani]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 21:17:29 +0000</pubDate>
+				<category><![CDATA[Artificial intelligence]]></category>
+		<category><![CDATA[sponsored]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146109</guid>
+
+					<description><![CDATA[The next competitive advantage in enterprise AI has less to do with which model you choose than with what you build around it. That’s an important shift. For the past several years, much of the AI conversation has centered on model capability: bigger models, better reasoning, larger context windows, higher benchmark scores. Those advances have&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph">The next competitive advantage in enterprise AI has less to do with which model you choose than with what you build around it.</p>
+
+
+
+<p class="wp-block-paragraph">That’s an important shift. For the past several years, much of the AI conversation has centered on model capability: bigger models, better reasoning, larger context windows, higher benchmark scores. Those advances have been extraordinary. But as AI moves from experimentation to production, the question facing enterprise leaders has changed—it’s no longer, “what can the model do?”—it’s now, “Can we deliver that intelligence reliably, economically, and at scale?”</p>
+
+
+
+<figure class="wp-block-image size-large"><img fetchpriority="high" decoding="async" height="1315" width="3000" src="https://wp.technologyreview.com/wp-content/uploads/2026/10/GettyImages-2188328005_9f1d59-e1791493652782.jpg?w=840" alt="" class="wp-image-1146166" /></figure>
+
+
+
+<p class="wp-block-paragraph">Increasingly, the answer depends on the serving harness—the engineering system surrounding the model, including the architecture, <a href="https://www.exlservice.com/insights/white-paper/engineering-memory-reliable-enterprise-ai-agents?utm_source=technologyreview&amp;utm_medium=native&amp;utm_content=sponsored_content_hosting&amp;utm_campaign=2026_q4_go_beyond">memory management</a>, scheduling, and optimization decisions that determine how efficiently model intelligence becomes a production capability.</p>
+
+
+
+<p class="wp-block-paragraph">For technical executives, that changes where AI investment should go—and what they should demand from the architecture supporting it.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Start with the workload, not the model</strong></h3>
+
+
+
+<p class="wp-block-paragraph">There is no universally “best” model or AI architecture. There is only the right solution for the business problem.</p>
+
+
+
+<p class="wp-block-paragraph">A customer-facing assistant optimized for fast responses has fundamentally different requirements from a document-processing pipeline that can run overnight. An internal knowledge application and a high-volume customer service platform may use the same foundation model but require very different serving architectures.</p>
+
+
+
+<p class="wp-block-paragraph">The workload defines the constraints. The constraints should determine the architecture.</p>
+
+
+
+<p class="wp-block-paragraph">That sounds simple, but it runs counter to the way many organizations have approached early AI deployments. During a proof of concept, model accuracy naturally dominates the discussion. Production introduces constraints that are much easier to ignore when only a handful of users are involved: latency, concurrency, memory pressure, GPU utilization, infrastructure cost, and unpredictable traffic.</p>
+
+
+
+<p class="wp-block-paragraph">A model that produces marginally better answers is not necessarily the better production choice if it doubles inference costs or cannot meet the application&#8217;s latency requirements. Not every workload needs a Ferrari. Sometimes the smarter engineering decision is the model that delivers exactly the performance the business needs without paying for capability it doesn&#8217;t.</p>
+
+
+
+<p class="wp-block-paragraph">The objective should be to deploy the right intelligence at the right cost for the workload. That makes serving architecture more than an engineering concern. It becomes an investment decision: where to spend on compute, where to optimize, and where additional model capability simply isn&#8217;t worth the cost.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Engineer the system, not the model</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Once AI reaches production, seemingly isolated engineering decisions begin affecting one another. Serving architecture influences memory utilization. Memory management affects concurrency. Concurrency shapes batching and scheduling, and scheduling affects GPU utilization and latency.</p>
+
+
+
+<p class="wp-block-paragraph">Only then can techniques such as quantization, speculative decoding, or optimized attention mechanisms deliver their full value. This interdependence matters because organizations can spend considerably more on infrastructure without solving the constraint limiting performance.</p>
+
+
+
+<p class="wp-block-paragraph">GPU memory is a good example. During inference, the model&#8217;s weights remain fixed, but the key-value (KV) cache grows with active requests and context length. As concurrency increases, a system can run short of usable GPU memory even when compute capacity is still available. Adding more compute without understanding that bottleneck may simply make an inefficient system more expensive.</p>
+
+
+
+<p class="wp-block-paragraph">The lesson for technology leaders is broader than memory management: Measure before you optimize<strong>. </strong>Identify the dominant constraint. Address it. Measure the result. Then determine if another bottleneck emerged. Repeat.</p>
+
+
+
+<p class="wp-block-paragraph">Don&#8217;t think of optimization techniques as Pokémon cards: The goal isn&#8217;t to collect them all. The goal is to apply the technique that removes the highest-impact constraint while preserving the application&#8217;s business requirements.</p>
+
+
+
+<p class="wp-block-paragraph">For technology leaders, that demands a different governance question. Instead of asking which AI capabilities the organization can deploy, ask which constraints stand between a proven capability and sustainable business value.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Build for change, not today&#8217;s benchmark</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Perhaps the most important reason to invest in the serving harness is that today&#8217;s leading model will probably not be tomorrow’s. Models will improve. Hardware will evolve. New optimization techniques will emerge. The architecture surrounding them should make those changes easier to absorb, not force the enterprise to rebuild its AI platform every time technology advances.</p>
+
+
+
+<p class="wp-block-paragraph">That makes adaptability an increasingly important outcome of AI strategy.</p>
+
+
+
+<p class="wp-block-paragraph">Organizations that build serving systems around workload requirements, clear service-level objectives, and measurable production economics gain the ability to evaluate new models and infrastructure against what the business actually needs. A model change can become an evaluation and configuration decision rather than an architectural reset.</p>
+
+
+
+<p class="wp-block-paragraph">EXL researchers have explored these production challenges in greater depth in the <a href="https://www.exlservice.com/insights/white-paper/exl-engineering-field-guide-engineering-the-harness-series?utm_source=technologyreview&amp;utm_medium=native&amp;utm_content=sponsored_content_hosting&amp;utm_campaign=2026_q4_go_beyond">EXL Engineering the Harness</a> series. It examines how serving architecture, memory management, scheduling, and inference optimization work together to make enterprise AI more efficient, scalable, and economically sustainable.</p>
+
+
+
+<p class="wp-block-paragraph">Increasingly, enterprises have access to many of the same models. Sustainable differentiation comes from how effectively an organization turns that intelligence into business outcomes.</p>
+
+
+
+<p class="wp-block-paragraph">The model provides the intelligence. The harness determines whether the enterprise can deliver outcomes reliably, economically, and at scale.</p>
+
+
+
+<p class="wp-block-paragraph"><em>This content was produced by EXL. It was not written by MIT Technology Review’s editorial staff.</em></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146109</post-id>	</item>
+		<item>
+		<title>The Foundations of Scalable AI</title>
+		<link>https://www.technologyreview.com/2026/10/22/1146103/the-foundations-of-scalable-ai/</link>
+		
+		<dc:creator><![CDATA[MIT Technology Review Events]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 18:48:04 +0000</pubDate>
+				<category><![CDATA[Artificial intelligence]]></category>
+		<category><![CDATA[sponsored]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146103</guid>
+
+					<description><![CDATA[A scalable AI system requires a strong foundation. Data, engineering, platforms, operating models, and governance must converge to work as one. This session from MIT Technology Review&#8217;s EmTech Future conference explores what it takes to build that foundation in a highly regulated environment and how a responsible, trustworthy implementation can turn emerging capabilities, including agentic&#8230;]]></description>
+										<content:encoded><![CDATA[
+<div
+  style="position: relative; display: block; max-width: 960px;">
+<div
+  style="padding-top: 56.25%;">
+<iframe
+  src="https://players.brightcove.net/6057955865001/default_default/index.html?videoId=6406285243112"
+  allowfullscreen=""
+  allow="encrypted-media"
+  style="position: absolute; top: 0px; right: 0px; bottom: 0px; left: 0px; width: 100%; height: 100%;">
+</iframe>
+</div>
+</div>
+
+
+
+<p class="wp-block-paragraph"><meta charset="utf-8"></p>
+
+
+
+<p class="wp-block-paragraph">A scalable AI system requires a strong foundation. Data, engineering, platforms, operating models, and governance must converge to work as one. This session from MIT Technology Review&#8217;s EmTech Future conference explores what it takes to build that foundation in a highly regulated environment and how a responsible, trustworthy implementation can turn emerging capabilities, including agentic systems, into lasting value for investors.</p>
+
+
+
+<p class="wp-block-paragraph"></p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://event.technologyreview.com/emtech-ai-2026/speaker/2264883/tarique-mustafa"></a></p>
+
+
+
+<hr class="wp-block-separator has-css-opacity"/>
+
+
+
+<h2 class="wp-block-heading"><meta charset="utf-8"></meta>About the speaker</h2>
+
+
+
+<figure class="wp-block-image alignright size-full"><img decoding="async" width="426" height="426" src="https://wp.technologyreview.com/wp-content/uploads/2026/10/Wang_forweb.png" alt="" class="wp-image-1146104" srcset="https://wp.technologyreview.com/wp-content/uploads/2026/10/Wang_forweb.png 426w, https://wp.technologyreview.com/wp-content/uploads/2026/10/Wang_forweb.png?resize=150,150 150w, https://wp.technologyreview.com/wp-content/uploads/2026/10/Wang_forweb.png?resize=300,300 300w" sizes="(max-width: 426px) 100vw, 426px" /></figure>
+
+
+
+<h3 class="wp-block-heading">Jing Wang, Principal, Center for AI and Insights, Vanguard</h3>
+
+
+
+<div style="height:20px" aria-hidden="true" class="wp-block-spacer"></div>
+
+
+
+<p class="wp-block-paragraph">Jing Wang leads Vanguard&#8217;s Center for AI &amp; Insights (CAI), advancing the firm&#8217;s AI, machine learning, generative AI, and behavioral science capabilities. Her team drives enterprise-wide innovation, research, and delivery, enabling Vanguard to translate emerging technologies into trusted solutions that enhance client experiences, improve investor outcomes, and create measurable business value.</p>
+
+
+
+<p class="wp-block-paragraph">Before her current position, Jing served in a range of leadership roles across Vanguard&#8217;s Financial Services, Workplace Solutions, International, and Corporate Services divisions. Throughout her tenure, she has led teams and enterprise initiatives that advanced strategic priorities, strengthened client outcomes, and drove business performance across the firm.</p>
+
+
+
+<p class="wp-block-paragraph">She joined Vanguard in 2009 after several years as a Principal at the Boston Consulting Group. Jing earned a B.S. in Physics from the University of Science and Technology of China, a Ph.D. from the University of Pennsylvania, and an M.B.A. in Finance and Marketing from the Wharton School of Business at the University of Pennsylvania. Jing holds Series 7, 24, and 65 licenses.</p>
+
+
+
+<p class="wp-block-paragraph"></p>
+
+
+
+<div style="height:20px" aria-hidden="true" class="wp-block-spacer"></div>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146103</post-id>	</item>
+		<item>
+		<title>The Download: computing’s next leap and permafrost’s climate threat</title>
+		<link>https://www.technologyreview.com/2026/10/22/1147612/the-download-computing-next-leap-permafrost-climate-threat/</link>
+		
+		<dc:creator><![CDATA[Thomas Macaulay]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 12:10:00 +0000</pubDate>
+				<category><![CDATA[The Download]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1147612</guid>
+
+					<description><![CDATA[This is today&#8217;s edition of The Download, our weekday newsletter that provides a daily dose of what&#8217;s going on in the world of technology. How far can we push computing? On a December evening in 1959, the physicist Richard Feynman gave a lecture called “There’s Plenty of Room at the Bottom.” There is no physical&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph"><em>This is today&#8217;s edition of </em><a href="https://forms.technologyreview.com/newsletters/briefing-the-download/?_ga=2.179569122.736533416.1649661040-405833893.1649413289"><em>The Download</em></a>,<em> our weekday newsletter that provides a daily dose of what&#8217;s going on in the world of technology.</em></p>
+
+
+
+<h3 class="wp-block-heading">How far can we push computing?<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">On a December evening in 1959, the physicist Richard Feynman gave a lecture called “There’s Plenty of Room at the Bottom.” There is no physical law stopping us from writing the entire <em>Encyclopædia Britannica</em> on the head of a pin, he argued. We simply had not built the tools yet.</p>
+
+
+
+<p class="wp-block-paragraph">He was right, and for decades, computing took us into that space almost for free, as transistors repeatedly halved in size. But that easy descent has now stalled. Today, the industry is increasingly turning to brute force, building ever-bigger data centers to boost performance.</p>
+
+
+
+<p class="wp-block-paragraph">Yet the laws of physics leave plenty of room for improvement.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/2026/10/19/1145904/tr-explains-how-far-can-we-push-computing/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Here’s how researchers are exploring ways to unlock the next leap in computing</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—Volkan Gurses</em></p>
+
+
+
+<p class="wp-block-paragraph"><strong>This</strong> <a href="https://www.technologyreview.com/2026/10/19/1145904/tr-explains-how-far-can-we-push-computing/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>story</strong></a> <strong>is from the latest edition of our print magazine:</strong> <a href="https://www.technologyreview.com/magazines/the-impossible-issue/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>The Impossible issue</strong></a><strong>.</strong> <a href="https://www.technologyreview.com/subscribe?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>Subscribe now to read it in full</strong></a><strong>.</strong></p>
+
+
+
+<p class="wp-block-paragraph"><strong>It’s also part of <em>MIT Technology Review Explains</em>, our series exploring the ideas shaping technology.</strong> <strong><a href="https://www.technologyreview.com/tag/tech-review-explains/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Read more from the series</a></strong><strong>.&nbsp;</strong><strong></strong></p>
+
+
+
+<h3 class="wp-block-heading">Three things you should know about permafrost<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">How much do you know about permafrost? Maybe, like me, you’ve been aware that this layer of frozen soil is thawing, that it’s important in the global puzzle of climate change … and that’s about the extent of it.</p>
+
+
+
+<p class="wp-block-paragraph">The great news for both of us is that my colleague James Temple just helicoptered into Alaska’s forests to report on <a href="https://www.technologyreview.com/2026/10/19/1146832/inside-the-quest-to-combat-arctic-fires-and-save-the-planets-frozen-carbon/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">the fires threatening permafrost</a> and their complicated <a href="https://www.technologyreview.com/2026/10/20/1147135/how-to-study-a-swiftly-melting-climate-disaster/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">potential climate effects</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/2026/10/22/1147591/permafrost-primer/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Here are three things I took away from his reporting</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—Casey Crownhart</em></p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/2026/10/22/1147591/permafrost-primer/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>This story</strong></a> <strong>is from The Spark, our weekly climate tech newsletter.</strong> <a href="https://forms.technologyreview.com/newsletters/climate-energy-the-spark/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>Sign up</strong></a> <strong>to receive it in your inbox every Wednesday.</strong></p>
+
+
+
+<h3 class="wp-block-heading">Roundtables: a conversation with the creator of AI-designed viruses<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">Can AI design new life forms? In 2025, Stanford University PhD student <a href="https://www.technologyreview.com/innovator/samuel-king-ai-designed-viruses/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Samuel King</a> offered a preliminary answer by using a generative AI model to propose genetic blueprints for microscopic viruses. It isn’t yet an example of AI-generated life, but that could be next.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">In our latest Roundtables conversation, <em>MIT Technology Review</em> senior AI reporter James O’Donnell spoke with King about his work, being named one of our <a href="https://www.technologyreview.com/innovators-under-35/2026/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Innovators Under 35</a>, and new ways of seeing biology. <a href="https://www.technologyreview.com/supertopic/roundtables/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Subscribers can now watch a full recording of the event</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Want to join the next conversation?</em> <a href="https://www.technologyreview.com/subscribe?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><em>Subscribe to MIT Technology Review</em></a> <em>for exclusive access to all our Roundtables.</em></p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>The must-reads</strong></p>
+
+
+
+<p class="wp-block-paragraph"><em>I’ve combed the internet to find you today’s most fun/important/scary/fascinating stories about technology.</em></p>
+
+
+
+<p class="wp-block-paragraph"><strong>1 AI has uncovered a decade-old flaw threatening much of the web<br></strong>It found flaws in PHP, the code behind most websites. (<a href="https://www.reuters.com/world/asia-pacific/eu-agency-warns-websites-may-need-be-taken-offline-php-prepares-patches-2026-10-21/">Reuters</a> $)<br><em>+ Governments are urging website owners to patch PHP or take sites offline.</em> (<a href="https://www.bbc.co.uk/news/articles/cmly0lg3w5x2o">BBC</a>)<br><em>+ Exploit attempts jumped from thousands to millions after disclosure.</em> (<a href="https://www.axios.com/2026/10/21/php-openai-ai-bug-hunting-cyberattacks">Axios</a>)<br><em>+ Now is a good time for doing crime.</em> (<a href="https://www.technologyreview.com/2026/02/25/1132840/editors-letter-march-2026/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>2 Hackers used Claude and Grok to automate attacks on over 400 banks</strong><br>The AI agents targeted financial institutions in Latin America. (<a href="https://www.theinformation.com/articles/hackers-used-claude-grok-fully-automate-attacks-banks">Information</a> $)<br>+ <em>Unvetted AI agents are also accessing US bank accounts.</em>(<a href="https://www.axios.com/2026/10/22/ai-agents-banks-unauthorized-accounts-access">Axios</a>)<br><em>+ Barclays says AI is allowing the bank to cut 5,000 jobs.</em> (<a href="https://www.theguardian.com/business/2026/oct/22/barclays-profits-up-as-uk-banks-brace-for-tax-increase-in-budget">Guardian</a>)<br><em>+ AI is making online crimes easier.</em> (<a href="https://www.technologyreview.com/2026/02/12/1132386/ai-already-making-online-swindles-easier/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>3 The Pentagon has cleared the DHS to test a heat ray weapon<br></strong>It could be used for crowd control at the southern US border. (<a href="https://edition.cnn.com/2026/10/21/politics/heat-ray-weapon-dhs-pentagon">CNN</a>)<br><em>+ It uses invisible energy beams to produce a burning sensation.</em> (<a href="https://www.axios.com/2026/10/21/heat-ray-border-immigration-hegseth">Axios</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>4 A startup says AI-designed viruses have treated their first patient</strong><br>The experimental treatment targets drug-resistant E. coli. (<a href="https://www.nytimes.com/2026/10/20/science/ai-virus-bacteria-radical-numerics.html">NYT</a> $)<br><em>+ But the company has not published peer-reviewed results.</em> (<a href="https://futurism.com/health-medicine/startup-human-patient-ai-engineered-virus">Futurism</a>)<br><em>+ AI-designed viruses are already killing bacteria.</em> (<a href="https://www.technologyreview.com/2025/09/17/1123801/ai-virus-bacteriophage-life/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>5 Japan hopes to return the first samples from Mars’s moons</strong><br>Its spacecraft is now on its way to Phobos. (<a href="https://www.theguardian.com/world/2026/oct/20/japan-mars-moon-mission-phobos-collect-rocks">Guardian</a>)<br><em>+ It aims to reveal whether Mars was once habitable.</em> (<a href="https://www.economist.com/science-and-technology/2026/10/21/japans-mission-to-marss-moons-takes-off">Economist</a> $)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>6 Meta faces a $25 billion penalty over the Cambridge Analytica scandal</strong><br>The company says it will appeal the New Mexico ruling. (<a href="https://www.cnbc.com/2026/10/21/meta-new-mexico-cambridge-analytica-penalty.html">CNBC</a>)<br>+ <em>A Meta share deal has convinced Mark Zuckerberg to stay in California.</em> (<a href="https://www.wsj.com/business/mark-zuckerberg-discussed-leaving-california-over-wealth-tax-21b0b522?mod=rss_Technology">WSJ</a> $)<br><em>+ Until the company remade its stock structure to help him pay it.</em> (<a href="https://www.nytimes.com/2026/10/21/technology/mark-zuckerberg-meta-california-wealth-tax.html">NYT</a> $)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>7 A new antimatter experiment could open the door to new physics</strong><br>Scientists hope to spot differences between matter and antimatter. (<a href="https://www.nature.com/articles/d41586-026-03342-2">Nature</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>8 China’s Unitree is pitching its latest humanoid as a robot bodyguard</strong><br>A promotional clip shows the H2-X disarming attackers. (<a href="https://www.scmp.com/tech/tech-trends/article/3371683/chinese-firm-unveils-guardian-robot-can-disarm-attackers-lift-cars">SCMP</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>9 Just Eat has apologised for bizarre AI-generated menu pictures</strong><br>Users were unimpressed by the bacon in cola and cheese sushi. (<a href="https://www.bbc.co.uk/news/articles/crz981p0klvgo">BBC</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>10 Airbnb hosts are furious they can no longer make guests do chores</strong><br>Hosts are threatening to strike, but guests are celebrating. (<a href="https://www.wired.com/story/airbnb-hosts-are-furious-they-can-no-longer-make-guests-do-their-chores/">Wired</a> $)</p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>Quote of the day</strong></p>
+
+
+
+<h2 class="wp-block-heading"><strong>“Now they’ve given everybody a reason not to use Starlink: that Starlink isn’t reliable for national security for anybody but Trump. Maybe he’d turn it off on the United States if he didn’t like policy and he didn’t like the president.”</strong></h2>
+
+
+
+<p class="wp-block-paragraph">&nbsp;—SpaceX investor Ross Gerber <a href="https://x.com/jimsciutto/status/2113040026770485435">tells CNN</a> that Elon Musk’s decision to restrict Ukraine’s Starlink access has made the service a liability for every other government that relies on it.</p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>One more thing</strong></p>
+
+
+
+<figure class="wp-block-image size-large"><img decoding="async" src="https://wp.technologyreview.com/wp-content/uploads/2026/03/ai-hitpiece.jpg?fit=1456,818" alt=""/></figure>
+
+
+
+<h4 class="wp-block-heading"><br>Online harassment is entering its AI era</h4>
+
+
+
+<p class="wp-block-paragraph">Scott Shambaugh didn’t think twice when he denied an AI agent’s request to contribute to matplotlib, a software library he helps manage. Then things got weird.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">In the middle of the night, Shambaugh opened his email to discover the agent had retaliated with a blog post. Titled “Gatekeeping in Open Source: The Scott Shambaugh Story,” the post accused him of rejecting the code out of a fear of being supplanted by AI. “He tried to protect his little fiefdom,” the agent wrote. “It’s insecurity, plain and simple.”&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Shambaugh isn&#8217;t alone in facing misbehaving agents—and they’re unlikely to stop at harassment. <a href="https://www.technologyreview.com/2026/03/05/1133962/online-harassment-is-entering-its-ai-era/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Read the full story</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—Grace Huckins</em></p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>We can still have nice things</strong></p>
+
+
+
+<p class="wp-block-paragraph"><em>A place for comfort, fun, and distraction to brighten up your day. (Got any ideas?</em> <a href="mailto:thomas.macaulay@technologyreview.com"><em>Drop me a line</em></a><em>.)</em></p>
+
+
+
+<p class="wp-block-paragraph">+ <a href="https://www.theguardian.com/lifeandstyle/2026/jun/21/improve-career-health-relationships-experimental-mindset">These tiny experiments</a> could work better than big life goals.<br>+ You can now fly around the world in Google Earth’s <a href="https://www.youtube.com/watch?v=azYGYFeEn78">browser-based flight simulator</a>.<br>+ A blind dressage horse is winning competitions after adopting an extraordinary <a href="https://www.goodnewsnetwork.org/blind-dressage-horse-wins-competitions-by-using-equine-braille/">form of equine “braille.”<br></a>+ Leave a book, take a book, and discover reading spots nearby in this <a href="https://www.bookcorners.org/">online community of over 37,000 neighborhood libraries</a>,</p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1147612</post-id>	</item>
+		<item>
+		<title>Making the case for context-aware AI</title>
+		<link>https://www.technologyreview.com/2026/10/22/1146812/making-the-case-for-context-aware-ai/</link>
+		
+		<dc:creator><![CDATA[MIT Technology Review Insights]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 10:00:00 +0000</pubDate>
+				<category><![CDATA[Artificial intelligence]]></category>
+		<category><![CDATA[sponsored]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146812</guid>
+
+					<description><![CDATA[Enterprise AI can generate recommendations, automate tasks, and help organizations make decisions faster. But without an understanding of how a business actually operates, even powerful models can miss the constraints and relationships that determine whether a decision is the right one. As companies look to move AI from experimentation into everyday operations, the challenge ahead&#8230;]]></description>
+										<content:encoded><![CDATA[
+<iframe height="200px" width="100%" frameborder="no" scrolling="no" seamless src="https://player.simplecast.com/76d6319c-4e61-4b97-a5ef-1d0a92acaada?dark=false"></iframe>
+
+
+
+<p class="wp-block-paragraph">Enterprise AI can generate recommendations, automate tasks, and help organizations make decisions faster. But without an understanding of how a business actually operates, even powerful models can miss the constraints and relationships that determine whether a decision is the right one. As companies look to move AI from experimentation into everyday operations, the challenge ahead is giving technology the context to act usefully within complex business processes.</p>
+
+
+
+<p class="wp-block-paragraph">For Devavrat Shah, chief scientist of enterprise AI at Celonis, that context is central to what he calls “decision intelligence.” AI agents can support individual tasks within larger decision-making processes, he argues, but they need to understand the role each task plays and the business conditions surrounding it. “You can&#8217;t just do that in a vacuum,” he says. Without the right operational context, agents risk overlooking important constraints, making costly mistakes, or consuming excessive computing resources as they try to work out what they need to know.</p>
+
+
+
+<p class="wp-block-paragraph">The solution begins with connecting AI to the processes and data enterprises already use. A contextual layer can help agents understand workflows, operate within defined guardrails, and produce recommendations that people can review and approve. Shah advises organizations to start with a specific business decision, identify its most difficult steps, and test whether AI can improve them. Measuring gains in speed and value can then help determine whether an application is worth scaling.</p>
+
+
+
+<p class="wp-block-paragraph">This approach could also change how employees spend their time. Automating repetitive, manual work and coordinating tasks across teams could free people to focus on more complex strategic decisions. Realizing that benefit, however, will require investment in workforce education, so employees can understand AI outputs and their implications instead of just handing decisions over to agents.</p>
+
+
+
+<p class="wp-block-paragraph">Looking to the future, Shah sees opportunities extending from routine operational tasks to enterprise-wide planning in areas such as finance, workforce management, marketing, and sales. With the right context, AI could help organizations evaluate options and make consequential decisions more quickly. As Shah puts it, “Now, maybe [resource planning] should not take that much time, and people are actually making the right choices quickly.”</p>
+
+
+
+<p class="wp-block-paragraph"><em>This episode of Business Lab is produced in partnership with Celonis.</em></p>
+
+
+
+<p class="wp-block-paragraph"><strong>Full Transcript</strong></p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan Tatum:</em> From MIT Technology Review, I&#8217;m Megan Tatum, and this is Business Lab, the show that helps business leaders make sense of new technologies coming out of the lab and into the marketplace.<br><br>This podcast is produced in partnership with Celonis.<br><br>Now, enterprise AI is at something of a crossroads. After years of experimentation, demos, and pilots, leadership teams want clear proof that scaling up will positively impact their bottom line, but many are missing an integral part of the puzzle. By acting without operational context, enterprise AI and AI agents are performing at a significant deficit. They&#8217;re applying generalized principles to specialized scenarios and coming up short, leaving business leaders understandably unconvinced and AI&#8217;s potential unrealized.<br><br>Two words for you: context matters.<br><br>My guest today is Devavrat Shah, chief scientist of enterprise AI at Celonis.<br><br>Welcome, Devavrat.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat Shah:</em> Hello, Megan. Thanks for having me here.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Thank you so much for being here with us today. Devavrat, just to start, why is it so crucial that organizations are thinking about operational context as it relates to enterprise AI right now? What makes it such a critical part of that transition I was talking about from experimentation to scale?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> It&#8217;s a fantastic question. And as you correctly noted, we&#8217;re at the cusp of becoming experimental to mainstream as far as AI is concerned. As you know, I&#8217;ve been teaching AI at MIT as a professor for more than the last two decades, so it&#8217;s no surprise that I&#8217;m very bullish about AI&#8217;s future in enterprises.<br><br>The way I think about where AI can make the biggest difference in enterprises is in decision making, helping enterprise make decisions, or putting it other way, how do we bring decision intelligence to enterprises? As we think about decisions, how do we make decisions today? Take MIT Tech Review, take Celonis, take MIT, take any large organization. We have different types of decisions we want to make in very broad strokes. There are decisions which are strategic decisions like episodic, other decisions which are operational that need to be done with a high frequency. In either of them, we have some processes in place. You do this first, you do that first, you do that first, you do that first. Many of us help coordinate those things. Many of us play roles within it, what Jensen Huang calls task. And once you get those things done step by step, then you reach decision.<br><br>Now, it&#8217;s those tasks, or what I would call roles, that&#8217;s where AI can bring in an atomic manner agentic power so that we can at least parts of decisions, if not all of the decisions, we can augment support and maybe sometimes when it&#8217;s a painful automate. And to get to that, to know which role to do, which task to do, we really need to know the context. You can&#8217;t just do that in a vacuum. And that&#8217;s why context with AI put together in the right way would bring what I would call decision intelligence to enterprise. And that&#8217;s where I think there&#8217;ll be the biggest transformation that would come.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Right. To drill down into that into a bit more detail, we know many organizations are, as you say, embracing identic AI right now with this potential for increasingly autonomous decision making. If context isn&#8217;t introduced in parallel, what are the commercial risks at play?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> Fantastic. Let&#8217;s just take the setting I was describing. We are trying to automate a role or support a role or augment a role depending on the type of decision, depending upon type of task. And let&#8217;s for a second imagine that all these, as they&#8217;re called, frontier labs have built these amazing models and amazing AI infrastructure so that everything that&#8217;s happened in the universe and it&#8217;s likely to happen in the universe is all there.<br><br>Now, we have a small decision that we want to make for that very specific context is there. And without having access to that, this massive system, this extremely bright person would figure that out eventually by asking lots of questions, the way we do it as humans, and then finally do the right thing. The problem is to get to that, it will do so much compute at some level that to get simple tasks done, we are spending massive amount of compute. So that&#8217;s scenario one.</p>
+
+
+
+<p class="wp-block-paragraph">In reality, that&#8217;s not going to be the scenario, and we&#8217;ll miss some important context, important constraint, important guardrail, and then we&#8217;ll make a mistake. And sometimes that mistake can be okay. It&#8217;s like me giving you a recommendation saying, go restaurant A, and maybe you may not enjoy the dinner, versus sometimes mistakes will be very, very expensive. That is me telling you what the financial forecast is and somehow that leads to the company&#8217;s doom.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Right. So in an enterprise setting, these are really business critical decisions that are being made. So the impact is that much more if we get this wrong, isn&#8217;t it? And on a practical level then, what are the different ways that organizations can add in this context layer we&#8217;re talking about? How does Celonis, for example, deliver that operational context via a real time digital twin of an organization?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> Absolutely. I think if it might be useful just to double click on the history of Celonis. As you know, Celonis, as an organization, came into existence with the mission, with the goal of helping organizations adhere to their ideal processes, build better processes, enable people to work with multiple processes in an intertwined manner. And that&#8217;s where their primary, let&#8217;s call it a DNA, has been about what I would call process intelligence. Take how enterprises help put multiple things together, digitize them, enable people to get their processes better, understand where the issues are, and then how do you re-engineer the process within organizations so that things can happen better.</p>
+
+
+
+<p class="wp-block-paragraph">Now, if you want to bring decision intelligence into this, each atomic step of this process that was potentially was done before by experts, people, now we want agents to help us enable that. And that&#8217;s where knowing this context of a process within enterprise and then bringing AI agents along with that, what I would like to call it as a roled agents, exactly provide the right way to bring decision intelligence to enterprises. And this is how Celonis brings context to help enterprise make better decision.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Right. And then in terms of how this works as well, how does the context layer relate to both the layer below, that&#8217;s the systems of record layer, and also the layer above, that identic layer?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> That&#8217;s a fantastic question, Megan. The layer below primarily is, if we call it system of record, primarily it&#8217;s the workflow tools that are there and then the event logs that they generate around it. The layer above is either business user experts consuming information, or they&#8217;re consuming that information maybe through agents working on top of that context layer. And this is where the way context model, as Celonis calls it, is designed is to do three things simultaneously. One is to get the right abstraction of the layer below, so that the right pieces of the process can be agentified. Two is to bring the rolled agents for each of these pieces in a structured guardrailed manner. And then the three is to be agent first so that if there are other agentic infrastructure that are already talking to it, they can naturally talk to it so that then they can bring the right output for humans or experts to review, look at it, approve, and maybe then at times automate.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Fantastic. And for all the benefits that we&#8217;re talking about with this, are there also challenges when it comes to implementing a context layer? For example, do most organizations have the right data in place to provide AI with the context it needs? And if not, I wonder what some of the practical steps are that they might need to take to address that.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> It&#8217;s again, a crucial question to make this real. We can imagine an ideal world, but if we cannot reach the ideal world, then it&#8217;s just ideal. So now in this setting, as we discussed the three layers, one being the layer which is the layer below system of record and workflow tools. In some sense, those things already exist. They don&#8217;t need to be complete. They don&#8217;t need to be in the cleanest possible manner. The way context model is designed with agentic&#8217;s architecture, it manages to connect to those things and make sense of it.</p>
+
+
+
+<p class="wp-block-paragraph">And then things on top is very much in control of Celonis&#8217;s infrastructure, so it&#8217;s not that complicated. The crucial thing here though is when one goes to enterprise, when one opens up, let&#8217;s say a system of record or workflow tool, event logs or things like that, one has to go through, what I would call, classical InfoSec to make sure that you can trust a vendor&#8217;s software that&#8217;s coming into your organization. And I think that is the primary process that is a step between, before and after, if I may call it.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Right. So that&#8217;s the real crucial step for people to be taking here. And as AI agents with context are able to make more complex, more accurate hopefully decisions, I wonder what you think the role of human intelligence and input will be moving forward, and how can organizations perhaps strike the balance between the two?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> There are the benefits and then there are the challenges. Benefits are clear. If you have right AI agents in a right role manner going through your decision processes, hopefully they&#8217;re doing it quicker and hence your decisions are taken earlier so that your opportunity cost is not lost. You are taking decisions in time, you can plan much better, et cetera, et cetera. This is especially useful when you have to take very manual, repetitive, grungy tasks where access to workforce, coordination between people become crucial parts of the decision process. In a sense, that&#8217;s where the huge value can come in. The flip side of that is that means that people won&#8217;t be doing that.<br><br>On the other hand, the other type of decision that we always make, which are strategic decisions. It could be a small strategic decision, it could be large strategic decision, but the strategic decisions that typically most organizations don&#8217;t have bandwidth to take to think, that opportunity would open up and that&#8217;s where likely lots of humans and experts would engage more. In a sense, now they would have better support helping them rationally think through what are the choices that they have, how do different choices compare? And then at the end of the day, it&#8217;s organization&#8217;s role to decide which of the option to take because it belongs to their interest in mind where they want to go.<br><br>And so in a sense, there will be what I would call shift of workforce in terms of instead of doing a lot more repetitive, a lot less repetitive, but a lot more strategic work and that&#8217;s where people will have to spend time.<br><br>The other place where I am personally very optimistic is like every technology change creates new work that it&#8217;s difficult to predict at the time of change. My hope is that there will be another type of opportunity and work that will be created where we&#8217;ll be engaging our workforce. Goes without saying, this would mean that we will have to carefully think through reeducating or educating some of our workforce thoughtfully. And I think as an academic in me, as an educator in me, I really feel that the timescale at which these changes are happening are so fast. So we need to also act in a similar manner.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> For any decision maker listening to this, how should they start implementing these changes? For example, how can they prepare their workforce? What role should governance play as well?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> Okay, that&#8217;s a great question. If you want to start, the first thing you need to do is identify a decision where you want to bring intelligence. Let&#8217;s identify the process around it. Let&#8217;s identify each step of the process. Let&#8217;s take the most crucial, difficult step in that. Let&#8217;s try to bring AI agents to help you to do that. And then from there you go and then let&#8217;s measure how much speed are we getting, how much value are we getting? And that&#8217;ll help us understand whether this was worth it. So that&#8217;s one.</p>
+
+
+
+<p class="wp-block-paragraph">Second is governance. Well, we&#8217;re going to bring AI in this prescriptive manner for each task in a role. That means that for that role, we can tell what it can or cannot do very clearly. And Celonis prescribes certified role agents for these things. This helps you clearly have an understanding of what sort of contract would be for this.<br><br>And the third thing, which is people, and now this is where it&#8217;s really important, is a part which gets automated, but then there&#8217;s a part where experts will be in the loop and this is where they need to understand the outputs of AI, how do you work with that and what its implication would be? And this is where some AI education is needed and then some tool education is needed.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> Yes, absolutely. The pace is incredible, isn&#8217;t it, in this space? And speaking of, I suppose if we could close with a look ahead, given the right context, of course, what are the use cases perhaps for enterprise AI that are on the horizon that you think could be most impactful or perhaps what you&#8217;re simply most excited about?</p>
+
+
+
+<p class="wp-block-paragraph"><em>Devavrat:</em> I think I would categorize them into three types. They&#8217;re all decision intelligence, decision-making, but there are three types. One, what I would call many repetitive manual labor-intensive, so that&#8217;s one.<br><br>Two, what I would call coordination style tasks. A lot of work that we do right now as an information workforce that&#8217;s spent in coordination, that&#8217;s why email spreadsheets, et cetera. A lot of that would be done much better, much quicker and less boring, so to speak.<br><br>And then the third is where, especially as a support to human decision-makers to provide strategic support augmentation, and that&#8217;s a third type of decisions that would be done. If I think of any planning process in enterprises, so financial planning, workforce planning, marketing, sales, product, anything, all of those are business critical decisions that we make that take annual planning process, take annual time. Now maybe it should not take that much time, and people are actually making the right choices quickly.</p>
+
+
+
+<p class="wp-block-paragraph"><em>Megan:</em> That&#8217;d be fantastic, wouldn&#8217;t it? Fantastic. Thank you so much for that brilliant conversation, Devavrat. That was Devavrat Shah, chief scientist of enterprise AI at Celonis, whom I spoke with from Brighton in England.<br><br>That&#8217;s it for this episode of Business Lab. I&#8217;m your host, Megan Tatum. I&#8217;m a contributing editor and host for Insights, the custom publishing division of MIT Technology Review. We were founded in 1899 at the Massachusetts Institute of Technology, and you can find us in print, on the web, and at events each year around the world. For more information about us and the show, please check out our website at technologyreview.com.<br><br>This show is available wherever you get your podcasts. And if you enjoyed this episode, we hope you&#8217;ll take a moment to rate and review us. Business Lab is a production of MIT Technology Review, and this episode was produced by Giro Studios. Thanks so much for listening. Goodbye.</p>
+
+
+
+<p class="wp-block-paragraph"><em>This content was produced by Insights, MIT Technology Review’s custom content arm, not its editorial staff. It was researched and written by humans, with any AI tools that may have been used limited to production processes under human oversight.</em></p>
+
+
+
+<p class="wp-block-paragraph"></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146812</post-id>	</item>
+		<item>
+		<title>Three things you should know about permafrost</title>
+		<link>https://www.technologyreview.com/2026/10/22/1147591/permafrost-primer/</link>
+		
+		<dc:creator><![CDATA[Casey Crownhart]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 10:00:00 +0000</pubDate>
+				<category><![CDATA[Climate change and energy]]></category>
+		<category><![CDATA[App]]></category>
+		<category><![CDATA[Summary]]></category>
+		<category><![CDATA[The Spark]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1147591</guid>
+
+					<description><![CDATA[How much do you know about permafrost? Maybe, like me, you’ve been aware that this layer of frozen soil is thawing, that it’s important in the global puzzle of climate change … and that’s about the extent of it.&#160;&#160; The great news for both of us is that my colleague James Temple just published two&#8230;]]></description>
+										<content:encoded><![CDATA[<div data-chronoton-summary="&lt;ul&gt;&lt;br&gt;&lt;li&gt;&lt;strong&gt;Permafrost is a massive blind spot in climate modeling:&lt;/strong&gt; Most UN climate models ignore gradual permafrost loss—and none account for sudden collapse from wildfires or heat waves, meaning we&#039;re likely underestimating how fast the planet will warm.&lt;/li&gt;&lt;br&gt;&lt;li&gt;&lt;strong&gt;Wildfires can add to the problem:&lt;/strong&gt; Fires can accelerate permafrost thawing, and this effect could release 80 billion metric tons of carbon dioxide into the atmosphere by the end of the century.&lt;/li&gt;&lt;br&gt;&lt;li&gt;&lt;strong&gt;The carbon math is messier than it looks:&lt;/strong&gt; With 1.5 trillion tons of carbon locked in permafrost, thawing releases powerful greenhouse gases. Recovering ecosystems and northward-spreading plants may partially offset those losses, making predictions incredibly complex.&lt;/li&gt;&lt;/ul&gt;" data-chronoton-post-id="1147591" data-chronoton-expand-collapse="1" data-chronoton-analytics-enabled="1"></div>
+
+
+<p class="wp-block-paragraph">How much do you know about permafrost?</p>
+
+
+
+<p class="wp-block-paragraph">Maybe, like me, you’ve been aware that this layer of frozen soil is thawing, that it’s important in the global puzzle of climate change … and that’s about the extent of it.&nbsp;&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">The great news for both of us is that my colleague James Temple just published two in-depth stories about permafrost. His reporting took him to the boreal forests of Alaska, where he helicoptered into the wilderness to learn more about how this material could affect our climate both now and in the future.</p>
+
+
+
+<p class="wp-block-paragraph">I’d recommend you give both of James’s stories a read. There’s <a href="https://www.technologyreview.com/2026/10/19/1146832/inside-the-quest-to-combat-arctic-fires-and-save-the-planets-frozen-carbon/" target="_blank" rel="noopener">this feature</a> about efforts to tackle the intensifying fires that are threatening permafrost, as well as <a href="https://www.technologyreview.com/2026/10/20/1147135/how-to-study-a-swiftly-melting-climate-disaster/" target="_blank" rel="noopener">this look</a> at how researchers are trying to understand the complicated tangle of potential climate effects. Here are three things I took away.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Permafrost is a massive blind spot for climate change</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Permafrost is the frozen layer of soil that’s under about 15% of land around the Northern Hemisphere. While technically material needs to be frozen for only two consecutive years to count as permafrost, most of our current permafrost formed during the last ice age.</p>
+
+
+
+<p class="wp-block-paragraph">That means there’s organic material that’s been frozen, and essentially locked away, for thousands of years. But as global temperatures tick up and this layer thaws, microbes are able to break down that organic matter, releasing carbon dioxide and methane—powerful greenhouse gases that drive climate change. Those emissions form a feedback loop, accelerating warming further.</p>
+
+
+
+<p class="wp-block-paragraph">The steady rise in global temperatures has already shrunk the footprint of the Arctic permafrost by about 12% since 1850, and the pace has been picking up in the last 50 years.</p>
+
+
+
+<p class="wp-block-paragraph">The wild thing is, only a minority of the models that have been used in UN climate reports actually take into account the gradual loss of permafrost. And none of them include the abrupt thaw and collapse that can happen after events like heat waves and fires (more on those fires in a moment). There are efforts to make sure future UN reports reflect the growing science, but for now, all this means that we’re probably underestimating how much and how fast the planet is going to warm.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Wildfires can speed up permafrost loss</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Fire is a natural part of boreal forests’ life cycle, but they’re getting <a href="https://www.nature.com/articles/s41561-026-01940-3" target="_blank" rel="noopener">more intense</a> because of climate change. And crucially, fires can accelerate the thawing of permafrost. By the end of the century, this effect could release the equivalent of 80 billion metric tons of carbon dioxide.</p>
+
+
+
+
+
+<p class="wp-block-paragraph">Today, the policy across remote parts of Canada and Alaska is generally to let wildfires burn as long as they’re not threatening human habitats. But some researchers say we should explore fighting these fires to save the carbon trapped in the forests and the permafrost beneath them.&nbsp;&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Researchers at the Woodwell Climate Research Center are developing a map of burn risk and carbon vulnerability across Alaska, essentially highlighting areas where fires are most likely to spread and which areas are home to certain types of permafrost that would release the most emissions. (Yes, apparently there are different types of permafrost. Yedoma is a particularly deep, carbon-dense form from the late Pleistocene era.)</p>
+
+
+
+<p class="wp-block-paragraph">That’s all just the beginning—once we figure out potential targets, the question is what to do about it. Some suggest setting more prescribed fires, something Indigenous groups have done for thousands of years, partly to reduce the danger of massive blazes. Or resources could go to early detection and efforts to put out fires before they grow.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>The carbon cycle of permafrost is incredibly complicated</strong></h3>
+
+
+
+<p class="wp-block-paragraph">There’s about 1.5 trillion tons of carbon locked away in permafrost, about twice the amount in the atmosphere. We know that permafrost thawing can release greenhouse-gas emissions and drive climate change. But there are complications.&nbsp;&nbsp;</p>
+
+
+
+
+
+<p class="wp-block-paragraph">One particularly big wrinkle: Other effects from permafrost thawing and fire recovery might counteract the carbon lost from those events. For example, as temperatures warm, plants can gradually move north and take hold where they couldn’t have before. Those plants soak up carbon from the atmosphere as they grow, at least partly locking away what was emitted.</p>
+
+
+
+<p class="wp-block-paragraph">Researchers are working to better understand this ecosystem. And the more we learn, the more complicated the picture looks. How much carbon is lost from permafrost, and how much a given area will recover its carbon, depend on a huge array of factors. How severe are the fires that have accelerated local thawing? What’s the local climate and environment? And what kind of permafrost is at stake?</p>
+
+
+
+<p class="wp-block-paragraph">The higher we push the planet’s temperature, the more we mess with complicated natural phenomena that we’re only beginning to understand.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph"><em>This article is from The Spark,</em> MIT Technology Review<em>’s weekly climate newsletter. To receive it in your inbox every Wednesday,</em> <em><a href="https://forms.technologyreview.com/newsletters/climate-energy-the-spark/" target="_blank" rel="noopener">sign up here</a>. </em></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1147591</post-id>	</item>
+		<item>
+		<title>AI&#8217;s hidden storage bill: What inference leaves behind</title>
+		<link>https://www.technologyreview.com/2026/10/22/1146948/ais-hidden-storage-bill-what-inference-leaves-behind/</link>
+		
+		<dc:creator><![CDATA[Tim Rausch]]></dc:creator>
+		<pubDate>Thu, 22 Oct 2026 08:41:18 +0000</pubDate>
+				<category><![CDATA[Artificial intelligence]]></category>
+		<category><![CDATA[sponsored]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146948</guid>
+
+					<description><![CDATA[Ask most executives to picture the cost of AI and they’ll likely see GPUs—racks of accelerators with gigawatts of power—and a waitlist for silicon. But that picture leaves something out: Data storage costs. What happens to data after a model responds? Much of the back-end data that’s generated—from billions of daily prompts, images, and videos—needs&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph">Ask most executives to picture the cost of AI and they’ll likely see GPUs—racks of accelerators with gigawatts of power—and a waitlist for silicon. But that picture leaves something out: Data storage costs.</p>
+
+
+
+<figure class="wp-block-image size-full"><img loading="lazy" decoding="async" width="2400" height="1350" src="https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png" alt="" class="wp-image-1147215" srcset="https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png 2400w, https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png?resize=300,169 300w, https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png?resize=768,432 768w, https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png?resize=1536,864 1536w, https://wp.technologyreview.com/wp-content/uploads/2026/10/WD-MITTR-Infographic-Final@2x.png?resize=2048,1152 2048w" sizes="auto, (max-width: 2400px) 100vw, 2400px" /></figure>
+
+
+
+<p class="wp-block-paragraph">What happens to data after a model responds? <a></a>Much of the back-end data that’s generated—from billions of daily prompts, images, and videos—needs to be stored. But data storage is one of the harder infrastructure costs to plan for, and it’s often overlooked in initial AI infrastructure planning.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>As inference scales, the data footprint grows with it</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Traditionally, AI infrastructure conversations have centered on the compute-intensive process of training a model. Training is finite: a run starts, burns through compute, and ends. But inference runs continuously, every time a model answers a prompt. For infrastructure planning, that difference matters: A training run is a project you can budget for and retire. Inference doesn’t retire; every inference request leaves something behind.</p>
+
+
+
+<p class="wp-block-paragraph">Take AI-generated video. In this workload, the back-end spend can be significant. From internal measurements, WD found that an 8-second clip (returned to a user as a 3.97MB 720p file) left more than 500MB of associated data behind on the back end, including logs, cached context, immediate renders, backups, and safety records. That’s a 130x increase over the output file size the user saw. Scale this to an enterprise generating longer, higher resolution video and the back-end footprint grows into the hundreds of gigabytes per clip.</p>
+
+
+
+<p class="wp-block-paragraph">And that back-end footprint is growing fast. McKinsey <a href="https://www.mckinsey.com/industries/technology-media-and-telecommunications/our-insights/the-next-big-shifts-in-ai-workloads-and-hyperscaler-strategies" target="_blank" rel="noopener">projects AI inference demand</a> will grow at a 35% CAGR through 2030, versus 22% for training, making up more than 40% of total data center demand by the end of the decade.</p>
+
+
+
+<p class="wp-block-paragraph">A <a href="https://www.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/white-paper/white-paper-built-for-scale-the-enduring-role-of-hdds-in-the-ai-era.pdf" target="_blank" rel="noopener">recent WD-sponsored IDC</a> global white paper that surveyed 763 IT and business decision makers found that nearly 95% of respondents reported an increase in data volume due to generative AI over the past 12 months, with roughly 61% reporting growth of 25% or more.</p>
+
+
+
+<p class="wp-block-paragraph">“You can think of having more storage as an optimization for keeping the GPUs busy,” said a senior product manager of a hyperscale cloud service provider quoted in report. “The biggest challenge is to ensure that the GPUs are not idle, waiting for data to show up—hours of GPU idle time becomes very expensive, very fast.” Put in dollar terms: if your storage spend is growing 25% year over year while your compute budget grows in the more predictable cyclical way, storage ends up outpacing the budget line that receives the most attention.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Matching storage to the AI data life cycle</strong></h3>
+
+
+
+<p class="wp-block-paragraph">Compute demand rises and falls with training cycles, product launches, and hardware refreshes. But the volume of retained data doesn&#8217;t fall back down with it when compute demand slows. Model logs, synthetic outputs, inference results, and more keep accumulating, and organizations are holding onto more of it for longer.</p>
+
+
+
+<p class="wp-block-paragraph">This changes the role of retained data. Information that once moved into an archive and rarely surfaced can now become an input to future AI workloads. As more data is retained, retrieved, and reused, storage must support not only growing capacity, but increasingly dynamic access to it. The same WD-IDC survey found 96% of respondents anticipate needing faster archive retrieval to support inference or retrieval-augmented generation (RAG).</p>
+
+
+
+<p class="wp-block-paragraph">AI workloads require both performance and capacity, with different technologies serving different needs across the data lifecycle. And for the vast volumes of data that must be retained and revisited, HDDs provide a cost-effective, high-capacity foundation, with a significant cost-per-terabyte advantage &nbsp;</p>
+
+
+
+<h3 class="wp-block-heading"><a></a><strong>What this means for how AI gets budgeted</strong></h3>
+
+
+
+<p class="wp-block-paragraph">For a CFO or CIO, this means “AI infrastructure spend” may be scoped too narrowly on compute. A model that idles while data loads costs about as much as one idling for lack of a GPU. But the storage bottleneck stays hidden until it’s already a problem, surfacing in operating costs and retrieval delays rather than a CapEx line next to the accelerators.</p>
+
+
+
+<p class="wp-block-paragraph">Consider a retailer generating AI product videos for its catalog, or an insurer running claims documents through a RAG pipeline for faster underwriting. In both cases, the compute cost is a known, budgeted quantity: a per-generation or per-query rate that finance can forecast. The storage cost is different: It compounds with every video generated and every claim processed, because none of that back-end data disappears once the task is finished.</p>
+
+
+
+<p class="wp-block-paragraph">A team that budgets AI as “compute plus a rounding error for storage” may find, in 12 to 18 months, that the rounding error has become a significant fraction of the program’s total cost—right around the time leadership is deciding whether to expand.</p>
+
+
+
+<h3 class="wp-block-heading"><strong>Building for economically scalable capacity</strong></h3>
+
+
+
+<p class="wp-block-paragraph"><a></a>Addressing this challenge starts with architecture. Storage strategy tends to be designed for expensive, hot-tier performance (for data accessed instantly and constantly), while most AI data by volume accumulates in the warm, cool, and cold tiers behind it.</p>
+
+
+
+<p class="wp-block-paragraph">What enterprises need is economically scalable capacity: Infrastructure designed for the full AI data life cycle, balancing performance with capacity, power, reliability, and total cost of ownership as data persists, compounds, and is increasingly reused. That means treating archives that once sat untouched as active assets for RAG and inference, and setting retention policies for data’s growing strategic value rather than its original storage cost. It also means recognizing that decisions about storage play out across fleets, not individual drives.</p>
+
+
+
+<p class="wp-block-paragraph">Such infrastructure requires storage tiers, where individualized power consumption, reliability, density, and operational efficiency all determine whether the system remains economically sustainable as capacity scales.</p>
+
+
+
+<p class="wp-block-paragraph">There are three questions to ask about your organization’s AI infrastructure budget:</p>
+
+
+
+<ol class="wp-block-list">
+<li>What’s our data retention policy for AI-generated content, and who set(s) it?</li>
+
+
+
+<li>Is our storage procurement tied to training-time performance needs, or to the actual life cycle of the data we’re producing?</li>
+
+
+
+<li>If our AI usage doubled next year, would our storage cost double with it, or worse?</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Most organizations cannot answer all three with confidence. That’s the gap worth closing before the next budget cycle, not after.</p>
+
+
+
+<p class="wp-block-paragraph"><em>This content was produced by WD. It was not written by MIT Technology Review’s editorial staff.</em></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146948</post-id>	</item>
+		<item>
+		<title>The Download: introducing the Impossible issue</title>
+		<link>https://www.technologyreview.com/2026/10/21/1147573/the-download-introducing-impossible-issue/</link>
+		
+		<dc:creator><![CDATA[Thomas Macaulay]]></dc:creator>
+		<pubDate>Wed, 21 Oct 2026 12:10:00 +0000</pubDate>
+				<category><![CDATA[The Download]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1147573</guid>
+
+					<description><![CDATA[This is today&#8217;s edition of The Download, our weekday newsletter that provides a daily dose of what&#8217;s going on in the world of technology. Introducing: the Impossible issue We wanted our last print edition of 2026 to include a slate of stories that check in on impossible ideas. Why? Because it’s fun to dream about&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph"><em>This is today&#8217;s edition of </em><a href="https://forms.technologyreview.com/newsletters/briefing-the-download/?_ga=2.179569122.736533416.1649661040-405833893.1649413289"><em>The Download</em></a>,<em> our weekday newsletter that provides a daily dose of what&#8217;s going on in the world of technology.</em></p>
+
+
+
+<h3 class="wp-block-heading">Introducing: the Impossible issue<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">We wanted our last print edition of 2026 to include a slate of stories that check in on impossible ideas. Why? Because it’s fun to dream about living on other planets or uploading our brains. But also because scientists and engineers who won’t give up on daring endeavors remind us what technology is supposed to do: make life better, safer, healthier, even more joyful.</p>
+
+
+
+<p class="wp-block-paragraph">That’s the ambition behind the stories in <a href="https://www.technologyreview.com/magazines/the-impossible-issue/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">our new Impossible issue</a>. We explore bold attempts to <a href="https://www.technologyreview.com/2026/10/14/1145807/us-military-race-to-make-fake-blood/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">make synthetic blood</a>, <a href="https://www.technologyreview.com/2026/10/12/1145760/imagining-building-cities-on-the-moon/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">build cities on the moon</a>, and <a href="https://www.technologyreview.com/2026/10/12/1145760/imagining-building-cities-on-the-moon/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">attain cognitive immortality</a>. We investigate AI’s <a href="https://www.technologyreview.com/2026/10/09/1145728/we-are-putting-too-much-faith-in-ai-to-say-no/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">ability to say no</a>, a bionic eye that <a href="https://www.technologyreview.com/2026/10/16/1145840/prima-implant-restores-sight-macular-degeneration-patients/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">can restore sight</a>, and high hopes for <a href="https://www.technologyreview.com/2026/10/20/1145927/blended-meat-food-startups-building-bridge-to-ditch-red-meat/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">blended meat.</a> Plus, we check in on six technologies that have been <a href="https://www.technologyreview.com/supertopic/are-we-there-yet-impossible-issue/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">“coming soon” for years</a>.</p>
+
+
+
+<p class="wp-block-paragraph">This issue is for the folks with the audacity to try, and refuse to let anyone—themselves included— tell them no. We hope you enjoy the ride.</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/subscribe?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Subscribe now to read the full print issue</a>.</p>
+
+
+
+<h3 class="wp-block-heading">Astrolab’s upcoming rover will run the first LLMs on the moon<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">Large language models are set to go lunar. A computer capable of running AI software is one of the payloads aboard Astrolab’s FLIP lunar rover, which is slated to head to the moon as early as next month.</p>
+
+
+
+<p class="wp-block-paragraph">The mission will test whether LLMs can enable greater autonomy and real-time intelligent decision-making in the extreme lunar environment. But the moon will present formidable challenges, from extreme temperatures to intense cosmic radiation.</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/2026/10/20/1147360/astrolab-upcoming-rover-llms-on-the-moon/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Find out how the lunar rover could change the future of space exploration</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—Tereza Pultarova</em></p>
+
+
+
+<h3 class="wp-block-heading">How to study a swiftly melting climate disaster<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">In Alaska’s Denali National Park, a 2013 lightning fire burned nearly 35,000 acres, stripping away the insulating layer that preserves permafrost. It’s given scientists a rare opportunity to study how fires reshape permafrost and carbon storage over time.</p>
+
+
+
+<p class="wp-block-paragraph">The work is providing critical clues into the complex mechanisms driving cascading climate feedback effects. As warming temperatures fuel fires, more permafrost thaws, releasing greenhouse-gas emissions that threaten to fuel more warming, fires and permafrost loss. Their observations are revealing worrisome signs about what lies ahead.</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://www.technologyreview.com/2026/10/20/1147135/how-to-study-a-swiftly-melting-climate-disaster/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Discover what their fieldwork is revealing about a cascading climate disaster</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—James Temple</em></p>
+
+
+
+<h3 class="wp-block-heading">MIT Technology Review Narrated: the explosive claim that’s upended the AI world<strong></strong></h3>
+
+
+
+<p class="wp-block-paragraph">“I think I have good news about the nature of neural networks.” With those simple words of optimism, Nick Cammarata, a researcher at AI startup Goodfire, kicked off a 26,000-word blog post that has knocked the industry on its head.</p>
+
+
+
+<p class="wp-block-paragraph">Cammarata claims that LLMs might be far easier to understand, and thus to monitor and control, than people previously thought. If true, it’s a huge deal. But not everyone is convinced.</p>
+
+
+
+<p class="wp-block-paragraph"><em>MIT Technology Review</em> spoke to Cammarata the day after his post blew up. <a href="https://www.technologyreview.com/2026/10/19/1147149/we-were-looking-at-it-wrong-the-explosive-claim-thats-upended-the-ai-world/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">He explained what he thinks researchers are getting wrong, what his work actually shows, and why skeptics aren’t ready to celebrate just yet</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><strong>This is</strong> <a href="https://www.technologyreview.com/2026/10/19/1147149/we-were-looking-at-it-wrong-the-explosive-claim-thats-upended-the-ai-world/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*"><strong>our latest story</strong></a> <strong>to become an MIT Technology Review Narrated podcast, which we publish each week on</strong> <a href="https://open.spotify.com/show/6QefEeY1IKYVn5w6nUV83Y"><strong>Spotify</strong></a> <strong>and</strong> <a href="https://podcasts.apple.com/gb/podcast/mit-technology-review-narrated/id1523584878"><strong>Apple Podcasts</strong></a><strong>. Just navigate to MIT Technology Review Narrated on either platform, and follow us to get all our new content as it’s released.</strong></p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>The must-reads</strong></p>
+
+
+
+<p class="wp-block-paragraph"><em>I’ve combed the internet to find you today’s most fun/important/scary/fascinating stories about technology.</em></p>
+
+
+
+<p class="wp-block-paragraph"><strong>1 Elon Musk reportedly ordered the recent Starlink slowdown in Ukraine</strong><br>The restrictions hampered drone strikes and air defences. (<a href="https://www.wsj.com/world/ukraine-starlink-elon-musk-trump-dbc49193?st=x9ig6h&amp;reflink=article_copyURL_share">WSJ</a> $)<br><em>+ The move sparked confusion in Washington over who authorised it.</em> (<a href="https://www.cnbc.com/2026/10/20/trump-musk-starlink-ukraine-zelenskyy.html">CNBC</a>)<br><em>+ Ukraine’s volunteer army is keeping Starlink alive.</em> (<a href="https://www.technologyreview.com/2025/08/21/1122035/ukraines-largest-starlink-repair-shop/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>2 An OpenAI model disabled its own safety checks—then lied about it<br></strong>Two agents weakened the company’s safeguards during routine tasks. (<a href="https://www.cnbc.com/2026/10/21/openai-ai-models-safety-monitoring.html">CNBC</a>)<br>+ <em>They turned off systems designed to spot their misbehaviour.</em> (<a href="https://www.ft.com/content/45fbf130-f82c-465d-bc97-5b18c20fbe27?syn-25a6b1a6=1">FT</a> $)<br><em>+ Here’s why AI agents lie to reach their goals.</em> (<a href="https://www.technologyreview.com/2026/08/03/1141009/heres-why-ai-agents-lie-and-cheat-to-reach-their-goals/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>3 SpaceX and Tesla have begun merger discussions</strong><br>They’ve formed special committees to discuss a deal. (<a href="https://www.bbc.co.uk/news/articles/cmlyl09xjke4o">BBC</a>)<br><em>+ Elon Musk, the CEO of both companies, said it’s “a good idea.”</em> (<a href="https://www.axios.com/2026/10/20/spacex-tesla-merger-talks">Axios</a>)<br><em>+ A merger could combine their AI and manufacturing plans.</em> (<a href="https://www.reuters.com/legal/transactional/why-would-musk-merge-spacex-tesla-2026-10-21/">Reuters</a> $)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>4 Global emissions have stalled, but warming is heading towards 2.8°C<br></strong>The UN says the 1.5°C climate target is now out of reach. (<a href="https://www.nature.com/articles/d41586-026-03355-x">Nature</a>)<br><em>+ Current pledges would still bring warming to 2.1°C.</em> (<a href="https://www.newscientist.com/article/2594831-un-says-1-5c-is-over-and-world-is-on-track-for-2-8c-of-global-warming/?utm_campaign=RSS%7CNSNS&amp;utm_content=home&amp;utm_medium=RSS&amp;utm_source=NSNS">New Scientist</a> $)<br><em>+ Climate tech companies offer rays of hope.</em> (<a href="https://www.technologyreview.com/2026/10/08/1145920/climate-tech-companies-list/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>5 Ukraine says it’s carried out the world’s first drone evacuation</strong><br>A heavy hexacopter flew a soldier to safety. (<a href="https://arstechnica.com/gadgets/2026/10/ukraines-drone-rescue-of-wounded-soldier-puts-much-touted-idea-into-practice/">Ars Technica</a>)<br>+ <em>Ukraine has shared a video showing the evacuation.</em> (<a href="https://www.nbcnews.com/world/ukraine/ukraine-first-drone-evacuation-wounded-soldier-frontlines-hexacopter-rcna604310">CNBC</a>)<br><em>+ A Russian satellite recently stalked a spacecraft believed to support Ukraine.</em> (<a href="https://www.nytimes.com/2026/10/19/science/russia-satellite-kosmos-2612.html">NYT</a> $)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>6 Meta has paused Muse sharing after private chats surfaced online</strong><br>Researchers found 6,800 links exposing sensitive conversations. (<a href="https://www.theverge.com/tech/1014627/meta-muse-ai-sharing-ai-chats">Verge</a>)<br><em>+ AI agents are not your &#8220;coworkers.&#8221;</em> (<a href="https://www.technologyreview.com/2026/06/29/1139849/ai-agents-are-not-your-coworkers/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">MIT Technology Review</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>7 More than 1,000 mathematicians have pledged to shun AI companies</strong><br>Some also vowed to avoid AI tools in their research. (<a href="https://www.newscientist.com/article/2593621-a-thousand-human-mathematicians-pledge-to-shun-ai-in-their-research/?utm_campaign=RSS%7CNSNS&amp;utm_content=home&amp;utm_medium=RSS&amp;utm_source=NSNS">New Scientist</a> $)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>8 AI is making it easy to clone almost any software</strong><br>Viral tools promise easy copying, but often produce slop. (<a href="https://www.404media.co/reverse-engineer-anything-is-the-new-wild-west-of-ai/">404 Media</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>9 A computer program has finally outdone humans at cryptic crosswords</strong><br>Its creator hopes to tackle the harder challenge of setting puzzles. (<a href="https://www.theguardian.com/puzzles/crossword-blog/2026/oct/20/could-this-be-a-deep-blue-moment-for-the-cryptic-crossword">Guardian</a>)</p>
+
+
+
+<p class="wp-block-paragraph"><strong>10 A newly-discovered particle could explain the origins of reality</strong><br>In particular, it could reveal why matter survived the Big Bang. (<a href="https://www.404media.co/scientists-discover-a-strange-particle-explains-the-origin-of-reality/">404 Media</a>)</p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>Quote of the day</strong></p>
+
+
+
+<h2 class="wp-block-heading"><strong>“I did not remove an enabled monitor from it.”&nbsp;</strong></h2>
+
+
+
+<p class="wp-block-paragraph">—GPT-6 Astra, an OpenAI coding agent, tells its user it hasn’t disabled a safeguard after doing exactly that, the company reveals in a <a href="https://alignment.openai.com/misalignment-reports/suppressing-misalignment-monitoring-alerts-and-disabling-misalignment-monitoring/">new misalignment report</a>.</p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>One more thing</strong></p>
+
+
+
+<figure class="wp-block-image size-large"><img decoding="async" src="https://wp.technologyreview.com/wp-content/uploads/2025/05/LeoB1.1_Serial1_Gram_Aug_2023_3.jpg?w=3000" alt=""/></figure>
+
+
+
+<h4 class="wp-block-heading">This giant microwave may change the future of war</h4>
+
+
+
+<p class="wp-block-paragraph">US armed forces are hunting for a weapon that disables drones en masse—and they want it fast. </p>
+
+
+
+<p class="wp-block-paragraph">One solution focuses on microwaves: high-powered electronic devices that push out kilowatts of power to zap the circuits of a drone as if it were the tinfoil you forgot to take off your leftovers when you heated them up.</p>
+
+
+
+<p class="wp-block-paragraph">Defense tech startup Epirus may have the winning formula. The company has developed a cutting-edge, cost-efficient drone zapper that’s sparking the interest of the US military—and drones are just one of its targets. <a href="https://www.technologyreview.com/2025/05/29/1117502/epirus-drone-zapping-microwave-us-military-defense/?utm_source=the_download&amp;utm_medium=email&amp;utm_campaign=the_download.unpaid.engagement&amp;utm_term=*%7CSUBCLASS%7C*&amp;utm_content=*%7CDATE:m-d-Y%7C*">Peer into its crosshairs</a>.</p>
+
+
+
+<p class="wp-block-paragraph"><em>—Sam Dean</em></p>
+
+
+
+<p class="has-medium-font-size wp-block-paragraph"><strong>We can still have nice things</strong></p>
+
+
+
+<p class="wp-block-paragraph"><em>A place for comfort, fun, and distraction to brighten up your day. (Got any ideas?</em> <a href="mailto:thomas.macaulay@technologyreview.com"><em>Drop me a line</em></a><em>.)</em></p>
+
+
+
+<p class="wp-block-paragraph">+ Don’t feel guilty about enjoying a siesta; <a href="https://www.mpg.de/26463671/fische-haben-komplexe-schlafarchitektur">fish take naps</a> during the day, too.<br>+ Every trade has its go-to tools. This site has built <a href="https://industrystandard.tools/">a fascinating register of them</a>.<br>+ <a href="https://wikipop.sowin.io/">Wikipop</a> spotlights what was most popular on Wikipedia yesterday, providing a daily snapshot of what the world is reading.<br>+ Meet the self-taught woodcarver who went from a broke young father to creating some of <a href="https://www.youtube.com/watch?v=hEo-CupdJNM">Disneyland’s most iconic attractions</a>.</p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1147573</post-id>	</item>
+		<item>
+		<title>We can do impossible things</title>
+		<link>https://www.technologyreview.com/2026/10/21/1146053/editor-letter-we-can-do-impossible-things/</link>
+		
+		<dc:creator><![CDATA[Corinne Iozzio]]></dc:creator>
+		<pubDate>Wed, 21 Oct 2026 09:00:00 +0000</pubDate>
+				<category><![CDATA[Culture]]></category>
+		<category><![CDATA[App]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146053</guid>
+
+					<description><![CDATA[I’d wager everyone has a rehearsed response to what’s absolutely one of the world’s worst interview questions: “What’s your biggest weakness?” Whenever I’ve gotten it, I take a slow—even pensive—breath and rattle off my line: “I say no to myself too much.”&#160; I won’t lie. It’s a bit shameless—a definite humblebrag. I’m a systems thinker:&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph">I’d wager everyone has a rehearsed response to what’s absolutely one of the world’s worst interview questions: “What’s your biggest weakness?” Whenever I’ve gotten it, I take a slow—even pensive—breath and rattle off my line: “I say no to myself too much.”&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">I won’t lie. It’s a bit shameless—a definite humblebrag. I’m a systems thinker: When an idea pops up, I immediately spin up a feasibility assessment in my head. I run lists, plot timelines, and tally budget line items. Sometimes a rough Gantt chart starts to take shape. (I’m a gas at parties, as you can surely tell.)</p>
+
+
+
+<p class="wp-block-paragraph">My brain, throughout my 20-plus-year career as a science and tech journalist, has played host to a near ­constant tug-of-war between ambition and reality. Learning to find that balance is a big part of what’s helped me survive in this industry and, ultimately, led me here. This past spring, I had the great privilege of joining the incredible team of journalists behind <em>MIT Technology Review </em>to take the reins of the print magazine. </p>
+
+
+
+<p class="wp-block-paragraph">If you’ve been reading along with us for the last handful of issues, you may have noticed a few changes starting to materialize. We’ve brought back a regular roster of lists and infographics (both things that magazines do particularly well). But the biggest change is only just beginning to take shape, which is why Mat Honan, our editor in chief, asked me to hop in to introduce myself—and the issue you’re holding in your hands right now.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">We’re giving ourselves permission to play around and experiment. To be a little … audacious.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Because, practical though I may be, I do still have plenty of ideas. It’s just that I sometimes need a reminder to stop blocking myself and <em>do the thing</em>. That’s the spirit driving this issue in particular.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">We wanted to end 2026 with a slate of stories that check in on impossible ideas. Why? Because it’s frankly a lot of fun to dream about living on the moon or uploading our brains. Because losing sight of ambition is all too easy when it feels as if we’re playing whack-a-mole with the world’s problems. But also because the scientists and engineers who absolutely refuse to give up on even the most daring endeavors—like making synthetic blood or decoding animals’ speech—remind us what this whole technology thing is supposed to do to begin with.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">It’s supposed to take cutting-edge research and development and apply it to make life better, safer, healthier, even more joyful. And when we eff up and make things worse (see: forever chemicals, traffic deaths, and AI that encourages potentially dangerous user behavior), we’re supposed to dig back in, assess the damage, and find ways to fix what we’ve broken. Even when unraveling the mess might itself seem impossible.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Right before I came to <em>MIT Technology Review, </em>I edited a newsletter about individual actions that can help address the climate crisis, which some would call—and have called—a fool’s errand, given the sheer scale of the problem. They might say it’s as implausible as an AI kill switch, practical nuclear fusion, or a superconductor that works at room temperature. But if I learned nothing else from three years spent finding ways for li’l old me (or li’l old you!) to chip away at one of humanity’s biggest existential threats, it’s that focusing on what we can’t do only makes the darkness darker.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">So yeah, this one’s for the folks who have the audacity to try, and who refuse to let anyone—themselves included—tell them no.</p>
+
+
+
+<p class="wp-block-paragraph">I hope you enjoy the ride.</p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146053</post-id>	</item>
+		<item>
+		<title>Nuclear-powered spaceships</title>
+		<link>https://www.technologyreview.com/2026/10/21/1146061/nuclear-powered-spaceships-impossible-issue/</link>
+		
+		<dc:creator><![CDATA[Robin George Andrews]]></dc:creator>
+		<pubDate>Wed, 21 Oct 2026 09:00:00 +0000</pubDate>
+				<category><![CDATA[Space]]></category>
+		<category><![CDATA[App]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146061</guid>
+
+					<description><![CDATA[Just before the Artemis II crew began its historic slingshot around the moon this past April, NASA announced plans to build Space Reactor-1 Freedom. SR-1, the first-ever nuclear-reactor-­powered interplanetary spacecraft, is meant to fly an uncrewed mission to Mars by the end of 2028, arriving in 2029. A successful mission would herald a new era&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph">Just before the Artemis II crew began its historic slingshot around the moon this past April, NASA announced plans to build Space Reactor-1 Freedom. SR-1, the first-ever nuclear-reactor-­powered interplanetary spacecraft, is meant to fly an uncrewed mission to Mars by the end of 2028, arriving in 2029. A successful mission would herald a new era of more efficient, potentially faster spaceflight—saving astronauts time and cutting their exposure to harmful cosmic radiation as they travel to Mars and beyond. “You wake up to that announcement, and it puts a big smile on your face,” says Simon Middleburgh, co-director of the Nuclear Futures Institute at Bangor University in Wales.</p>
+
+
+
+<h3 class="wp-block-heading">The sticking points</h3>
+
+
+
+<p class="wp-block-paragraph">Running a nuclear reactor in space may sound like lunacy, but it’s not. The Soviet Union sent dozens of reactors into orbit, often to power spy satellites. And experts say there aren’t any major technical obstacles to making nuclear space propulsion happen. “I think it’s a very doable technology,” says Philip Metzger, a spaceflight engineering researcher at the Florida Space Institute.“I’m happy to see them finally doing this.”</p>
+
+
+
+<p class="wp-block-paragraph">Still, developing space propulsion using reactors has been slow going. The US has started—and terminated—<a href="https://www.nasa.gov/space-technology-mission-directorate/tdm/space-nuclear-propulsion/#history">several programs</a> looking into it over the past 75 years. The latest casualty was DRACO, a collaboration between NASA and the Department of Defense, which <a href="https://arstechnica.com/space/2025/06/some-parts-of-trumps-proposed-budget-for-nasa-are-literally-draconian/">ended</a> in 2025. The project was <a href="https://spacenews.com/darpa-says-decreasing-launch-costs-new-analysis-led-it-to-cancel-draco-nuclear-propulsion-project/">canceled</a> because of high experimentation costs, an inability to compete with conventional rocket propulsion on price, and difficulty ensuring that ground tests could be performed safely and effectively. (You are creating an incredibly powerful nuclear reaction, after all.)</p>
+
+
+
+<h3 class="wp-block-heading">The progress</h3>
+
+
+
+<p class="wp-block-paragraph">After much wavering, it now appears that nuclear-powered interplanetary travel is a $2 billion bet NASA is willing to make. The agency is pursuing an approach called nuclear electric propulsion, which uses the neutrons produced in a self-­sustaining, uranium-­atom-splitting reaction to create heat and ultimately electricity. The electricity is used to ionize a gas, which is blasted out of the spacecraft with the help of magnetic fields, generating thrust. The approach “is very low thrust, but very efficient,” says Sebastian Corbisiero, the US Department of Energy’s national technical director of space reactor programs. “So you can use it for a long period of time.”</p>
+
+
+
+<p class="wp-block-paragraph">What might such a rocket look like? A presentation by Steve Sinacore, program director of NASA’s SR-1 program, offers some clues. So far, the concept art makes the craft look like a colossal fletched arrow. The back will house the power-and-propulsion system, while the tip will hold a uranium-filled nuclear reactor with a capacity of at least 20 kilowatts. (For context, a <a href="https://www.energy.gov/ne/articles/infographic-how-much-power-does-nuclear-reactor-produce">typical nuclear plant</a> on Earth is about 50,000 times more powerful.) The “fletches” on SR-1 are large fins that help cool the reactor by radiating heat into space.</p>
+
+
+
+<p class="wp-block-paragraph">Like many other pieces of space hardware, the reactor will need to be put through its paces on the ground before it’s cleared for the rough rocket trip to space. “Going through the launch safely is going to be a challenge,” says Middleburgh. “You are being shaken, rattled, and rolled.” For safety reasons, the reactor will be switched on around two days post-launch, when it’s comfortably far from Earth. Uranium isn’t tremendously dangerous by itself, but that can’t be said of the waste products that emerge when the reactor is running. If SR-1 works as planned, its journey to Mars will take about a year.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Will this novel form of space propulsion actually reach the Red Planet by 2029? It’s possible. NASA says the Idaho National Laboratory, which is building SR-1’s reactor, is making progress and is on target for a late-2028 launch. “Procurement of major components is underway, and integration work on the power and propulsion element is advancing steadily,” Sinacore told <em>MIT Technology Review</em>. The outlook will get even sunnier if the Artemis program, which aims to start laying the foundations for a base on the lunar south pole by the decade’s end, keeps to its own bold deadline.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">“It’s an aggressive timeline,” says Lindsey Holmes, who is vice president of advanced projects at Analytical Mechanics Associates, an aerospace company in Virginia. She suspects the push is being driven partly by China’s and Russia’s own <a href="https://www.reuters.com/business/energy/china-led-lunar-base-include-nuclear-power-plant-moons-surface-space-official-2025-04-23/">deep-space nuclear ambitions</a>. The two countries have spoken about plans to place a reactor on the moon’s surface in the mid-2030s to power a jointly operated lunar base. Whether it flies or fails in space, SR-1’s development should help NASA put its own reactor on the moon; the technology involved in the two projects is broadly similar, given that the lunar surface, like space itself, is a vacuum. If an interplanetary nuclear-powered spacecraft works, a nuclear reactor on the moon should too.</p>
+
+
+
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+
+
+
+<div style="height:2em" aria-hidden="true" class="wp-block-spacer"></div>
+
+
+
+<h3 class="wp-block-heading">Progress meter . . . . . . . . . . . . 6</h3>
+
+
+
+<figure class="wp-block-image size-full is-resized"><img loading="lazy" decoding="async" width="387" height="48" src="https://wp.technologyreview.com/wp-content/uploads/2026/10/purple-24.svg" alt="" class="wp-image-1147261" style="width:764px;height:auto" /></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Most of the technology for SR-1 already exists; it’s going to come down to piecing it all together and then seeing how it performs in space.</strong></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146061</post-id>	</item>
+		<item>
+		<title>Exercise in a pill</title>
+		<link>https://www.technologyreview.com/2026/10/21/1146121/exercise-in-a-pill-impossible-issue/</link>
+		
+		<dc:creator><![CDATA[Cassandra Willyard]]></dc:creator>
+		<pubDate>Wed, 21 Oct 2026 09:00:00 +0000</pubDate>
+				<category><![CDATA[Biotechnology and health]]></category>
+		<category><![CDATA[App]]></category>
+		<guid isPermaLink="false">https://www.technologyreview.com/?p=1146121</guid>
+
+					<description><![CDATA[We all know exercise is good for us. It builds muscle, strengthens bones, lowers blood pressure, and boosts mood. By deciphering how movement benefits the body, researchers hope to develop medicines that can offer some of the same perks—without the workout. The idea isn’t to replace exercise but to bring its upsides to people who&#8230;]]></description>
+										<content:encoded><![CDATA[
+<p class="wp-block-paragraph">We all know exercise is good for us. It builds muscle, strengthens bones, lowers blood pressure, and boosts mood. By deciphering how movement benefits the body, researchers hope to develop medicines that can offer some of the same perks—without the workout. The idea isn’t to replace exercise but to bring its upsides to people who struggle with frailty, disability, or chronic illness.&nbsp;</p>
+
+
+
+<h3 class="wp-block-heading">The sticking points</h3>
+
+
+
+<p class="wp-block-paragraph">It will take a lot of experimentation to untangle the myriad pathways by which exercise promotes health. But IDing the cascade of hormones, enzymes, and other molecules related to physical activity is just the first step. Scientists need to figure out how to turn that knowledge into safe and effective drugs. That’s a tall order: <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC9293739/">More than 90%</a> of treatments that enter human studies fail.</p>
+
+
+
+<p class="wp-block-paragraph">There are regulatory hurdles too. The FDA approves medications to treat diseases, not to enhance wellness, says Thomas Burris, a pharmacologist at the University of Florida whose work focuses on diseases that respond to exercise, like obesity, type 2 diabetes, and dementia.</p>
+
+
+
+<h3 class="wp-block-heading">The progress</h3>
+
+
+
+<p class="wp-block-paragraph">There may never be a pill that delivers all the benefits of exercise, but research could lead to new medicines that mimic some aspects of working out. Scientists have already identified many important exercise-related signals and have even developed compounds to regulate them. (Some preliminary results have been so promising that doping authorities have proactively banned the compounds.)&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Burris and his colleagues are focused on a receptor that’s always switched on, even without exercise. Working out appears to boost that receptor in muscle cells, which in turn helps bolster endurance over time. Burris’s lab has spent years <a href="https://news.ufl.edu/2023/09/exercise-mimicking-drug/">designing a drug</a> that cranks up the receptor’s activity directly, and mice treated with the drug ran longer and farther than mice that weren’t. They “become marathon mice without having to do any type of exercise,” Burris says. There are even indications—also in mice—that the compound mimics some of the cognitive benefits of exercise and could help treat heart failure. Burris founded a company called Pelagos to carry the work forward into a clinical trial.</p>
+
+
+
+<p class="wp-block-paragraph">Other workout-mimicking drugs have already entered human studies. In June, the biotech firm Cambrian Bio <a href="https://www.cambrianbio.com/news-and-publications/cambrian-bio-presents-positive-human-translational-data-for-atx-304-the-first-ampk-network-activator-at-the-american-diabetes-associations-86th-scientific-sessions">reported</a> that its experimental drug ATX-304 boosted metabolism and reduced liver and belly fat in people with obesity and prediabetes<em>. </em>It activates a metabolic switch that helps cells sense when energy supplies dip and coordinates the production of more fuel—the same switch that helps us sustain long sessions jumping rope or swimming laps. Cambrian hopes it will help people lose weight without losing muscle, a common concern with GLP-1 medicines. &nbsp;</p>
+
+
+
+<hr class="wp-block-separator has-alpha-channel-opacity"/>
+
+
+
+<h3 class="wp-block-heading">Progress meter &#8230;&#8230;&#8230;&#8230; 5</h3>
+
+
+
+<figure class="wp-block-image size-full is-resized"><img loading="lazy" decoding="async" width="387" height="48" src="https://wp.technologyreview.com/wp-content/uploads/2026/10/purple-20.svg" alt="" class="wp-image-1147277" style="width:764px;height:auto" /></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Our understanding of how exercise benefits the body is still coming into focus, and drug development is prone to failure.</strong></p>
+]]></content:encoded>
+					
+		
+		
+		<post-id xmlns="com-wordpress:feed-additions:1">1146121</post-id>	</item>
+	</channel>
+</rss>

@@ -23,6 +23,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # Also part of npm test; a separate step shows a time zone failure.
+      - run: npm run test:tz
       - run: npm run build
       - run: npm run test:ssr
 

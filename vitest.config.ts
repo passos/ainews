@@ -19,7 +19,11 @@ export default defineConfig(async () => {
           test: {
             name: "workers",
             include: ["tests/**/*.test.ts"],
-            exclude: ["tests/**/*.node.test.ts", "tests/architecture.test.ts"],
+            exclude: [
+              "tests/**/*.node.test.ts",
+              "tests/architecture.test.ts",
+              "tests/lib/**",
+            ],
             setupFiles: ["./tests/setup/apply-migrations.ts"],
           },
         },
@@ -27,7 +31,12 @@ export default defineConfig(async () => {
           test: {
             name: "node",
             environment: "node",
-            include: ["tests/**/*.node.test.ts", "tests/architecture.test.ts"],
+            include: [
+              "tests/**/*.node.test.ts",
+              "tests/architecture.test.ts",
+              // Time zone tests: workerd does not read TZ, node does.
+              "tests/lib/**/*.test.ts",
+            ],
           },
         },
       ],

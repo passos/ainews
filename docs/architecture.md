@@ -147,7 +147,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：事件里"已批准文章的集合"变化时，`events.revision + 1`：已批准的文章并入事件，或事件里的文章被批准、被拒绝、被下线。所有板块上线时都是审核模式，大多数文章是先归组、后批准的，所以批准和拒绝的同一个 `batch()` 里也要加 revision（#11 提供语句，#9 调用）。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
-- **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。
+- **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{article_id}.html`（#5 写），它是正文抓取第 0 档的原始输入，不是正文版本。
 
 ## 7. 发布与审核
 

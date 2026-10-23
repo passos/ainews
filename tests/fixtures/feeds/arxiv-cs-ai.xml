@@ -1,0 +1,293 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Snapshot of https://rss.arxiv.org/rss/cs.AI downloaded 2026-10-23 with User-Agent "PersonalNewsBot/1.0 (+https://news.ioenv.com)". Trimmed: channel header plus 20 of 366 items (the first 5 of each arxiv:announce_type: new, cross, replace, replace-cross), in feed order. Item content is unchanged. -->
+<rss xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0">
+  <channel>
+    <title>cs.AI updates on arXiv.org</title>
+    <link>http://rss.arxiv.org/rss/cs.AI</link>
+    <description>cs.AI updates on the arXiv.org e-print archive.</description>
+    <atom:link href="http://rss.arxiv.org/rss/cs.AI" rel="self" type="application/rss+xml"/>
+    <docs>http://www.rssboard.org/rss-specification</docs>
+    <language>en-us</language>
+    <lastBuildDate>Fri, 23 Oct 2026 04:00:05 +0000</lastBuildDate>
+    <managingEditor>rss-help@arxiv.org</managingEditor>
+    <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+    <skipDays>
+      <day>Saturday</day>
+      <day>Sunday</day>
+    </skipDays>
+    <item>
+      <title>The Cost of Saying Hello: An Empirical Study of Handshake Overhead in AI Agent Communication Protocols</title>
+      <link>https://arxiv.org/abs/2610.30151</link>
+      <description>arXiv:2610.30151v1 Announce Type: new 
+Abstract: Every interaction between AI agents begins with a handshake: the initiating agent must locate its counterpart, learn what it can do, and establish a session before the first useful message can be sent. Surveys of agent communication protocols name handshake overhead as an efficiency criterion, yet none report measurements. This paper presents the first empirical, phase-decomposed benchmark of the handshake in three major agent protocols: MCP (in both its 2025 initialize and 2026 discover eras), A2A, and ACP. Using each protocol's official SDK, we instrument every request for round trips, per-phase latency, wire bytes, and token cost across cold-start, warm-repeat, capability-mismatch, and degraded-metadata scenarios (N=50 per cell, on loopback and under an emulated 50 ms RTT). Round-trip count dominates handshake cost. A legacy MCP handshake takes three round trips and 230 ms at 50 ms RTT; A2A needs one round trip and 61.0 ms. Round trips are not the whole bill: when an LLM reads the counterpart's metadata, handshake cost scales with the counterpart's capability inventory at 24-107 tokens per capability, so a 200-capability counterpart spends 11% of a 200k-token context window before the agent reads its own task. MCP's own 2026 revision cuts its handshake from three round trips to two and, with era pinning, to zero on warm reconnects, protocol evolution that corroborates the cost we measure. We release the full harness, raw data, and analysis at https://github.com/pvarshh/handshake-benchmark.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30151v1</guid>
+      <category>cs.AI</category>
+      <category>cs.LG</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Pranav Varshney</dc:creator>
+    </item>
+    <item>
+      <title>MCP vs CLI for AI Agents: A Comparative Analysis of Tool Integration Strategies for Autonomous Systems</title>
+      <link>https://arxiv.org/abs/2610.30157</link>
+      <description>arXiv:2610.30157v1 Announce Type: new 
+Abstract: AI agents require interfaces to interact with external systems such as files, APIs, databases, and cloud services. Two competing paradigms have emerged: CLI (Command Line Interface), where agents execute shell commands directly, and MCP (Model Context Protocol), a structured JSON-RPC protocol providing governed, typed tool access. This paper presents a comparative analysis across 14 evaluation dimensions, supported by worked examples, security assessment against established compliance frameworks, and economic modeling. Our analysis indicates that CLI provides superior efficiency for single-user, local-only workflows, while MCP addresses requirements that CLI fundamentally cannot satisfy, including fine-grained access control, credential isolation, structured audit, and multi-tenant governance. We further examine how progressive disclosure techniques eliminate MCP's historical weakness (context window overhead), yielding token efficiency comparable to CLI while preserving its architectural benefits. A hybrid architecture is recommended for production systems. This analysis draws upon academic, government, and industry sources including NSA formal guidance (CSI U/OO/6030316-26), OWASP security standards, and economic modeling from BCG and Gartner.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30157v1</guid>
+      <category>cs.AI</category>
+      <category>cs.CR</category>
+      <category>cs.DC</category>
+      <category>cs.ET</category>
+      <category>cs.SE</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Arun Malik, Nitish Talasu, Bradley Klemick, Vineet Tushar Trivedi, Prachi Shah, Sanay Devi, Junjie Zhang, Kunal Sonawane</dc:creator>
+    </item>
+    <item>
+      <title>Accelerating Wildfire Hazard Mapping Across Canada with an AI Surrogate Modelling Framework</title>
+      <link>https://arxiv.org/abs/2610.30170</link>
+      <description>arXiv:2610.30170v1 Announce Type: new 
+Abstract: Canada's increasing wildfire activity requires frequent national hazard mapping to guide proactive mitigation, including fuel management, land-use planning, infrastructure protection, and evacuation routing. However, process-based wildfire simulation frameworks (e.g., BurnP3 and BurnP3+) rely on computationally intensive Monte Carlo simulations to model burn probability, fire intensity, and rate of spread. These workflows can take days to weeks to process a single regional modelling unit. To overcome these computational bottlenecks, we present three contributions developed through collaboration between AI researchers and wildfire modelling experts: (a) a standardized framework for training, fine-tuning, and evaluating AI surrogate models against process-based wildfire simulators; (b) a multi-task deep learning surrogate trained on national-scale data to emulate burn probability, mean fire intensity, and mean rate of spread at a fraction of the computational cost (seconds); and (c) domain-specific metrics and counterfactual evaluation protocols to probe out-of-distribution generalization. Integrating geospatial data (fuel, terrain, ignition likelihood) and regional weather, our model approximates BurnP3+ simulation outputs, achieving strong performance across agreement, rank-correlation, error, and spatial-overlap metrics. It preserves downstream hazard classifications and produces physically plausible responses to expert-informed counterfactual interventions. On a representative region, the surrogate achieves 806-fold end-to-end CPU acceleration and uses 13% of BurnP3+'s host memory, facilitating rapid scenario analysis.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30170v1</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Hager Radi Abdelwahed, Toluwaleke Olutayo, Chirag Goel, Jana Osea, Aldo Zaimi, Tom Swystun, Sandy Erni, Francisco Emiliano Lopez Saavedra, Yan Boulanger, Ga\'etan Marceau Caron</dc:creator>
+    </item>
+    <item>
+      <title>Neural Networks with Differentiable Belief-Function Layers</title>
+      <link>https://arxiv.org/abs/2610.30173</link>
+      <description>arXiv:2610.30173v1 Announce Type: new 
+Abstract: Yager's 1987 rule of combination $\boxplus$ was proposed on epistemic grounds: under high conflict, mass should be redistributed to ignorance rather than renormalised onto the class simplex. We observe that backpropagation needs the same rule: Dempster's normaliser $(1{-}\kappa)^{-1}$, where $\kappa$ is the conflict mass, puts a $(1{-}\kappa)^{-2}$ term in the gradient that diverges exactly when evidence sources disagree, while Yager's $\boxplus$ is bilinear and has no such term. Building on this, we construct a deep evidential pipeline in which every mass in the chain from heads to output is a valid Dempster--Shafer mass function, combined by Yager's rule. The output mass on the ignorance set, $m(\Theta)$, serves as the network's ``I do not know'' signal. The network is fit to hard labels and never sees an annotator distribution, yet $m(\Theta)$ orders human disagreement in two modalities, visual and linguistic. Dempster's rises too and ranks contested inputs about as well, but its normaliser divides the conflict out: Yager's vacuity is $9\times$ larger on the most contested CIFAR-10H images, so only Yager's is readable as an amount of ignorance without recalibration. For out-of-distribution detection it is competitive with strong single-pass baselines, while the clamped Dempster variant that scores higher becomes gradient-unstable once the clamp is removed.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30173v1</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <arxiv:DOI>10.1007/978-3-032-41960-6_7</arxiv:DOI>
+      <arxiv:journal_reference>Belief Functions: Theory and Applications (BELIEF 2026), Lecture Notes in Computer Science, vol. 17186, Springer, Cham, 2026, pp. 7</arxiv:journal_reference>
+      <dc:creator>Antonin Sulc</dc:creator>
+    </item>
+    <item>
+      <title>When Stable and Preferred Semantics Agree: A Path-Based Approach</title>
+      <link>https://arxiv.org/abs/2610.30176</link>
+      <description>arXiv:2610.30176v1 Announce Type: new 
+Abstract: We investigate structural conditions under which preferred and stable semantics agree in abstract argumentation frameworks. Our approach is based on suitably chosen sets of paths in the attack graph and binary relations induced by them. We establish a general path-based criterion for semantic agreement and instantiate it with several classes of paths, obtaining sufficient conditions expressed in terms of well-foundedness of the corresponding relations.
+  The resulting conditions strictly generalize two principal structural criteria for preferred and stable agreement in the literature: Dung's limited controversiality condition and the SCC-symmetry condition. In particular, Dung's result is recovered as a special case by taking the relevant path set to be the set of even paths. We further introduce two infinite sequences of path sets, each yielding a family of agreement conditions. For the first sequence, a Collapse Theorem reduces the infinitely many associated well-foundedness conditions to three essentially distinct ones, whereas the second sequence gives rise to genuinely distinct conditions with no analogous collapse. Our results apply to both finite and infinite argumentation frameworks, admit simplified formulations in the finite case, and also yield sufficient conditions for the existence of stable extensions.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30176v1</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>new</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Yan Zhang, Kehan Liu</dc:creator>
+    </item>
+    <item>
+      <title>Lighthouse: On Building a Trustworthy Digital Assistant for Exploring History with Civil Rights Archives</title>
+      <link>https://arxiv.org/abs/2610.30158</link>
+      <description>arXiv:2610.30158v1 Announce Type: cross 
+Abstract: Artificial intelligence (AI), as a decision-support aid, provides new tools for studying history effectively using multimodal data, including text, images, and audio. We present, to our knowledge, the first digital assistant named Lighthouse--commonly called a chatbot--for exploring the Civil Rights period of the United States using data from South Carolina. From an AI perspective, the system's novelty lies in its guiding design principles of (a) focusing on trustworthiness of content and (b) by modeling and reducing potential harm to users from generated answers. It implements these with a neuro-symbolic approach that combines neural learning through a large language model (LLM) with rule-based symbolic solving, balancing risk of answers with generality of coverage. We evaluate Lighthouse with both factual objective questions that admit a single acceptable answer as well as subjective questions. For the latter, a dataset of subjective question-answer pairs (QAs) is created by discovering a "gold standard" by aggregating answers from independent experts. Lighthouse has access to over 18k primary sources from a range of collections and can be easily extended.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30158v1</guid>
+      <category>cs.CL</category>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>John A. Aydin, Angelica Williams, Steven Dindl, Nathan Saunders, Kate Boyd, Vandana Srivastava, Biplav Srivastava</dc:creator>
+    </item>
+    <item>
+      <title>V-JEPA 2 Meets AQA: Phase-Based Scoring and Reference-Based Feedback for Mountain Biking</title>
+      <link>https://arxiv.org/abs/2610.30160</link>
+      <description>arXiv:2610.30160v1 Announce Type: cross 
+Abstract: We study mountain-bike action quality assessment (AQA) with weak labels and candidate feedback. The training corpus comprises 95 field-recorded jump clips with binary labels denoting good or poor technique. These are coarse categorical labels, not continuous expert quality scores; phase-boundary and aspect-level annotations are unavailable. Our pipeline summarizes four heuristic phases using frozen V-JEPA 2 video features and two-dimensional pose and motion measurements. A small transformer predicts a binary-label score. A separate reference layer compares phase-specific measurements with those of clips labelled as good technique to propose phase, body-parameter, and direction cues. We detail the measurements, network, and evaluation so that the limits of each output are explicit. In five-fold clip-level cross-validation, the full scorer obtained pooled out-of-fold AUROC 0.768 and average precision 0.812. These are exploratory figures because the reporting fold also selected the neural training epoch and riders were not separated between folds. Removing biomechanical scoring inputs raised AUROC to 0.809. A separate inner-selection run obtained AUROC 0.678, but used about 57 rather than 76 training clips per outer fold, so its difference from the test-selected run does not quantify selection bias. The unsupervised aspect head did not learn distinct factors. On a 17-clip external probe, an earlier checkpoint obtained binary accuracy 0.412 and Spearman association -0.135 with expert scores. Candidate cues had precision 0.118 and recall 1.0 against each of two coaches, with substantial disagreement about direction. These findings do not establish rider-independent scoring or reliable corrective feedback; they identify the empirical work needed to evaluate either use.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30160v1</guid>
+      <category>cs.CV</category>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by-nc-nd/4.0/</dc:rights>
+      <dc:creator>Santhiya Rajan, Savio Cardoz</dc:creator>
+    </item>
+    <item>
+      <title>TauIndianBankBench: Procedure-Aware, Action-Oriented Evaluation of Tool-Using Conversational Agents</title>
+      <link>https://arxiv.org/abs/2610.30161</link>
+      <description>arXiv:2610.30161v1 Announce Type: cross 
+Abstract: Many Indian banks serve customers through FAQ pages and scripted chatbots. Assistants based on language models could respond faster and carry out requests such as blocking a card, but only if they give correct information and follow the bank's rules. These rules prescribe a procedure, a set of required steps, such as obtaining a closure quote before closing a deposit. Adapting models to this domain requires measuring how well they follow the procedure, before and after training. Benchmarks usually judge only the records left at the end of a conversation. Many required steps, however, leave the records unchanged, so an assistant that skips them can still be judged successful. We present TauIndianBankBench, an action-oriented benchmark of 1,000 Indian retail-banking tasks where an assistant helps a simulated customer. Besides the final records, it checks that the assistant took every required step and made no unrequested change. For every model, 6.5-12.0% of sessions are judged successful when only the final records are checked, although the assistant skipped a required step or made an unrequested change. Scoring both procedure and outcome shows more accurately how well language models perform in Indian retail banking.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30161v1</guid>
+      <category>cs.CL</category>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by-nc-nd/4.0/</dc:rights>
+      <dc:creator>Krishanu Adhikary, Prashant Devadiga</dc:creator>
+    </item>
+    <item>
+      <title>FusionEval: Benchmarking Model Fusion for Large Language Models</title>
+      <link>https://arxiv.org/abs/2610.30162</link>
+      <description>arXiv:2610.30162v1 Announce Type: cross 
+Abstract: Model fusion aims to integrate the capabilities of multi-expert models into a single model. Existing evaluations offer limited coverage of reasoning with long chains of thought and tool use, while strong average performance can mask substantial losses in individual expert capabilities. We introduce FusionEval, a benchmark that provides controlled expert pools, integrates fusion methods with and without additional training, and offers a unified evaluation suite. The pools contain domain experts independently trained from Qwen3 and Llama base models across math, code, science, instruction following, and tool use. The suite evaluates capability retention and computational cost on eight public benchmarks under comparable data access rules, reporting normalized average and worst performance, runtime, and peak GPU memory usage. Extensive experiments show that training-free methods preserve reasoning performance but substantially degrade tool use at both model scales. In contrast, MOPD preserves tool use and achieves a more balanced capability profile, but requires additional data preparation, inference, and training. Jointly retaining reasoning, instruction following, and tool use at low computational cost remains a challenge. We hope FusionEval supports future research on efficient model fusion that jointly preserves expert capabilities. Our code is available at https://github.com/Baicaihaochi/FusionEval_Benchmark.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30162v1</guid>
+      <category>cs.CL</category>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Shuo Cai, Yanggan Gu, Yuhang Liu, Su Lu, Yuanyi Wang, Yang Yu, Zhen Li, Zhitian Hou, Guanghao Zhu, Ming Li, Hongxia Yang</dc:creator>
+    </item>
+    <item>
+      <title>IRAH: Hierarchical Agentic Tree Search for Retrieval Pipeline Optimization</title>
+      <link>https://arxiv.org/abs/2610.30167</link>
+      <description>arXiv:2610.30167v1 Announce Type: cross 
+Abstract: Optimizing Information Retrieval (IR) pipelines for Retrieval-Augmented Generation (RAG) requires jointly selecting structural components and numerical hyperparameters under limited evaluation budgets. We introduce the Information Retrieval Agentic Harness (IRAH), which combines Language Agent Tree Search for IR (LATS-IR) with offline meta-learned initialization. LATS-IR performs UCT-guided hierarchical search, first exploring macro-structural pipeline choices and then refining numerical parameters, with natural-language reflections to guide subsequent mutations and provide inspectable search traces. We evaluate IRAH on three in-distribution benchmarks and one out of-distribution benchmark to assess generalization under distribution shift. Under the same meta-learned initialization, LATS-IR outperforms TPE on two of three in-distribution benchmarks, with gains of up to 6.4%, and remains competitive on the out-of-distribution benchmark. Across all four benchmarks, warm-started IRAH achieves the highest average held-out nDCG@10 (0.4816) and improves over its cold-start counterpart. These results establish IRAH as a competitive approach to retrieval pipeline optimization under constrained evaluation budgets.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2610.30167v1</guid>
+      <category>cs.IR</category>
+      <category>cs.AI</category>
+      <category>cs.LG</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Maria Ana Cardei, Aniket Singh, Amir Moghadam, Srividhya Baikadi, Rashmi Shetty</dc:creator>
+    </item>
+    <item>
+      <title>Anchoring Distributed Agency: Institutional Metaphors for Designing Large-Scale AI and AI Techniques for Running Institutions</title>
+      <link>https://arxiv.org/abs/1803.03407</link>
+      <description>arXiv:1803.03407v3 Announce Type: replace 
+Abstract: Artificial Intelligence (AI) started out with the ambition to reproduce the human mind, but as soon as the sheer scale of that ambition became apparent, it retreated into either studying specialized intelligent behaviours or proposing overarching architectural concepts for interfacing specialized intelligent components---conceived of as agents acting through organizational structures. The agent-based modelling paradigm proved to have interesting applications beyond the original domain, supporting the understanding, simulation, and the assessment of behaviour of socio-economic and legal structures on an aggregate level. Looking at contemporary AI, whereas text completion provides a successful example of specialized behaviour, surprisingly little of the rich foundation of multi-agent systems (MAS) and normative systems research is currently reflected in Agentic AI systems. Addressing this gap, the chapter examines cross-cutting conceptualisations, modelling problems, and design challenges shared by large-scale distributed AI and institutional systems. Three main contributions can be highlighted. First, by tracing the historical trajectory of AI, the chapter identifies an \textit{ecological} perspective on intelligence, examining both the value and limits of the \textit{compression-as-intelligence} hypothesis. Second, it shows how moving between internal cognitive mechanisms and external manifestations of agency supports a functional separation of concerns for both individual and collective agency. Third, it argues that \textit{epistemological}, \textit{normative}, and \textit{value pluralisms} are necessary conditions for sustaining the ecological character of intelligence. Furthermore, we indicate how AI techniques can support institutions by modelling social roles, simulating normative interactions, detecting and diagnosing failures, and supporting procedures of review and revision.</description>
+      <guid isPermaLink="false">oai:arXiv.org:1803.03407v3</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Alexander Boer, Giovanni Sileno</dc:creator>
+    </item>
+    <item>
+      <title>Risk-Aware Alignment Must Incorporate Reward Uncertainty</title>
+      <link>https://arxiv.org/abs/2410.23726</link>
+      <description>arXiv:2410.23726v2 Announce Type: replace 
+Abstract: We consider the problem of policy optimization with noisy rewards, where the policy is constrained to be in the neighborhood of a reference policy.We study the risk of the policy optimization process, defined to be the chance of obtaining a policy worse off than the reference policy. In an idealized multivariate Gaussian model for the noisy reward function, we show that the regularizer achieving optimal risk in a suitably local neighborhood of the reference policy is the quadratic norm weighted by the reward covariance matrix. This result is used to develop a new policy optimization algorithm based on regularization via reward variance estimates. Experiments across synthetic bandit models, large language models and reward models show that this algorithm yields more robust alignment outcomes than existing approaches.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2410.23726v2</guid>
+      <category>cs.AI</category>
+      <category>cs.LG</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Debangshu Banerjee, Kintan Saha, Aditya Gopalan</dc:creator>
+    </item>
+    <item>
+      <title>Agent-Environment Alignment via Automated Interface Generation</title>
+      <link>https://arxiv.org/abs/2505.21055</link>
+      <description>arXiv:2505.21055v3 Announce Type: replace 
+Abstract: Large language model (LLM) agents have shown impressive reasoning capabilities in interactive decision-making tasks. These agents interact with environment through intermediate interfaces, such as predefined action spaces and interaction rules, which mediate the perception and action. However, mismatches often happen between the internal expectations of the agent regarding the influence of its issued actions and the actual state transitions in the environment, a phenomenon referred to as agent-environment misalignment. While prior work has invested substantially in improving agent strategies and environment design, the critical role of the interface still remains underexplored. In this work, we empirically demonstrate that agent-environment misalignment poses a significant bottleneck to agent performance. To mitigate this issue, we propose ALIGN, an Auto-Aligned Interface Generation framework that alleviates the misalignment by enriching the interface. Specifically, the ALIGN-generated interface enhances both the static information of the environment and the step-wise observations returned to the agent. Implemented as a lightweight wrapper, this interface achieves the alignment without modifying either the agent logic or the environment code. Experiments across multiple domains including embodied tasks, web navigation and tool-use, show consistent performance improvements, with up to a 45.67% success rate improvement observed in ALFWorld. Meanwhile, ALIGN-generated interface can generalize across different agent architectures and LLM backbones without interface regeneration. Code and experimental results are available at https://github.com/THUNLP-MT/ALIGN.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2505.21055v3</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Kaiming Liu, Xuanyu Lei, Ziyue Wang, Peng Li, Yang Liu</dc:creator>
+    </item>
+    <item>
+      <title>Group Contrastive Policy Optimization: Learning Beyond the Self-Exploration Limit with Golden Answers</title>
+      <link>https://arxiv.org/abs/2510.07790</link>
+      <description>arXiv:2510.07790v2 Announce Type: replace 
+Abstract: Reinforcement learning with verifiable rewards (RLVR) has become a powerful paradigm for improving the reasoning abilities of large language models, yet group-based methods lose their learning signal when every sampled response receives zero reward. We propose Group Contrastive Policy Optimization (GCPO), a hybrid objective that preserves standard on-policy optimization for informative rollout groups and activates a proximal contrastive objective only when exploration completely fails. The auxiliary objective pairs an offline golden reasoning trajectory with the current policy's failed responses, thereby providing a reliable positive reference and prompt-specific hard negatives without treating the golden trajectory as an on-policy rollout. Its old-policy token probabilities are evaluated through teacher forcing and used solely to constrain the update, rather than as an importance-sampling correction for the teacher distribution. A first-order analysis shows that the resulting update increases a length-normalized likelihood margin between reliable reasoning and observed failures. Experiments across two model scales and 10 core mathematical reasoning benchmarks demonstrate that GCPO improves training efficiency and final reasoning performance over competitive supervised and RLVR baselines.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2510.07790v2</guid>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <dc:creator>Hao Wu, Wei Liu, Shizhe Xiang, Jinwen Luo,  Yeshani, Jin Ma</dc:creator>
+    </item>
+    <item>
+      <title>How to Teach Large Multimodal Models New Skills</title>
+      <link>https://arxiv.org/abs/2510.08564</link>
+      <description>arXiv:2510.08564v3 Announce Type: replace 
+Abstract: How can we teach large multimodal models (LMMs) new skills without erasing prior abilities? We study sequential fine-tuning on five target skills while monitoring general ability on eight held-out benchmarks across three model families. Surprisingly, we find that performance lost on held-out tasks after fine-tuning on one skill can partly recover when the model is subsequently tuned on a different skill. We trace this behavior to a measurable shift in the output token distribution, manifested through a simple counting-bias probe that shows the shift co-varies with forgetting. Guided by this insight, we identify two simple, robust tuning recipes that learn strongly while limiting drift: (i) updating only the self-attention projection layers (SA Proj., $\Delta$ learning +24.9 / $\Delta$ held-out forgetting -0.6), and (ii) updating only the MLP Gate&amp;Up while freezing the Down projection (+30.5 / -2.1). Both substantially outperform full-LLM tuning (+31.8 / -23.3) in the learning-forgetting trade-off. We also compare against common forgetting mitigation methods: Learning without Forgetting (LwF), LoRA, Mixture-of-Experts, and weight-space interpolation (WiSE-FT), and find that our selective tuning recipes match or exceed their learning-stability balance while remaining simpler, requiring no replay, auxiliary parameters, or per-stage tuning. These results hold across LLaVA-OneVision, LLaVA-NeXT, and Qwen2.5-VL, confirming that the key to teaching LMMs new skills without forgetting lies in controlling output distribution shift by choosing which components to tune. Code will be made available.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2510.08564v3</guid>
+      <category>cs.AI</category>
+      <category>cs.CV</category>
+      <category>cs.LG</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Zhen Zhu, Yiming Gong, Yao Xiao, Yaoyao Liu, Derek Hoiem</dc:creator>
+    </item>
+    <item>
+      <title>Evolutionary Deep Nets for Non-Intrusive Load Monitoring</title>
+      <link>https://arxiv.org/abs/2303.03538</link>
+      <description>arXiv:2303.03538v2 Announce Type: replace-cross 
+Abstract: Compact appliance classifiers can support local electricity-load monitoring where memory and computation are constrained. We evaluate adaptive sparse evolutionary training and warm-start compression using synthetic aggregate windows derived from household appliance recordings. A completed convolutional network study trains 120 models over four targets and three seeds with validation-only model selection. Two analyses examine compression with approximately preserved binary accuracy and joint improvement in positive-class F1 and sparsity. Relative to a newly trained fixed sparse evolutionary baseline, the selected compressed policy changes accuracy from 91.53%, while increasing macro F1 to 92.40%. Stored weights decrease by 17.36% and active first-layer connections by 23.93%. Refinement requires additional training. Three seeds and unverified source-window independence prevent claims of statistical equivalence or unseen-house performance.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2303.03538v2</guid>
+      <category>cs.LG</category>
+      <category>cs.AI</category>
+      <category>cs.NE</category>
+      <category>cs.SY</category>
+      <category>eess.SP</category>
+      <category>eess.SY</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace-cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <arxiv:DOI>10.13140/RG.2.2.25983.28324</arxiv:DOI>
+      <dc:creator>Jinsong Wang, Kenneth A. Loparo</dc:creator>
+    </item>
+    <item>
+      <title>Hearing the shape of an arena with spectral swarm robotics</title>
+      <link>https://arxiv.org/abs/2403.17147</link>
+      <description>arXiv:2403.17147v2 Announce Type: replace-cross 
+Abstract: Swarm robotics relies on robots with minimal sensing and computation that achieve self-organization at the level of the collective to address a variety of tasks. Yet swarm robotics still struggles with global tasks that require understanding the broader spatial context in which robots operate, such as identifying the shape of the arena in which they are embedded. Here, we introduce spectral swarm robotics, a framework in which robots recover global spectral descriptors of the swarm's geometric structure through strictly local interactions. To do so, robots emulate diffusion to locally estimate Laplacian spectral invariants, quantities normally obtained only through centralized computation. These spectral values serve as compact descriptors of the environment. In the present proof of concept, robots estimated the second Laplacian eigenvalue and used it to classify arenas from a predefined set of shapes with distinct spectral signatures. We show that estimating a single eigenvalue is sufficient for one-shot classification among selected confined environments with distinct spectral signatures. We uncovered a scaling law linking swarm size (a global parameter) and interaction radius (a local parameter) that ensures robust estimation. We validated the approach experimentally on two distinct hardware platforms, Kilobots and Pogobots, achieving reliable classification of arena shapes under realistic noise and sparse-connectivity conditions. Last, we discuss how locally recovering Laplacian spectral invariants opens avenues for swarm robotics in settings where producing efficient collective behaviors strongly depends on the global structure of the swarm.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2403.17147v2</guid>
+      <category>cs.RO</category>
+      <category>cs.AI</category>
+      <category>cs.CG</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace-cross</arxiv:announce_type>
+      <dc:rights>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</dc:rights>
+      <arxiv:DOI>10.1126/scirobotics.adr9578</arxiv:DOI>
+      <arxiv:journal_reference>Science Robotics 11 (119), eadr9578 (2026)</arxiv:journal_reference>
+      <dc:creator>Leo Cazenille, Nicolas Lobato-Dauzier, Alessia Loi, Loona Macabre, Mika Ito, Olivier Marchal, Soo-Hyeon Kim, Nathanael Aubert-Kato, Nicolas Bredeche, Anthony J. Genot</dc:creator>
+    </item>
+    <item>
+      <title>ACTIVA: Amortized Causal Effect Estimation via Variational Autoencoders</title>
+      <link>https://arxiv.org/abs/2503.01290</link>
+      <description>arXiv:2503.01290v4 Announce Type: replace-cross 
+Abstract: Predicting post-intervention distributions from observational data is central to many scientific and decision-making problems, but remains challenging due to causal ambiguity, restrictive modeling assumptions, and the lack of amortization across tasks. We introduce ACTIVA, a transformer-based conditional variational autoencoder for amortized estimation of full interventional distributions from observational data and intervention queries. ACTIVA learns a conditional latent prior that amortizes causal knowledge across diverse training tasks, so that a new causal model drawn from the training distribution is handled in a single forward pass, without interventional data, a causal graph, or per-task fitting. Beyond the training distribution, only a parametric shift of the simulator is tested. We provide a population-level characterization of ACTIVA's estimand, showing that, under idealized expressivity and infinite samples assumptions, ACTIVA's learning objective targets a simulator-weighted mixture over the interventional distributions of causal models that are observationally compatible with the input. Empirically, on synthetic datasets and biologically realistic gene-expression simulations, ACTIVA substantially outperforms a correlational baseline, reduces spurious non-descendant effects, and achieves competitive performance relative to strong amortized baselines. On a pair of observationally equivalent models sharing a single observational dataset, ACTIVA recovers the predicted mixture, validating the theory in a finite-capacity model. Our results show that ACTIVA is a promising approach for estimating interventional distributions from observational data.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2503.01290v4</guid>
+      <category>cs.LG</category>
+      <category>cs.AI</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace-cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Andreas Sauter, Saber Salehkaleybar, Frank van Harmelen, Aske Plaat, Erman Acar</dc:creator>
+    </item>
+    <item>
+      <title>The Mathematical Theory of Double Descent as Shrinkage, not Overfitting: Matching Bounds for Path-Regularized Multilayer Neural Networks</title>
+      <link>https://arxiv.org/abs/2503.02129</link>
+      <description>arXiv:2503.02129v4 Announce Type: replace-cross 
+Abstract: We give a nonasymptotic generalization theory for multilayer fully connected neural networks trained with path regularization, for general Lipschitz losses and without assuming the loss bounded, the architecture sparse, or any width or depth limit. Approximation error is modelled explicitly, and along the way we settle an open problem of E et al. on approximation rates in generalized Barron spaces. We treat the underparameterized and overparameterized regimes separately, which is what allows the resulting curve to be non-monotone in the width. We then prove lower bounds on the error itself, valid at every target and at every local minimizer, and combine them with the upper bounds into a theorem asserting that the error - not merely our bound on it - descends, rises and descends again as the width grows, with a peak exceeding the final plateau by a factor diverging in the sample size. Having both sides of the bound also identifies what drives the ascent, and it is not overfitting: once the regularization exceeds the dual norm of the noise, which the prescribed schedule does at every width, a slow-rate oracle inequality controls the error with no variance term at all. The rise is instead the shrinkage demanded by the regularization that the underparameterized regime requires, and we show it cannot be removed by any width-independent regularization under which the theory's guarantees hold. This mechanism is a property of the estimator analyzed here; we do not claim it accounts for the double descent reported for unregularized training.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2503.02129v4</guid>
+      <category>cs.LG</category>
+      <category>cs.AI</category>
+      <category>math.ST</category>
+      <category>stat.TH</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace-cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Hao Yu</dc:creator>
+    </item>
+    <item>
+      <title>Does More Compute Make Every Adversarial Attack Transferable?</title>
+      <link>https://arxiv.org/abs/2504.20310</link>
+      <description>arXiv:2504.20310v3 Announce Type: replace-cross 
+Abstract: Transferable attacks, or transferable jailbreaks, are a particularly strong version of adversarial examples that fool all defenders in a class. In this work, we study when more compute enables transferable attacks. We show that, when there is a quadratic gap in computational resources between attacker and defender, every learnable classification task admits either a transferable attack or an adversarial defense. For generative tasks, this dichotomy fails below a quadratic gap, i.e., more compute for the attacker does not lead to a transferable attack.
+  We prove a stronger result that implies this failure: a defense that spends additional computation after it sees the input can be provably strictly stronger than every defense that publishes a fixed model. This result provides formal evidence that increasing inference-time compute can improve robustness, as empirically observed by Zaremba et al. (2025). We assume the existence of an array of cryptographic primitives: identity-based fully homomorphic encryption, publicly verifiable zero-knowledge succinct non-interactive arguments of knowledge, non-parallelizing languages, and incrementally verifiable computation.</description>
+      <guid isPermaLink="false">oai:arXiv.org:2504.20310v3</guid>
+      <category>cs.LG</category>
+      <category>cs.AI</category>
+      <category>cs.CR</category>
+      <pubDate>Fri, 23 Oct 2026 00:00:00 -0400</pubDate>
+      <arxiv:announce_type>replace-cross</arxiv:announce_type>
+      <dc:rights>http://creativecommons.org/licenses/by/4.0/</dc:rights>
+      <dc:creator>Greg Gluch, Shafi Goldwasser, Anastasiia Struss</dc:creator>
+    </item>
+  </channel>
+</rss>

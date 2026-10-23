@@ -13,7 +13,8 @@
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && prettier --check .",
-    "test": "vitest run",
+    "test": "vitest run --project workers && npm run test:tz",
+    "test:tz": "TZ=UTC vitest run --project node && TZ=Asia/Shanghai vitest run --project node",
     "test:ssr": "CLOUDFLARE_ENV=test vite build && node scripts/smoke-ssr.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local"
@@ -22,8 +23,10 @@
     "@tanstack/react-router": "^1.170.46",
     "@tanstack/react-start": "^1.169.4",
     "drizzle-orm": "^0.45.4",
+    "fast-xml-parser": "^5.11.2",
     "jose": "^6.2.13",
     "markdown-it": "^15.0.3",
+    "node-html-parser": "^9.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zod": "^4.6.7"
