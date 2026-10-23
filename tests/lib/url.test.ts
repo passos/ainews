@@ -34,7 +34,6 @@ describe("normalizeUrl", () => {
       "gclid=d",
       "mc_cid=e",
       "mc_eid=f",
-      "ref=g",
       "ref_src=h",
       "_hsenc=i",
       "_hsmi=j",
@@ -45,6 +44,13 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl(`https://x.com/a?id=7&${tracking}`)).toBe(
       "https://x.com/a?id=7",
     );
+  });
+
+  it("keeps ref (some sites use it to tell articles apart), drops ref_src", () => {
+    const a = normalizeUrl("https://x.com/p?ref=a&ref_src=twsrc");
+    const b = normalizeUrl("https://x.com/p?ref=b");
+    expect(a).toBe("https://x.com/p?ref=a");
+    expect(a).not.toBe(b);
   });
 
   it("keeps the root path and a non-default port", () => {

@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { USER_AGENT } from "../../src/lib/http";
+import { normalizeUrl } from "../../src/lib/url";
 import {
   collectSource,
+  feedKey,
   MAX_FEED_BYTES,
 } from "../../src/pipeline/collect/collect";
+import { hookBatch } from "../providers/fakes";
 import { parseFeed } from "../../src/pipeline/collect/rss";
 import arxivXml from "../fixtures/feeds/arxiv-cs-ai.xml?raw";
 import mitXml from "../fixtures/feeds/mit-tr.xml?raw";
@@ -146,7 +149,7 @@ describe("collectSource", () => {
     expect(newOrCross).toBe(10);
     expect(await count("SELECT count(*) AS n FROM articles")).toBe(newOrCross);
     const row = await env.DB.prepare(
-      "SELECT stage, fetched_at, stage_updated_at, published_at, published_raw, has_feed_content, requeue_count FROM articles LIMIT 1",
+      "SELECT stage, fetched_at, stage_updated_at, published_at, published_raw, requeue_count FROM articles LIMIT 1",
     ).first();
     expect(row).toEqual({
       stage: "collected",
@@ -154,35 +157,113 @@ describe("collectSource", () => {
       stage_updated_at: NOW,
       published_at: Date.UTC(2026, 9, 23, 4),
       published_raw: "Fri, 23 Oct 2026 00:00:00 -0400",
-      has_feed_content: 0,
       requeue_count: 0,
     });
     expect(q.sent).toHaveLength(newOrCross);
     expect(q.sent.every((m) => m.kind === "body")).toBe(true);
   });
 
-  it("stores MIT TR: content:encoded to R2 feed/{id}.html, published_at set", async () => {
+  it("stores MIT TR: content:encoded in R2 at feed/{sha256(canonical_url)}.html, published_at set", async () => {
     const id = await seedSource({ industryId: industryA, feedUrl: MIT });
-    const q = fakeQueue();
+    // When a body message is sent, its article's feed content is in R2.
+    const checked: number[] = [];
+    const q = fakeQueue(async (bodies) => {
+      for (const m of bodies) {
+        if (m.kind !== "body") continue;
+        const row = await env.DB.prepare(
+          "SELECT canonical_url FROM articles WHERE id = ?1",
+        )
+          .bind(m.articleId)
+          .first<{ canonical_url: string }>();
+        expect(
+          await env.BODIES.head(await feedKey(row!.canonical_url)),
+        ).not.toBeNull();
+        checked.push(m.articleId);
+      }
+    });
     await collectSource(pipelineEnv(q, ON), id, NOW, fakeFetch(xml(mitXml)));
     const { results } = await env.DB.prepare(
-      "SELECT id, url, published_at, has_feed_content FROM articles ORDER BY id",
+      "SELECT id, url, canonical_url, published_at FROM articles ORDER BY id",
     ).all<{
       id: number;
       url: string;
+      canonical_url: string;
       published_at: number;
-      has_feed_content: number;
     }>();
     expect(results).toHaveLength(10);
+    expect(checked).toHaveLength(10);
     const items = parseFeed(mitXml, MIT);
     for (const r of results) {
       expect(r.published_at).toBeGreaterThan(Date.UTC(2026, 0, 1));
-      expect(r.has_feed_content).toBe(1);
-      const obj = await env.BODIES.get(`feed/${r.id}.html`);
+      const key = await feedKey(r.canonical_url);
+      expect(key).toMatch(/^feed\/[0-9a-f]{64}\.html$/);
+      const obj = await env.BODIES.get(key);
       expect(await obj?.text()).toBe(
         items.find((i) => i.url === r.url)?.contentHtml,
       );
     }
+  });
+
+  it("writes feed content to R2 before the rows: a failed insert loses no content", async () => {
+    const id = await seedSource({ industryId: industryA, feedUrl: MIT });
+    const db = hookBatch(async () => {
+      throw new Error("D1 down");
+    });
+    const result = await collectSource(
+      { ...pipelineEnv(fakeQueue(), ON), DB: db },
+      id,
+      NOW,
+      fakeFetch(xml(mitXml)),
+    );
+    expect(result).toEqual({ status: "failed", error: "D1 down" });
+    expect(await count("SELECT count(*) AS n FROM articles")).toBe(0);
+    for (const item of parseFeed(mitXml, MIT)) {
+      const obj = await env.BODIES.get(await feedKey(normalizeUrl(item.url)!));
+      expect(await obj?.text()).toBe(item.contentHtml);
+    }
+  });
+
+  it("drops an Atom entry by <category term>", async () => {
+    const feedUrl = "https://atom.example/feed";
+    const id = await seedSource({
+      industryId: industryA,
+      feedUrl,
+      config: { exclude: [{ field: "category", values: ["sponsored"] }] },
+    });
+    const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><title>Ad</title><link href="https://atom.example/ad"/><category term="sponsored"/></entry>
+      <entry><title>News</title><link href="https://atom.example/news"/><category term="ai"/></entry>
+    </feed>`;
+    expect(parseFeed(atom, feedUrl)[0].fields.category).toEqual(["sponsored"]);
+    const result = await collectSource(
+      pipelineEnv(fakeQueue(), ON),
+      id,
+      NOW,
+      fakeFetch(xml(atom)),
+    );
+    expect(result).toMatchObject({ status: "ok", items: 2, excluded: 1 });
+    const { results } = await env.DB.prepare("SELECT url FROM articles").all<{
+      url: string;
+    }>();
+    expect(results.map((r) => r.url)).toEqual(["https://atom.example/news"]);
+  });
+
+  it("stores at most 4,000 characters of summary", async () => {
+    const id = await seedSource({ industryId: industryA, feedUrl: ARXIV });
+    const rss = `<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Long</title><link>https://long.example/a</link>
+      <description>${"word ".repeat(1200)}</description></item>
+    </channel></rss>`;
+    await collectSource(
+      pipelineEnv(fakeQueue(), ON),
+      id,
+      NOW,
+      fakeFetch(xml(rss)),
+    );
+    const row = await env.DB.prepare(
+      "SELECT length(summary) AS n FROM articles",
+    ).first<{ n: number }>();
+    expect(row?.n).toBe(4000);
   });
 
   it("stores an article seen by two sources once, in the first source's industry", async () => {

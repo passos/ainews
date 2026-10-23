@@ -34,7 +34,9 @@ const ZONE_NAMES: Record<string, string> = {
   pdt: "-07:00",
 };
 
-const ZONE = String.raw`(Z|[+-]\d{2}:?\d{2}|GMT|UTC|UT|[ECMP][SD]T)`;
+// Any 2-5 letter name is taken; zoneOffset() ignores the ones it does not
+// know (BST, CEST, JST are ambiguous or not RFC 822).
+const ZONE = String.raw`(Z|(?:GMT|UTC)?[+-]\d{2}:?\d{2}|[a-z]{2,5})`;
 const TIME = String.raw`(\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?`;
 
 // 2026-10-22, 2026-10-22T10:00:00.5+08:00, 2026-10-22 10:00 GMT
@@ -113,10 +115,13 @@ function split(raw: string): Fields | null {
   return null;
 }
 
-function zoneOffset(zone: string): string {
+/** "+hh:mm" for a zone, or null for a name it does not know. */
+function zoneOffset(zone: string): string | null {
   const named = ZONE_NAMES[zone.toLowerCase()];
   if (named) return named;
-  return zone.includes(":") ? zone : `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  // "-0400", "+08:00", "GMT+08:00", "UTC-0500"
+  const m = /^(?:GMT|UTC)?([+-]\d{2}):?(\d{2})$/i.exec(zone);
+  return m ? `${m[1]}:${m[2]}` : null;
 }
 
 const pad = (s: string | undefined) => (s ?? "0").padStart(2, "0");
@@ -131,11 +136,13 @@ export function parseFeedDate(
   raw: string | null | undefined,
   utcOffset: string,
 ): Date | null {
-  const text = raw?.trim();
+  // A trailing comment such as "(EDT)" is dropped first (RFC 2822 allows it).
+  const text = raw?.replace(/\s*\([^()]*\)\s*$/, "").trim();
   if (!text) return null;
   const f = split(text);
   if (!f || f.month < 1 || f.month > 12) return null;
-  const offset = f.zone ? zoneOffset(f.zone) : utcOffset;
+  // An unknown zone name is ignored: the source's offset is used instead.
+  const offset = (f.zone && zoneOffset(f.zone)) || utcOffset;
   if (!OFFSET.test(offset)) return null;
   const iso =
     `${f.year}-${pad(String(f.month))}-${pad(f.day)}` +

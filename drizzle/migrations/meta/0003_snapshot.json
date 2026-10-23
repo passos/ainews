@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6fd7ec8b-1041-426d-b678-7ddbc3689734",
+  "id": "8088859f-6288-410d-bc34-430a44282866",
   "prevId": "22de34d1-36ab-49e0-bfcd-73dac777ec70",
   "tables": {
     "analyses": {
@@ -269,14 +269,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "has_feed_content": {
-          "name": "has_feed_content",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         },
         "requeue_count": {
           "name": "requeue_count",
@@ -1161,6 +1153,14 @@
         },
         "fail_count": {
           "name": "fail_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "empty_fetches": {
+          "name": "empty_fetches",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

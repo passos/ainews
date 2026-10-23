@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 // The Worker entry points: queue() and scheduled() in src/server.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IngestMessage } from "../../src/pipeline/messages";
@@ -120,7 +121,22 @@ describe("COLLECT_ENABLED not set", () => {
     const q = fakeQueue();
     const e = pipelineEnv(q);
     expect(e.COLLECT_ENABLED).toBeUndefined();
+    // A source that one more empty fetch would pause: the cron leaves every
+    // source row as it is.
+    await seedSource({
+      industryId: industry,
+      feedUrl: "https://stale.example/feed",
+      createdAt: NOW - 400 * DAY,
+      lastOkAt: NOW - 31 * DAY,
+      emptyFetches: 10_000,
+    });
+    const before = await env.DB.prepare(
+      "SELECT * FROM sources ORDER BY id",
+    ).all();
     await runScheduled(controller(NOW), e, ctx);
+    expect(
+      (await env.DB.prepare("SELECT * FROM sources ORDER BY id").all()).results,
+    ).toEqual(before.results);
     const f = fakeFetch(() => new Response(arxivXml));
     const msg = batch("ainews-ingest", [{ kind: "collect", sourceId: source }]);
     await runQueue(msg.batch, e, ctx, f);
@@ -140,14 +156,7 @@ describe("COLLECT_ENABLED not set", () => {
 });
 
 describe("runScheduled", () => {
-  it("claims due sources, pauses stale ones and requeues stuck rows", async () => {
-    const stale = await seedSource({
-      industryId: industry,
-      feedUrl: "https://stale.example/feed",
-      createdAt: NOW - 31 * DAY,
-      lastOkAt: NOW - DAY,
-      nextFetchAt: NOW + 1,
-    });
+  it("claims due sources and requeues stuck rows", async () => {
     const stuck = await seedArticle({
       sourceId: source,
       industryId: industry,
@@ -160,6 +169,5 @@ describe("runScheduled", () => {
       { kind: "collect", sourceId: source },
       { kind: "body", articleId: stuck },
     ]);
-    expect((await sourceRow(stale))?.paused_reason).toBe("stale");
   });
 });

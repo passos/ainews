@@ -81,6 +81,32 @@ describe("parseFeedDate", () => {
     expect(iso("22 Oct 26 10:00 +0000")).toBe("2026-10-22T10:00:00.000Z");
   });
 
+  it("drops a trailing comment such as (EDT)", () => {
+    expect(iso("Thu, 22 Oct 2026 00:00:00 -0400 (EDT)", "+08:00")).toBe(
+      "2026-10-22T04:00:00.000Z",
+    );
+  });
+
+  it("ignores an unknown zone name and uses the source offset", () => {
+    for (const zone of ["BST", "CEST", "JST"]) {
+      expect(iso(`Thu, 22 Oct 2026 10:00:00 ${zone}`, "+08:00")).toBe(
+        "2026-10-22T02:00:00.000Z",
+      );
+    }
+    expect(iso("2026-10-22 10:00 JST", "+09:00")).toBe(
+      "2026-10-22T01:00:00.000Z",
+    );
+  });
+
+  it("reads GMT+08:00 / UTC-0500 as that offset, not the source offset", () => {
+    expect(iso("Thu, 22 Oct 2026 10:00:00 GMT+08:00", "-05:00")).toBe(
+      "2026-10-22T02:00:00.000Z",
+    );
+    expect(iso("2026-10-22 10:00 UTC-0500", "+08:00")).toBe(
+      "2026-10-22T15:00:00.000Z",
+    );
+  });
+
   it("returns null for what it cannot read", () => {
     expect(parseFeedDate(null, "+00:00")).toBeNull();
     expect(parseFeedDate("", "+00:00")).toBeNull();

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { countSightings, pauseStale } from "../../src/pipeline/collect/health";
+import { countSightings } from "../../src/pipeline/collect/health";
 import { scheduleDueSources } from "../../src/pipeline/collect/schedule";
 import {
   DAY,
@@ -79,71 +79,7 @@ describe("scheduleDueSources", () => {
   });
 });
 
-describe("pauseStale", () => {
-  const old = NOW - 31 * DAY;
-  const recentOk = NOW - DAY;
-
-  it("pauses only a source that is old, fetched recently, and saw nothing new for 30 days", async () => {
-    const stale = await src(1, { createdAt: old, lastOkAt: recentOk });
-    const young = await src(2, {
-      createdAt: NOW - 29 * DAY,
-      lastOkAt: recentOk,
-    });
-    const neverFetched = await src(3, { createdAt: old, lastOkAt: null });
-    const notFetchedLately = await src(4, {
-      createdAt: old,
-      lastOkAt: NOW - 31 * DAY,
-    });
-    const fresh = await src(5, { createdAt: old, lastOkAt: recentOk });
-    const oldSighting = await src(6, { createdAt: old, lastOkAt: recentOk });
-    const paused = await src(7, {
-      createdAt: old,
-      lastOkAt: recentOk,
-      status: "paused",
-    });
-    const a1 = await seedArticle({
-      sourceId: fresh,
-      industryId: industry,
-      url: "https://a/1",
-      stageUpdatedAt: 0,
-    });
-    const a2 = await seedArticle({
-      sourceId: oldSighting,
-      industryId: industry,
-      url: "https://a/2",
-      stageUpdatedAt: 0,
-    });
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO article_sightings VALUES (?1, ?2, ?3)").bind(
-        a1,
-        fresh,
-        NOW - 29 * DAY,
-      ),
-      env.DB.prepare("INSERT INTO article_sightings VALUES (?1, ?2, ?3)").bind(
-        a2,
-        oldSighting,
-        NOW - 31 * DAY,
-      ),
-    ]);
-
-    expect((await pauseStale(env, NOW)).sort()).toEqual(
-      [stale, oldSighting].sort(),
-    );
-    for (const id of [stale, oldSighting]) {
-      expect(await sourceRow(id)).toMatchObject({
-        status: "paused",
-        paused_reason: "stale",
-      });
-    }
-    for (const id of [young, neverFetched, notFetchedLately, fresh]) {
-      expect(await sourceRow(id)).toMatchObject({
-        status: "active",
-        paused_reason: null,
-      });
-    }
-    expect((await sourceRow(paused))?.paused_reason).toBeNull();
-  });
-
+describe("countSightings", () => {
   it("counts sightings since a time (the 7-day metric)", async () => {
     const id = await src(1);
     const a1 = await seedArticle({

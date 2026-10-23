@@ -42,8 +42,6 @@ export const articles = sqliteTable(
     fetchRung: integer("fetch_rung"),
     /** sha256 of the current body version in R2. */
     bodySha: text("body_sha"),
-    /** 0 or 1: the feed's content:encoded is in R2 at feed/{id}.html. */
-    hasFeedContent: integer("has_feed_content").notNull().default(0),
     /** Times the backfill cron sent this row again (architecture §5). */
     requeueCount: integer("requeue_count").notNull().default(0),
   },

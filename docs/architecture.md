@@ -28,7 +28,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 | 名字 | 类型 | 用途 |
 |---|---|---|
 | `DB` | D1 `ainews` | 全部业务数据，Drizzle 访问 |
-| `BODIES` | R2 `ainews-bodies` | 正文，按版本存，不覆盖 |
+| `BODIES` | R2 `ainews-bodies` | 正文，按版本存，不覆盖；`feed/` 原始输入除外 |
 | `Q_INGEST` | Queue | 采集 → 正文 → 分析，可并发 |
 | `Q_GROUP` | Queue，`max_concurrency = 1` | 归组，批内顺序处理 |
 | `Q_GENERATE` | Queue | 事件产物、报告、watch、Ask、发现 |
@@ -134,7 +134,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
                     Q_GENERATE : artifacts · claims · watch · digest · ask · discover
 ```
 
-- 每篇文章在 `articles.stage` 记录阶段（`collected → body_ready → analyzed → grouped`，没入选的停在 `dropped`）和 `stage_updated_at`。消息只带 `kind` 和 id；消费者按 `kind` 分发，从库里读状态，重复投递时直接跳过已完成的阶段。
+- 每篇文章在 `articles.stage` 记录阶段（`collected → body_ready → analyzed → grouped`，没入选的停在 `dropped`）和 `stage_updated_at`。任何写 `stage` 的语句同时写 `stage_updated_at = now`、`requeue_count = 0`。消息只带 `kind` 和 id；消费者按 `kind` 分发，从库里读状态，重复投递时直接跳过已完成的阶段。
 - cron 每 10 分钟扫一次卡住的行（阶段超过 30 分钟没变），重新入队：`collected`、`body_ready` 回 `Q_INGEST`，`analyzed` 进 `Q_GROUP`。`dropped` 和 `grouped` 是终态。
 - 入选文章由 #11 发进 `Q_GROUP`。DLQ 里的消息在后台查看和重放（见第 1 节 `Q_DLQ`）。
 - 每个消费者按最坏情况的批次定 `max_batch_size`：一次调用共享 15 分钟墙钟时间和 CPU 上限。
@@ -147,7 +147,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：事件里"已批准文章的集合"变化时，`events.revision + 1`：已批准的文章并入事件，或事件里的文章被批准、被拒绝、被下线。所有板块上线时都是审核模式，大多数文章是先归组、后批准的，所以批准和拒绝的同一个 `batch()` 里也要加 revision（#11 提供语句，#9 调用）。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
-- **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{article_id}.html`（#5 写），它是正文抓取第 0 档的原始输入，不是正文版本。
+- **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{sha256hex(canonical_url)}.html`（#5 写，在插入 `articles` 之前写，每次抓取覆盖写），它是正文抓取第 0 档的原始输入，不是正文版本；#6 按 `canonical_url` 算出键去读，有就用。
 
 ## 7. 发布与审核
 

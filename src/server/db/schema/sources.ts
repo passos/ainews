@@ -35,6 +35,11 @@ export const sources = sqliteTable(
     lastModified: text("last_modified"),
     /** Consecutive failed fetches. */
     failCount: integer("fail_count").notNull().default(0),
+    /**
+     * Consecutive successful fetches that found nothing new for this source.
+     * empty_fetches * interval_minutes >= 30 days pauses it as 'stale'.
+     */
+    emptyFetches: integer("empty_fetches").notNull().default(0),
     /** Epoch milliseconds. */
     lastOkAt: integer("last_ok_at"),
     /** Epoch milliseconds. */

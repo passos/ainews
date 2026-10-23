@@ -73,7 +73,7 @@ export async function collectSource(
       lastModified: res.headers.get("Last-Modified"),
     };
     if (res.status === 304) {
-      await recordSuccess(env.DB, source.id, now, cache);
+      await recordSuccess(env.DB, source.id, now, cache, 0);
       return { status: "not_modified" };
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -90,8 +90,8 @@ export async function collectSource(
       throw new Error("html source has no list config");
     }
     const kept = items.filter((i) => !isExcluded(i.fields, config.exclude));
-    const inserted = await storeItems(env, source, kept, now);
-    await recordSuccess(env.DB, source.id, now, cache);
+    const { inserted, sightings } = await storeItems(env, source, kept, now);
+    await recordSuccess(env.DB, source.id, now, cache, sightings);
     const result = {
       status: "ok" as const,
       items: items.length,
@@ -136,25 +136,43 @@ const INSERT_ARTICLES = `INSERT INTO articles (source_id, industry_id, canonical
     'collected', ?4
   FROM json_each(?1) AS j WHERE true
   ON CONFLICT (canonical_url) DO NOTHING
-  RETURNING id, canonical_url`;
+  RETURNING id`;
 
 const INSERT_SIGHTINGS = `INSERT INTO article_sightings (article_id, source_id, seen_at)
   SELECT a.id, ?2, ?3 FROM json_each(?1) AS j
     JOIN articles AS a ON a.canonical_url = j.value ->> '$.canonical'
   WHERE true
-  ON CONFLICT (article_id, source_id) DO NOTHING`;
+  ON CONFLICT (article_id, source_id) DO NOTHING
+  RETURNING article_id`;
 
 /**
- * Order: rows (stage 'collected') -> R2 feed/{id}.html -> `body` messages.
- * A crash in between leaves rows in 'collected'; the backfill cron sends
- * them later. Returns the new article ids.
+ * R2 key of the feed's content:encoded for an article: #6 (fetch rung 0)
+ * computes it from canonical_url. Overwritten on every fetch.
+ */
+export async function feedKey(canonicalUrl: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalUrl),
+  );
+  const hex = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `feed/${hex}.html`;
+}
+
+/**
+ * Order: R2 feed/{sha256(canonical_url)}.html -> rows (stage 'collected')
+ * -> `body` messages. R2 comes first, so a stored row always has its feed
+ * content; a crash after the insert leaves rows in 'collected' and the
+ * backfill cron sends them later. Returns the new article ids and the
+ * number of articles this source saw for the first time.
  */
 async function storeItems(
   env: PipelineEnv,
   source: SourceRow,
   items: FeedItem[],
   now: number,
-): Promise<number[]> {
+): Promise<{ inserted: number[]; sightings: number }> {
   const rows: Row[] = [];
   const content = new Map<string, string>();
   for (const item of items) {
@@ -174,13 +192,17 @@ async function storeItems(
     }
   }
 
-  const inserted: { id: number; canonical_url: string }[] = [];
+  for (const [canonical, html] of content) {
+    await env.BODIES.put(await feedKey(canonical), html, {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+    });
+  }
+
+  const inserted: number[] = [];
+  let sightings = 0;
   for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
     const chunk = JSON.stringify(rows.slice(i, i + INSERT_CHUNK));
-    const [articles] = await env.DB.batch<{
-      id: number;
-      canonical_url: string;
-    }>([
+    const [articles, seen] = await env.DB.batch<{ id: number }>([
       env.DB.prepare(INSERT_ARTICLES).bind(
         chunk,
         source.id,
@@ -189,30 +211,13 @@ async function storeItems(
       ),
       env.DB.prepare(INSERT_SIGHTINGS).bind(chunk, source.id, now),
     ]);
-    inserted.push(...articles.results);
+    inserted.push(...articles.results.map((r) => r.id));
+    sightings += seen.results.length;
   }
 
-  const withContent: number[] = [];
-  for (const { id, canonical_url } of inserted) {
-    const html = content.get(canonical_url);
-    if (html === undefined) continue;
-    await env.BODIES.put(`feed/${id}.html`, html, {
-      httpMetadata: { contentType: "text/html; charset=utf-8" },
-    });
-    withContent.push(id);
-  }
-  if (withContent.length > 0) {
-    await env.DB.prepare(
-      "UPDATE articles SET has_feed_content = 1 WHERE id IN (SELECT value FROM json_each(?1))",
-    )
-      .bind(JSON.stringify(withContent))
-      .run();
-  }
-
-  const ids = inserted.map((r) => r.id);
   await sendIngest(
     env,
-    ids.map((articleId) => ({ kind: "body", articleId })),
+    inserted.map((articleId) => ({ kind: "body", articleId })),
   );
-  return ids;
+  return { inserted, sightings };
 }

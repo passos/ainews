@@ -15,7 +15,10 @@ export interface FakeQueue {
   batches: number;
 }
 
-export function fakeQueue(): FakeQueue {
+/** `onBatch` runs before each sendBatch is recorded, e.g. to check R2. */
+export function fakeQueue(
+  onBatch?: (bodies: IngestMessage[]) => Promise<void>,
+): FakeQueue {
   const fake: FakeQueue = { sent: [], batches: 0, queue: undefined as never };
   fake.queue = {
     async send(body: IngestMessage) {
@@ -23,7 +26,9 @@ export function fakeQueue(): FakeQueue {
     },
     async sendBatch(messages: Iterable<MessageSendRequest<IngestMessage>>) {
       fake.batches += 1;
-      for (const m of messages) fake.sent.push(m.body);
+      const bodies = [...messages].map((m) => m.body);
+      await onBatch?.(bodies);
+      fake.sent.push(...bodies);
     },
   } as unknown as Queue;
   return fake;
@@ -41,6 +46,8 @@ export const ON = { COLLECT_ENABLED: "true" };
 
 /** Storage is shared by the tests of a file: start each test empty. */
 export async function resetPipeline(): Promise<void> {
+  const { objects } = await env.BODIES.list({ prefix: "feed/" });
+  if (objects.length > 0) await env.BODIES.delete(objects.map((o) => o.key));
   await env.DB.batch(
     ["article_sightings", "articles", "sources", "industries"].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
@@ -69,13 +76,17 @@ export interface SourceSeed {
   lastOkAt?: number | null;
   failCount?: number;
   etag?: string | null;
+  intervalMinutes?: number;
+  emptyFetches?: number;
 }
 
 export async function seedSource(s: SourceSeed): Promise<number> {
   const row = await env.DB.prepare(
     `INSERT INTO sources (industry_id, feed_url, kind, status, config,
-       utc_offset, next_fetch_at, created_at, last_ok_at, fail_count, etag)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) RETURNING id`,
+       utc_offset, next_fetch_at, created_at, last_ok_at, fail_count, etag,
+       interval_minutes, empty_fetches)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+     RETURNING id`,
   )
     .bind(
       s.industryId,
@@ -89,6 +100,8 @@ export async function seedSource(s: SourceSeed): Promise<number> {
       s.lastOkAt ?? null,
       s.failCount ?? 0,
       s.etag ?? null,
+      s.intervalMinutes ?? 60,
+      s.emptyFetches ?? 0,
     )
     .first<{ id: number }>();
   return row!.id;
@@ -97,7 +110,8 @@ export async function seedSource(s: SourceSeed): Promise<number> {
 export async function sourceRow(id: number) {
   return env.DB.prepare(
     `SELECT status, paused_reason, fail_count, last_ok_at, last_failed_at,
-       last_error, etag, last_modified, next_fetch_at FROM sources WHERE id = ?1`,
+       last_error, etag, last_modified, next_fetch_at, empty_fetches
+     FROM sources WHERE id = ?1`,
   )
     .bind(id)
     .first<{
@@ -110,6 +124,7 @@ export async function sourceRow(id: number) {
       etag: string | null;
       last_modified: string | null;
       next_fetch_at: number;
+      empty_fetches: number;
     }>();
 }
 

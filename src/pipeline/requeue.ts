@@ -1,6 +1,9 @@
 // Backfill (architecture §5): rows whose stage has not changed for 30
 // minutes are sent again. dropped and grouped are final; analyzed -> group
 // goes to Q_GROUP and is added by #11.
+// Contract (architecture §5): every statement that writes `stage` also sets
+// stage_updated_at = now and requeue_count = 0, so the requeues of one stage
+// do not use up those of the next.
 import { isEnabled, type SafetyFlag } from "../lib/flags";
 import { sendIngest, type IngestMessage, type PipelineEnv } from "./messages";
 

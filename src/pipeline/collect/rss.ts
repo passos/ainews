@@ -79,7 +79,10 @@ function fieldsOf(node: Node): Record<string, string[]> {
   const fields: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith("@_") || key === "#text") continue;
-    fields[key] = list(value).map((v) => text(v).trim());
+    // Atom: <category term="..."/> has no text, only the attribute.
+    fields[key] = list(value).map((v) =>
+      (text(v) || text((v as Node | null)?.["@_term"])).trim(),
+    );
   }
   return fields;
 }
