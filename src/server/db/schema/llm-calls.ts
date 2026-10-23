@@ -12,7 +12,9 @@ export const llmCalls = sqliteTable(
     logicalKey: text("logical_key").notNull().unique(),
     slot: text("slot").notNull(),
     model: text("model").notNull(),
-    channel: text("channel", { enum: ["workers_ai", "gateway"] }).notNull(),
+    channel: text("channel", {
+      enum: ["workers_ai", "gateway", "jina"],
+    }).notNull(),
     status: text("status", {
       enum: ["pending", "in_flight", "completed", "failed", "unknown"],
     }).notNull(),
@@ -43,7 +45,7 @@ export const llmCalls = sqliteTable(
   (t) => [
     check(
       "llm_calls_channel_check",
-      sql`${t.channel} IN ('workers_ai', 'gateway')`,
+      sql`${t.channel} IN ('workers_ai', 'gateway', 'jina')`,
     ),
     check(
       "llm_calls_status_check",

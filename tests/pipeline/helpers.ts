@@ -11,6 +11,8 @@ export const DAY = 24 * 60 * MIN;
 export interface FakeQueue {
   queue: Queue;
   sent: IngestMessage[];
+  /** Options of each send() call, in order (sendBatch is not included). */
+  sendOptions: (QueueSendOptions | undefined)[];
   /** sendBatch calls. */
   batches: number;
 }
@@ -19,10 +21,16 @@ export interface FakeQueue {
 export function fakeQueue(
   onBatch?: (bodies: IngestMessage[]) => Promise<void>,
 ): FakeQueue {
-  const fake: FakeQueue = { sent: [], batches: 0, queue: undefined as never };
+  const fake: FakeQueue = {
+    sent: [],
+    sendOptions: [],
+    batches: 0,
+    queue: undefined as never,
+  };
   fake.queue = {
-    async send(body: IngestMessage) {
+    async send(body: IngestMessage, options?: QueueSendOptions) {
       fake.sent.push(body);
+      fake.sendOptions.push(options);
     },
     async sendBatch(messages: Iterable<MessageSendRequest<IngestMessage>>) {
       fake.batches += 1;
@@ -37,7 +45,13 @@ export function fakeQueue(
 /** The test env with a fake Q_INGEST. Flags are off unless given. */
 export function pipelineEnv(
   q: FakeQueue,
-  flags: { COLLECT_ENABLED?: string; MODEL_CALLS_ENABLED?: string } = {},
+  flags: Pick<
+    PipelineEnv,
+    | "COLLECT_ENABLED"
+    | "MODEL_CALLS_ENABLED"
+    | "THIRD_PARTY_READER_ENABLED"
+    | "JINA_API_KEY"
+  > = {},
 ): PipelineEnv {
   return { DB: env.DB, BODIES: env.BODIES, Q_INGEST: q.queue, ...flags };
 }
@@ -46,12 +60,18 @@ export const ON = { COLLECT_ENABLED: "true" };
 
 /** Storage is shared by the tests of a file: start each test empty. */
 export async function resetPipeline(): Promise<void> {
-  const { objects } = await env.BODIES.list({ prefix: "feed/" });
-  if (objects.length > 0) await env.BODIES.delete(objects.map((o) => o.key));
+  for (const prefix of ["feed/", "bodies/"]) {
+    const { objects } = await env.BODIES.list({ prefix });
+    if (objects.length > 0) await env.BODIES.delete(objects.map((o) => o.key));
+  }
   await env.DB.batch(
-    ["article_sightings", "articles", "sources", "industries"].map((t) =>
-      env.DB.prepare(`DELETE FROM ${t}`),
-    ),
+    [
+      "article_sightings",
+      "articles",
+      "sources",
+      "industries",
+      "fetch_hosts",
+    ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
   );
 }
 
@@ -78,14 +98,20 @@ export interface SourceSeed {
   etag?: string | null;
   intervalMinutes?: number;
   emptyFetches?: number;
+  siteDomain?: string | null;
+  fetchRung?: number | null;
+  rungFailCount?: number;
+  jinaEnabled?: number;
 }
 
 export async function seedSource(s: SourceSeed): Promise<number> {
   const row = await env.DB.prepare(
     `INSERT INTO sources (industry_id, feed_url, kind, status, config,
        utc_offset, next_fetch_at, created_at, last_ok_at, fail_count, etag,
-       interval_minutes, empty_fetches)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+       interval_minutes, empty_fetches, site_domain, fetch_rung,
+       rung_fail_count, jina_enabled)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+       ?16, ?17)
      RETURNING id`,
   )
     .bind(
@@ -102,6 +128,10 @@ export async function seedSource(s: SourceSeed): Promise<number> {
       s.etag ?? null,
       s.intervalMinutes ?? 60,
       s.emptyFetches ?? 0,
+      s.siteDomain ?? null,
+      s.fetchRung ?? null,
+      s.rungFailCount ?? 0,
+      s.jinaEnabled ?? 0,
     )
     .first<{ id: number }>();
   return row!.id;
@@ -142,13 +172,15 @@ export interface ArticleSeed {
   stage?: string;
   stageUpdatedAt: number;
   requeueCount?: number;
+  title?: string;
+  summary?: string | null;
 }
 
 export async function seedArticle(a: ArticleSeed): Promise<number> {
   const row = await env.DB.prepare(
     `INSERT INTO articles (source_id, industry_id, canonical_url, url, title,
-       fetched_at, stage, stage_updated_at, requeue_count)
-     VALUES (?1, ?2, ?3, ?3, 't', 0, ?4, ?5, ?6) RETURNING id`,
+       fetched_at, stage, stage_updated_at, requeue_count, summary)
+     VALUES (?1, ?2, ?3, ?3, ?7, 0, ?4, ?5, ?6, ?8) RETURNING id`,
   )
     .bind(
       a.sourceId,
@@ -157,6 +189,8 @@ export async function seedArticle(a: ArticleSeed): Promise<number> {
       a.stage ?? "collected",
       a.stageUpdatedAt,
       a.requeueCount ?? 0,
+      a.title ?? "t",
+      a.summary ?? null,
     )
     .first<{ id: number }>();
   return row!.id;

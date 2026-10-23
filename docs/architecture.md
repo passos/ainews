@@ -166,12 +166,16 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | 1+2 | 一次 `fetch`，`Accept: text/markdown, text/html;q=0.9`：返回 markdown 就直接用（第 1 档）；返回 HTML 或 PDF 就交给 `env.AI.toMarkdown()`（第 2 档，支持 PDF，**已验证**） |
 | 3 | Jina Reader：全局开关 `THIRD_PARTY_READER_ENABLED`，并且信源单独打开时才用 |
 
+Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
+
 第 1 档只对在 Cloudflare 上开了 Markdown for Agents 的站点有效。arXiv 和 MIT Technology Review 都返回 HTML（**已验证**，细化 #6 时实测），所以 1、2 档合成一次请求，不多发一次。arXiv 的 robots.txt 要求 `Crawl-delay: 15`。
 
 - 需要浏览器渲染才能抓到的信源不收（使用者决定）。信源发现阶段就把它们过滤掉。
 - 每个信源探测一次后记下 `fetch_rung`，连续失败 3 次重新探测；每篇文章记下实际用的档。
 - 抓之前先查 robots.txt，禁止就不抓。单篇正文上限 2 MB；EDGAR 不走抓取梯（见 #22）。
 - 只在已批准的信源和每个板块的一手来源白名单内抓取（N§6）。
+- 重定向手动跟随，最多 5 跳；每一跳都查协议、白名单、robots.txt。一次抓取内同主机的跳转共用 hop 0 的抓取间隔；跨主机跳转各自抢时段，抢不到就推迟，带剩余等待时间重发消息，重发后从文章 URL 重新开始；被拦下的重定向不再走第 3 档。
+- robots.txt 请求失败（网络错误、5xx、429、越出白名单的重定向）时保留旧缓存，1 小时后再请求；没有旧缓存时按全部禁止处理，也是 1 小时后再请求。
 
 ## 9. 数据模型（核心表，列在实现时定）
 
@@ -196,6 +200,10 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | `llm_calls` / `budgets` / `settings` | 见第 6 节 |
 
 **已知限制**：`canonical_url` 在所有板块之间唯一，一篇文章只属于最先采到它的信源所在的板块，只按那个板块的配置分析。同一篇文章同时出现在两个板块的信源里时，第二个板块看不到它。以后如果需要，再把分析结果改成按 `(article_id, industry_id)` 存。
+
+### 迁移
+
+从 `COLLECT_ENABLED` 第一次打开起，`articles` 和所有被外键引用的表不再用"重建表"的迁移；加列用 `ALTER TABLE ADD COLUMN`；需要改 CHECK 的，另开 issue 先设计。
 
 ## 10. 测试、CI 与合并
 

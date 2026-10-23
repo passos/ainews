@@ -42,6 +42,12 @@ export const articles = sqliteTable(
     fetchRung: integer("fetch_rung"),
     /** sha256 of the current body version in R2. */
     bodySha: text("body_sha"),
+    /** 'full': a fetched body; 'summary': only the feed summary (#6). */
+    bodyKind: text("body_kind", { enum: ["full", "summary"] }),
+    /** 1 if the body was cut at 2 MB. */
+    bodyTruncated: integer("body_truncated").notNull().default(0),
+    /** Epoch milliseconds. */
+    bodyFetchedAt: integer("body_fetched_at"),
     /** Times the backfill cron sent this row again (architecture §5). */
     requeueCount: integer("requeue_count").notNull().default(0),
   },
@@ -51,6 +57,10 @@ export const articles = sqliteTable(
     check(
       "articles_stage_check",
       sql`${t.stage} IN ('collected', 'body_ready', 'analyzed', 'grouped', 'dropped')`,
+    ),
+    check(
+      "articles_body_kind_check",
+      sql`${t.bodyKind} IN ('full', 'summary')`,
     ),
   ],
 );

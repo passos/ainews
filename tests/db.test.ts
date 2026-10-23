@@ -54,6 +54,7 @@ it("migrations create the core tables", async () => {
     "event_articles",
     "event_artifacts",
     "events",
+    "fetch_hosts",
     "industries",
     "llm_calls",
     "reviews",

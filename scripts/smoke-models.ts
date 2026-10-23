@@ -34,7 +34,9 @@ import {
 import type { ModelTransport } from "../src/providers/transport.ts";
 
 const RAW_LIMIT = 2_000;
-const SLOTS: Slot[] = ["judge", "embed", "write", "reason"];
+// `read` (Jina Reader) is checked by scripts/smoke-body.ts.
+type SmokeSlot = Exclude<Slot, "read">;
+const SLOTS: SmokeSlot[] = ["judge", "embed", "write", "reason"];
 const CONFIG_PATH = fileURLToPath(
   new URL("../wrangler.jsonc", import.meta.url),
 );
@@ -42,7 +44,7 @@ const CONFIG_PATH = fileURLToPath(
 type Path = "rest" | "binding";
 
 interface Outcome {
-  slot: Slot;
+  slot: SmokeSlot;
   path: Path;
   ok: boolean;
   detail: string;
@@ -90,7 +92,7 @@ const JEV_QUESTIONS = {
   },
 } as const;
 
-function buildInput(slot: Slot, model: string) {
+function buildInput(slot: SmokeSlot, model: string) {
   switch (slot) {
     case "judge":
       return {
@@ -116,7 +118,7 @@ function buildInput(slot: Slot, model: string) {
 }
 
 function parse(
-  slot: Slot,
+  slot: SmokeSlot,
   model: string,
   raw: unknown,
 ): {
@@ -170,7 +172,7 @@ function describeError(error: unknown): string {
 
 async function runOne(
   path: Path,
-  slot: Slot,
+  slot: SmokeSlot,
   transport: ModelTransport,
   rawText: () => string | null,
   extra: () => Record<string, unknown>,

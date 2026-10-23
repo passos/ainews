@@ -48,6 +48,8 @@ export const sources = sqliteTable(
     lastError: text("last_error"),
     /** Fetch ladder rung (0-3), set after the first probe. */
     fetchRung: integer("fetch_rung"),
+    /** Consecutive failures at `fetch_rung`; 3 clears it (re-probe). */
+    rungFailCount: integer("rung_fail_count").notNull().default(0),
     /** 0 or 1. */
     jinaEnabled: integer("jina_enabled").notNull().default(0),
     /** Epoch milliseconds. */
