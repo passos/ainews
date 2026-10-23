@@ -1,15 +1,28 @@
 import { toMarkdown } from "../providers/tomarkdown";
+import { bindingTransport } from "../providers/transport";
+import { analyzeArticle, type AnalyzeDeps } from "./analyze/analyze";
 import { processBody, type BodyDeps } from "./body/body";
 import { collectSource } from "./collect/collect";
 import { INGEST_QUEUE, type IngestMessage, type PipelineEnv } from "./messages";
 
-/** fetch and env.AI.toMarkdown(); tests pass fakes. */
-function defaultDeps(env: PipelineEnv): BodyDeps {
+export type QueueDeps = BodyDeps & AnalyzeDeps;
+
+/** fetch, env.AI.toMarkdown() and env.AI.run() via AI Gateway; tests pass fakes. */
+function defaultDeps(env: PipelineEnv): QueueDeps {
   return {
     fetch: (input, init) => fetch(input, init),
     toMarkdown: (bytes, mime, baseUrl) => {
       if (!env.AI) return Promise.reject(new Error("no AI binding"));
       return toMarkdown(env.AI, bytes, mime, baseUrl);
+    },
+    transport: {
+      run: async (model, input) => {
+        if (!env.AI) throw new Error("no AI binding");
+        return bindingTransport(env.AI, env.AI_GATEWAY_ID ?? "").run(
+          model,
+          input,
+        );
+      },
     },
   };
 }
@@ -19,14 +32,14 @@ export async function runQueue(
   batch: MessageBatch,
   env: PipelineEnv,
   _ctx: ExecutionContext,
-  overrides: Partial<BodyDeps> = {},
+  overrides: Partial<QueueDeps> = {},
 ): Promise<void> {
   if (batch.queue !== INGEST_QUEUE) {
     console.log({ queue: batch.queue, messages: batch.messages.length });
     batch.ackAll();
     return;
   }
-  const deps: BodyDeps = { ...defaultDeps(env), ...overrides };
+  const deps: QueueDeps = { ...defaultDeps(env), ...overrides };
   for (const msg of batch.messages as readonly Message<IngestMessage>[]) {
     const body = msg.body;
     // One failing message does not stop the batch. It is acked like a
@@ -42,9 +55,11 @@ export async function runQueue(
           // this one: msg.retry() would use up max_retries and end in the DLQ.
           await processBody(env, body.articleId, Date.now(), deps);
           break;
-        default:
-          // analyze: #7. The backfill cron sends these again.
-          console.log({ queue: batch.queue, kind: body.kind, handled: false });
+        case "analyze":
+          // Budget, config and model errors are handled inside; the
+          // backfill cron sends the message again.
+          await analyzeArticle(env, body.articleId, Date.now(), deps);
+          break;
       }
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);

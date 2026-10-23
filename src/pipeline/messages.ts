@@ -1,16 +1,18 @@
 // The only definition of Q_INGEST messages (architecture §5: messages carry
-// ids only). #6 and #7 add handlers in queue.ts, not new types.
+// ids only). Handlers are in queue.ts.
 
 /** Queue name of Q_INGEST in wrangler.jsonc; MessageBatch.queue carries it. */
 export const INGEST_QUEUE = "ainews-ingest";
 
 export type IngestMessage =
   | { kind: "collect"; sourceId: number }
-  | { kind: "body"; articleId: number } // handler: #6
-  | { kind: "analyze"; articleId: number }; // handler: #7
+  | { kind: "body"; articleId: number }
+  | { kind: "analyze"; articleId: number };
 
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
 export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST" | "AI"> & {
+  /** Model calls go through this AI Gateway (wrangler var). */
+  AI_GATEWAY_ID?: string;
   COLLECT_ENABLED?: string;
   MODEL_CALLS_ENABLED?: string;
   THIRD_PARTY_READER_ENABLED?: string;

@@ -122,8 +122,8 @@ export function parseJevOutput<Q extends JevQuestions>(
       const key = question.type;
       parsed[name] = {
         [key]:
-          key === "choice"
-            ? string(answer.choice, `${path}.choice`)
+          question.type === "choice"
+            ? criterion(question.criteria, answer.choice, `${path}.choice`)
             : number(answer.score, `${path}.score`),
         confidence: number(answer.confidence, `${path}.confidence`),
         probabilities: probabilities(
@@ -144,6 +144,21 @@ function unwrapResult(raw: unknown): Record<string, unknown> {
     );
   }
   return record(body.result, "result");
+}
+
+/** A choice must be one of the question's criteria keys. */
+function criterion(
+  criteria: Record<string, string>,
+  value: unknown,
+  path: string,
+): string {
+  const choice = string(value, path);
+  if (!Object.hasOwn(criteria, choice)) {
+    throw new ResponseParseError(
+      `${path}: ${JSON.stringify(choice)} is not one of the criteria`,
+    );
+  }
+  return choice;
 }
 
 function probabilities(value: unknown, path: string): Record<string, number> {

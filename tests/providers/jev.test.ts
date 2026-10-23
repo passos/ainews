@@ -113,6 +113,37 @@ describe("jev", () => {
     );
   });
 
+  it("rejects a choice that is not one of the question's criteria", () => {
+    const answers = jevResponse.result.answers;
+    const raw = {
+      ...jevResponse,
+      result: {
+        ...jevResponse.result,
+        answers: { ...answers, topic: { ...answers.topic, choice: "music" } },
+      },
+    };
+    expect(() => parseJevOutput(ANSWER_QUESTIONS, raw)).toThrow(
+      ResponseParseError,
+    );
+    expect(() => parseJevOutput(ANSWER_QUESTIONS, raw)).toThrow(
+      /result\.answers\.topic\.choice/,
+    );
+    // An inherited key is not a criterion either.
+    const proto = {
+      ...raw,
+      result: {
+        ...raw.result,
+        answers: {
+          ...answers,
+          topic: { ...answers.topic, choice: "toString" },
+        },
+      },
+    };
+    expect(() => parseJevOutput(ANSWER_QUESTIONS, proto)).toThrow(
+      ResponseParseError,
+    );
+  });
+
   it("rejects a response whose state is not Completed", () => {
     expect(() =>
       parseJevOutput(ANSWER_QUESTIONS, { ...jevResponse, state: "Failed" }),
