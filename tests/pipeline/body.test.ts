@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { USER_AGENT } from "../../src/lib/http";
 import { processBody, type BodyDeps } from "../../src/pipeline/body/body";
+import { checkRobots } from "../../src/pipeline/body/robots";
 import { MAX_BODY_BYTES, PAGE_ACCEPT } from "../../src/pipeline/body/ladder";
 import { feedKey } from "../../src/pipeline/collect/collect";
 import type { IngestMessage, PipelineEnv } from "../../src/pipeline/messages";
@@ -16,6 +17,7 @@ import {
   DAY,
   fakeFetch,
   fakeQueue,
+  MIN,
   NOW,
   pipelineEnv,
   resetPipeline,
@@ -30,6 +32,7 @@ const URL1 = `https://${SITE}/a/1`;
 const URL2 = `https://${SITE}/a/2`;
 /** 400 non-whitespace characters: passes the 200-character check. */
 const LONG = "word ".repeat(100);
+const HOUR = 60 * MIN;
 const ON = { COLLECT_ENABLED: "true" };
 const JINA_ON = {
   ...ON,
@@ -39,7 +42,7 @@ const JINA_ON = {
 };
 
 interface Web {
-  robots?: () => Response;
+  robots?: (req: Request) => Response;
   page?: (req: Request) => Response;
   jina?: (req: Request) => Response;
 }
@@ -51,8 +54,13 @@ function web(w: Web = {}) {
     if (url.hostname === "r.jina.ai") {
       return w.jina?.(req) ?? new Response("", { status: 500 });
     }
+    // Pages and robots.txt: redirects are followed by hand, so a request
+    // that would let fetch() follow them is an error.
+    if (req.redirect !== "manual") {
+      throw new Error(`${req.url}: redirect is ${req.redirect}`);
+    }
     if (url.pathname === "/robots.txt") {
-      return w.robots?.() ?? new Response("", { status: 404 });
+      return w.robots?.(req) ?? new Response("", { status: 404 });
     }
     return w.page?.(req) ?? new Response("", { status: 404 });
   });
@@ -107,6 +115,8 @@ function deps(w: ReturnType<typeof web>, ai = fakeAi()): BodyDeps {
   };
 }
 
+const moved = (to: string) =>
+  new Response(null, { status: 301, headers: { Location: to } });
 const html = (body: string = `<p>${LONG}</p>`) =>
   new Response(body, { headers: { "Content-Type": "text/html" } });
 const markdown = (body: string = LONG) =>
@@ -368,6 +378,201 @@ describe("gates: no request unless every gate passes", () => {
   });
 });
 
+describe("whitelist, redirects and schemes", () => {
+  it("a domain matches only at a label boundary: no request at all, robots.txt included", async () => {
+    await setup();
+    const a = await article("https://evilnews.example.com/x");
+    const b = await article("https://badexample.org/x");
+    const w = web({ page: () => html() });
+    await processBody(e(), a, NOW, deps(w));
+    await processBody(e(), b, NOW, deps(w));
+    expect(w.requests).toHaveLength(0);
+    expect((await articleRow(a))?.body_kind).toBe("summary");
+    expect((await articleRow(b))?.body_kind).toBe("summary");
+  });
+
+  it("site_domain of only spaces: no request, reason no_site_domain", async () => {
+    await setup({ siteDomain: "  " });
+    const id = await article("https://docs.example.org/p");
+    const w = web({ page: () => html() });
+    const log = vi.spyOn(console, "log");
+    await processBody(e(), id, NOW, deps(w));
+    expect(w.requests).toHaveLength(0);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ body: id, reason: "no_site_domain" }),
+    );
+  });
+
+  it("an article URL that is not http(s): no request, reason bad_url", async () => {
+    await setup();
+    const id = await article(`ftp://${SITE}/a/1`);
+    const w = web({ page: () => html() });
+    const log = vi.spyOn(console, "log");
+    await processBody(e(), id, NOW, deps(w));
+    expect(w.requests).toHaveLength(0);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ body: id, reason: "bad_url" }),
+    );
+  });
+
+  it("a redirect to ftp:, file: or javascript: sends no request: summary", async () => {
+    await setup();
+    const ids = [await article(URL1), await article(URL2)];
+    ids.push(await article(`https://${SITE}/a/3`));
+    const w = web({
+      page: (req) => {
+        const to = {
+          "/a/1": `ftp://${SITE}/x`,
+          "/a/2": "file:///etc/passwd",
+          "/a/3": "javascript:alert(1)",
+        }[new URL(req.url).pathname];
+        return to ? moved(to) : html();
+      },
+    });
+    for (const id of ids) await processBody(e(), id, NOW, deps(w));
+    expect(w.urls().filter((u) => !u.startsWith("https://"))).toEqual([]);
+    for (const id of ids) {
+      expect((await articleRow(id))?.body_kind).toBe("summary");
+    }
+  });
+
+  it("an invalid Location fails the rung: summary, body_ready, no throw", async () => {
+    await setup();
+    const id = await article();
+    const w = web({ page: () => moved("http://[") });
+    await expect(processBody(e(), id, NOW, deps(w))).resolves.toMatchObject({
+      status: "ok",
+      kind: "summary",
+    });
+    expect((await articleRow(id))?.stage).toBe("body_ready");
+  });
+
+  it("MAX_REDIRECTS: a chain of 5 redirects is followed, a chain of 6 fails", async () => {
+    await setup();
+    const five = await article(`https://${SITE}/c5/0`);
+    const six = await article(`https://${SITE}/c6/0`);
+    const w = web({
+      page: (req) => {
+        const [, chain, n] = new URL(req.url).pathname.split("/");
+        const length = chain === "c5" ? 5 : 6;
+        return Number(n) < length
+          ? moved(`/${chain}/${Number(n) + 1}`)
+          : html();
+      },
+    });
+    await processBody(e(), five, NOW, deps(w));
+    await processBody(e(), six, NOW, deps(w));
+    expect((await articleRow(five))?.body_kind).toBe("full");
+    expect(w.to(`https://${SITE}/c5/`)).toBe(6);
+    expect((await articleRow(six))?.body_kind).toBe("summary");
+    expect(w.to(`https://${SITE}/c6/6`)).toBe(0);
+  });
+
+  it("a redirect that the whitelist blocks does not go on to Jina", async () => {
+    await setup({ jinaEnabled: 1 });
+    await env.DB.prepare(
+      "INSERT INTO budgets (day, channel, cap_micros) VALUES (?1, 'jina', 1000000)",
+    )
+      .bind(TODAY)
+      .run();
+    const id = await article();
+    const w = web({
+      page: () => moved("https://evil.example.net/x"),
+      jina: () => new Response(`Markdown Content:\n${LONG}`),
+    });
+    await processBody(e(JINA_ON), id, NOW, deps(w));
+    expect(w.to("https://evil.example.net/")).toBe(0);
+    expect(w.jinaCount()).toBe(0);
+    expect((await articleRow(id))?.body_kind).toBe("summary");
+  });
+
+  it("robots.txt redirected inside the whitelist is followed and obeyed", async () => {
+    await setup();
+    const a = await article(URL1);
+    const b = await article(URL2);
+    const w = web({
+      robots: (req) =>
+        new URL(req.url).hostname === SITE
+          ? moved("https://www.example.org/robots.txt")
+          : new Response("User-agent: *\nDisallow: /a/1\n"),
+      page: () => html(),
+    });
+    await processBody(e(), a, NOW, deps(w));
+    await processBody(e(), b, NOW, deps(w));
+    expect(w.to(`https://${SITE}/robots.txt`)).toBe(1);
+    expect(w.to("https://www.example.org/robots.txt")).toBe(1);
+    expect(w.to(URL1)).toBe(0);
+    expect(w.to(URL2)).toBe(1);
+  });
+
+  it("robots.txt redirected outside the whitelist: no request to it, disallowed", async () => {
+    await setup();
+    const id = await article();
+    const w = web({
+      robots: (req) =>
+        new URL(req.url).hostname === SITE
+          ? moved("https://evil.example.net/robots.txt")
+          : new Response(""),
+      page: () => html(),
+    });
+    await processBody(e(), id, NOW, deps(w));
+    expect(w.to("https://evil.example.net/")).toBe(0);
+    expect(w.to(URL1)).toBe(0);
+    expect((await articleRow(id))?.body_kind).toBe("summary");
+  });
+});
+
+describe("robots.txt cache when the request fails", () => {
+  const ROBOTS = `https://${SITE}/robots.txt`;
+
+  function flaky() {
+    let status = 200;
+    const w = web({
+      robots: () => {
+        if (status === 0) throw new Error("network");
+        return status === 200
+          ? new Response("User-agent: *\nDisallow: /private\n")
+          : new Response("", { status });
+      },
+    });
+    return {
+      w,
+      set: (s: number) => (status = s),
+      allowed: async (path: string, at: number) =>
+        (await checkRobots(env, `https://${SITE}${path}`, at, w.fetch, [SITE]))
+          .allowed,
+    };
+  }
+
+  it("a failed refresh keeps the old rules and tries again after an hour", async () => {
+    const r = flaky();
+    expect(await r.allowed("/a/1", NOW)).toBe(true);
+    r.set(503);
+    expect(await r.allowed("/a/1", NOW + DAY)).toBe(true);
+    expect(await r.allowed("/private/x", NOW + DAY)).toBe(false);
+    expect(r.w.to(ROBOTS)).toBe(2);
+    expect(await r.allowed("/a/1", NOW + DAY + HOUR - 1)).toBe(true);
+    expect(r.w.to(ROBOTS)).toBe(2);
+    r.set(0);
+    expect(await r.allowed("/a/1", NOW + DAY + HOUR)).toBe(true);
+    expect(r.w.to(ROBOTS)).toBe(3);
+  });
+
+  it("no cache and a 503: disallowed, not asked again within an hour", async () => {
+    const r = flaky();
+    r.set(503);
+    expect(await r.allowed("/a/1", NOW)).toBe(false);
+    expect(await r.allowed("/a/1", NOW + HOUR - 1)).toBe(false);
+    expect(r.w.to(ROBOTS)).toBe(1);
+    r.set(200);
+    expect(await r.allowed("/a/1", NOW + HOUR)).toBe(true);
+    expect(r.w.to(ROBOTS)).toBe(2);
+    // A good response is cached for 24 hours again.
+    expect(await r.allowed("/a/1", NOW + HOUR + DAY - 1)).toBe(true);
+    expect(r.w.to(ROBOTS)).toBe(2);
+  });
+});
+
 describe("rung 0: feed material, no request", () => {
   it("summaryIsBody uses the summary", async () => {
     await setup({ config: { summaryIsBody: true } });
@@ -592,6 +797,22 @@ describe("rung 3: Jina Reader", () => {
     expect(nokey.w.jinaCount()).toBe(0);
   });
 
+  it("a Jina body under 200 characters falls back to the summary", async () => {
+    await setup({ jinaEnabled: 1 });
+    await env.DB.prepare(
+      "INSERT INTO budgets (day, channel, cap_micros) VALUES (?1, 'jina', 1000000)",
+    )
+      .bind(TODAY)
+      .run();
+    const id = await article();
+    const w = web({
+      jina: () => new Response("Title: x\n\nMarkdown Content:\nshort"),
+    });
+    await processBody(e(JINA_ON), id, NOW, deps(w));
+    expect(w.jinaCount()).toBe(1);
+    expect((await articleRow(id))?.body_kind).toBe("summary");
+  });
+
   it("a Jina error page is a failure", async () => {
     await setup({ jinaEnabled: 1 });
     await env.DB.prepare(
@@ -677,6 +898,52 @@ describe("versions and idempotency", () => {
     expect(r2.puts).toHaveLength(1);
     expect(analyzed()).toHaveLength(1);
     expect(w.to(URL1)).toBe(1);
+  });
+
+  it("a message that throws is logged and acked; the batch goes on", async () => {
+    await setup();
+    const a = await article(URL1);
+    const b = await article(URL2);
+    const bodies = new Proxy(env.BODIES, {
+      get(target, prop) {
+        if (prop === "put") {
+          return (key: string, ...rest: unknown[]) =>
+            key.startsWith(`bodies/${a}/`)
+              ? Promise.reject(new Error("R2 down"))
+              : (target.put as (...x: unknown[]) => unknown)(key, ...rest);
+        }
+        const value: unknown = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const acked: number[] = [];
+    const batch = {
+      queue: "ainews-ingest",
+      messages: [a, b].map((articleId, i) => ({
+        id: String(i),
+        timestamp: new Date(NOW),
+        attempts: 1,
+        body: { kind: "body", articleId },
+        ack: () => acked.push(i),
+        retry: () => {
+          throw new Error("retry() must not be used");
+        },
+      })),
+    } as unknown as MessageBatch;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const w = web({ page: () => markdown() });
+    await runQueue(
+      batch,
+      { ...e(), BODIES: bodies },
+      {} as ExecutionContext,
+      deps(w),
+    );
+    expect(acked).toEqual([0, 1]);
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ message: { kind: "body", articleId: a } }),
+    );
+    expect((await articleRow(a))?.stage).toBe("collected");
+    expect((await articleRow(b))?.stage).toBe("body_ready");
   });
 
   it("another delivery moving the stage first wins: no analyze, its body stays", async () => {
@@ -797,11 +1064,108 @@ describe("Crawl-delay", () => {
       page: () => html(),
     });
     await processBody(e(), a, NOW, deps(w));
-    expect(await processBody(e(), b, NOW + 14_999, deps(w))).toEqual({
+    // The remaining wait, rounded up: not the whole Crawl-delay.
+    expect(await processBody(e(), b, NOW + 14_000, deps(w))).toEqual({
       status: "deferred",
-      delaySeconds: 15,
+      delaySeconds: 1,
+    });
+    expect(await processBody(e(), b, NOW + 5_500, deps(w))).toEqual({
+      status: "deferred",
+      delaySeconds: 10,
     });
     await processBody(e(), b, NOW + 15_000, deps(w));
     expect(w.to(URL2)).toBe(1);
+  });
+
+  it("six articles on one host with Crawl-delay 10: each wait is the remaining one, no slot is lost", async () => {
+    await setup();
+    const ids: number[] = [];
+    for (let n = 0; n < 6; n++)
+      ids.push(await article(`https://${SITE}/s/${n}`));
+    const w = web({
+      robots: () => new Response("User-agent: *\nCrawl-delay: 10\n"),
+      page: () => html(),
+    });
+    // Simulated queue: the messages arrive one second apart; a deferred one
+    // comes back after delaySeconds.
+    const pending = ids.map((id, n) => ({ id, at: NOW + n * 1000 }));
+    const fetchedAt: number[] = [];
+    const waits: number[] = [];
+    let deliveries = 0;
+    while (pending.length > 0) {
+      pending.sort((x, y) => x.at - y.at || x.id - y.id);
+      const { id, at } = pending.shift()!;
+      deliveries += 1;
+      const result = await processBody(e(), id, at, deps(w));
+      if (result.status === "deferred") {
+        const host = await env.DB.prepare(
+          "SELECT next_allowed_at FROM fetch_hosts WHERE host = ?1",
+        )
+          .bind(SITE)
+          .first<{ next_allowed_at: number }>();
+        expect(result.delaySeconds).toBe(
+          Math.ceil((host!.next_allowed_at - at) / 1000),
+        );
+        waits.push(result.delaySeconds);
+        pending.push({ id, at: at + result.delaySeconds * 1000 });
+      } else {
+        fetchedAt.push(at - NOW);
+      }
+    }
+    // One fetch per 10-second slot, back to back.
+    expect(fetchedAt).toEqual([0, 10_000, 20_000, 30_000, 40_000, 50_000]);
+    expect(waits.slice(0, 5)).toEqual([9, 8, 7, 6, 5]);
+    // Deferred messages wake together, so each slot costs the waiting ones a
+    // delivery: at most 6 + 5 + 4 + 3 + 2 + 1.
+    expect(deliveries).toBeLessThanOrEqual(21);
+  });
+
+  it("a redirect to another host waits for that host's slot: no request, the remaining wait", async () => {
+    await setup();
+    const other = await article("https://docs.example.org/q");
+    const id = await article(URL1);
+    const w = web({
+      robots: (req) =>
+        new Response(
+          new URL(req.url).hostname === "docs.example.org"
+            ? "User-agent: *\nCrawl-delay: 10\n"
+            : "",
+        ),
+      page: (req) =>
+        req.url === URL1 ? moved("https://docs.example.org/p") : html(),
+    });
+    await processBody(e(), other, NOW, deps(w));
+    expect(await processBody(e(), id, NOW + 3000, deps(w))).toEqual({
+      status: "deferred",
+      delaySeconds: 7,
+    });
+    expect(w.to("https://docs.example.org/p")).toBe(0);
+    expect((await articleRow(id))?.stage).toBe("collected");
+    const i = q.sent.findIndex((m) => m.kind === "body" && m.articleId === id);
+    expect(q.sendOptions[i]).toEqual({ delaySeconds: 7 });
+    // force: no message is sent again.
+    const sent = q.sent.length;
+    expect(
+      await processBody(e(), id, NOW + 3000, deps(w), { force: true }),
+    ).toMatchObject({ status: "deferred" });
+    expect(q.sent).toHaveLength(sent);
+    await processBody(e(), id, NOW + 10_000, deps(w));
+    expect(w.to("https://docs.example.org/p")).toBe(1);
+    expect((await articleRow(id))?.body_kind).toBe("full");
+  });
+
+  it("a same-host redirect uses the slot this run already holds", async () => {
+    await setup();
+    const id = await article();
+    const w = web({
+      robots: () => new Response("User-agent: *\nCrawl-delay: 15\n"),
+      page: (req) => (req.url === URL1 ? moved("/b/1") : html()),
+    });
+    expect(await processBody(e(), id, NOW, deps(w))).toMatchObject({
+      status: "ok",
+      kind: "full",
+    });
+    expect(w.to(URL1)).toBe(1);
+    expect(w.to(`https://${SITE}/b/1`)).toBe(1);
   });
 });

@@ -14,6 +14,7 @@ import {
 import { JevInputTooLargeError, estimateTokens } from "../../src/providers/jev";
 import {
   ModelCallsDisabledError,
+  ModelConfigError,
   createModelClient,
 } from "../../src/providers/models";
 import { TransportHttpError } from "../../src/providers/transport";
@@ -21,6 +22,7 @@ import { googleResponse, jevResponse } from "./fixtures";
 import {
   ENABLED,
   NOW,
+  TODAY,
   budgetRow,
   fakeTransport,
   ledgerRow,
@@ -249,6 +251,34 @@ describe("model client", () => {
       status: "completed",
       attempt: 1,
     });
+  });
+
+  it("readPage refuses a read slot that is not a jina/ model before any request", async () => {
+    const transport = fakeTransport();
+    const models = createModelClient({
+      db: env.DB,
+      transport,
+      env: ENABLED,
+      now: () => NOW,
+    });
+    await env.DB.prepare(
+      "INSERT INTO budgets (day, channel, cap_micros) VALUES (?1, 'jina', 1000000)",
+    )
+      .bind(TODAY)
+      .run();
+    try {
+      await setSetting(SETTING_SLOTS, {
+        ...DEFAULT_SLOTS,
+        read: { model: WRITE_MODEL, channel: "jina" },
+      });
+      await expect(models.readPage("https://a.example/p", 1)).rejects.toThrow(
+        ModelConfigError,
+      );
+      expect(transport.calls.length).toBe(0);
+      expect(await ledgerCount()).toBe(0);
+    } finally {
+      await setSetting(SETTING_SLOTS, DEFAULT_SLOTS);
+    }
   });
 
   it("rejects a Jev input that is still too large before taking a lease", async () => {

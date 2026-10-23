@@ -5,7 +5,7 @@
 //
 // Assumption (from AIHOT packages/backend/src/providers/jina.ts; checked by
 // scripts/smoke-body.ts): the request headers below, the
-// "\nMarkdown Content:\n" separator and the `x-usage-tokens` header.
+// "\nMarkdown Content:\n" separator (LF or CRLF) and the `x-usage-tokens` header.
 //
 // Node-loadable (scripts/smoke-body.ts): imports use explicit extensions and
 // the imported files have no runtime imports.
@@ -73,7 +73,7 @@ export function jinaTransport(options: {
   };
 }
 
-const MARKER = "\nMarkdown Content:\n";
+const MARKER = /\r?\nMarkdown Content:\r?\n/;
 /** Head of a response without the marker that is checked for errors. */
 const HEAD_CHARS = 1_000;
 const PAGE_ERROR = /Target URL returned error [45]\d\d|CAPTCHA/i;
@@ -83,8 +83,8 @@ const PAGE_ERROR = /Target URL returned error [45]\d\d|CAPTCHA/i;
  * says the target page failed (HTTP 4xx/5xx or a CAPTCHA).
  */
 export function parseJinaText(text: string): string | null {
-  const at = text.indexOf(MARKER);
-  const head = at < 0 ? text.slice(0, HEAD_CHARS) : text.slice(0, at);
+  const marker = MARKER.exec(text);
+  const head = marker ? text.slice(0, marker.index) : text.slice(0, HEAD_CHARS);
   if (PAGE_ERROR.test(head)) return null;
-  return at < 0 ? text : text.slice(at + MARKER.length);
+  return marker ? text.slice(marker.index + marker[0].length) : text;
 }

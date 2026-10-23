@@ -62,7 +62,10 @@ export async function collectSource(
   try {
     // List pages are crawled pages: robots.txt applies (#6). Feeds are not.
     if (source.kind === "html") {
-      const robots = await checkRobots(env, source.feed_url, now, deps.fetch);
+      // A robots.txt redirect may only go to the list page's own host.
+      const robots = await checkRobots(env, source.feed_url, now, deps.fetch, [
+        new URL(source.feed_url).hostname,
+      ]);
       if (!robots.allowed) throw new Error(ROBOTS_DISALLOWED);
     }
     const headers = new Headers({ "User-Agent": USER_AGENT });

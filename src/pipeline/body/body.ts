@@ -3,13 +3,14 @@
 //
 //   COLLECT_ENABLED -> stage = collected (unless force) -> rung 0 (no request)
 //     -> host in site_domain / primary_domains -> robots.txt -> crawl slot
-//     -> rungs 1+2, 3 -> else "summary only"
+//     -> rungs 1+2 (each redirect hop: the same gates), 3 -> else "summary only"
 //     -> R2 bodies/{id}/{sha256}.md (head first: never overwritten)
 //     -> one batch(): articles (stage condition) + sources (probe)
 //     -> `analyze` message if this call moved the stage
 //
 // Any failed gate means no request at all; the article goes on with its
-// feed summary (body_kind 'summary'), so body_sha is never null.
+// feed summary (body_kind 'summary'), so body_sha is never null. A taken
+// crawl slot (also of a redirect hop) sends the message again with a delay.
 import { isEnabled } from "../../lib/flags";
 import { createModelClient } from "../../providers/models";
 import type { ModelClient } from "../../providers/models";
@@ -18,15 +19,9 @@ import { prefixTransport } from "../../providers/transport";
 import { parseSourceConfig } from "../collect/config";
 import type { SourceConfig } from "../collect/config";
 import type { PipelineEnv } from "../messages";
-import {
-  fetchPage,
-  hostAllowed,
-  MAX_BODY_BYTES,
-  readFeed,
-  readWithJina,
-} from "./ladder";
+import { fetchPage, MAX_BODY_BYTES, readFeed, readWithJina } from "./ladder";
 import type { LadderArticle, LadderBody, LadderDeps } from "./ladder";
-import { checkRobots, claimHostSlot } from "./robots";
+import { checkRobots, claimHostSlot, hostAllowed } from "./robots";
 
 /** Injected like CollectDeps: production uses fetch and env.AI. */
 export type BodyDeps = LadderDeps;
@@ -100,22 +95,19 @@ export async function processBody(
   if (!body) {
     const gate = await openGates(env, row, now, deps);
     if (gate.kind === "deferred") {
-      if (!force) {
-        await env.Q_INGEST.send(
-          { kind: "body", articleId },
-          { delaySeconds: gate.delaySeconds },
-        );
-      }
-      console.log({ body: articleId, deferred: gate.delaySeconds });
-      return { status: "deferred", delaySeconds: gate.delaySeconds };
+      return defer(env, articleId, gate.delaySeconds, force);
     }
     if (gate.kind === "blocked") {
       reason = gate.reason;
     } else {
       const fetched = await fetchRemote(env, row, article, now, gate, deps);
+      // The page fetch is the first request: nothing is written yet.
+      if (fetched.kind === "deferred") {
+        return defer(env, articleId, fetched.delaySeconds, force);
+      }
       body = fetched.body;
       probe = fetched.probe;
-      if (!body) reason = "all_rungs_failed";
+      if (!body) reason = fetched.reason;
     }
   }
 
@@ -168,6 +160,21 @@ export async function processBody(
   return { status: "ok", kind, rung, sha, advanced };
 }
 
+/** Sends the message again after the crawl-delay wait, capped. */
+async function defer(
+  env: PipelineEnv,
+  articleId: number,
+  waitSec: number,
+  force: boolean,
+): Promise<BodyResult> {
+  const delaySeconds = Math.min(Math.max(waitSec, 1), MAX_DELAY_S);
+  if (!force) {
+    await env.Q_INGEST.send({ kind: "body", articleId }, { delaySeconds });
+  }
+  console.log({ body: articleId, deferred: delaySeconds });
+  return { status: "deferred", delaySeconds };
+}
+
 type Gate =
   | { kind: "open"; domains: string[] }
   | { kind: "blocked"; reason: string }
@@ -182,7 +189,9 @@ async function openGates(
 ): Promise<Gate> {
   // #8 fills site_domain. Without it the source has no whitelist entry:
   // no fallback to the feed host (rss.arxiv.org is not arxiv.org).
-  if (!row.site_domain) return { kind: "blocked", reason: "no_site_domain" };
+  if (!row.site_domain?.trim()) {
+    return { kind: "blocked", reason: "no_site_domain" };
+  }
   let url: URL;
   try {
     url = new URL(row.url);
@@ -196,15 +205,15 @@ async function openGates(
   if (!hostAllowed(url.hostname, domains)) {
     return { kind: "blocked", reason: "host_not_allowed" };
   }
-  const robots = await checkRobots(env, url.href, now, deps.fetch);
+  const robots = await checkRobots(env, url.href, now, deps.fetch, domains);
   if (!robots.allowed) return { kind: "blocked", reason: "robots_disallowed" };
-  const delay = robots.crawlDelaySec ?? 0;
-  if (!(await claimHostSlot(env, url.host, delay, now))) {
-    return {
-      kind: "deferred",
-      delaySeconds: Math.min(Math.max(delay, 1), MAX_DELAY_S),
-    };
-  }
+  const slot = await claimHostSlot(
+    env,
+    url.host,
+    robots.crawlDelaySec ?? 0,
+    now,
+  );
+  if (!slot.claimed) return { kind: "deferred", delaySeconds: slot.waitSec };
   return { kind: "open", domains };
 }
 
@@ -219,7 +228,8 @@ interface Probe {
 
 /**
  * Rungs 1-3 from max(1, sources.fetch_rung ?? 1) upwards. Rungs 1 and 2 are
- * one request, so a recorded 1 or 2 is "the page fetch".
+ * one request, so a recorded 1 or 2 is "the page fetch". A redirect the
+ * gates block ends the ladder (no Jina) and counts as a failed page fetch.
  */
 async function fetchRemote(
   env: PipelineEnv,
@@ -228,7 +238,10 @@ async function fetchRemote(
   now: number,
   gate: { domains: string[] },
   deps: BodyDeps,
-): Promise<{ body: LadderBody | null; probe: Probe }> {
+): Promise<
+  | { kind: "deferred"; delaySeconds: number }
+  | { kind: "done"; body: LadderBody | null; probe: Probe; reason: string }
+> {
   const recorded =
     row.fetch_rung !== null && row.fetch_rung >= 1 && row.fetch_rung <= 3
       ? row.fetch_rung
@@ -236,11 +249,15 @@ async function fetchRemote(
   const start = Math.max(1, recorded ?? 1);
   let body: LadderBody | null = null;
   let firstOk = false;
+  let blocked = false;
   if (start <= 2) {
-    body = await fetchPage(env, article.url, now, gate.domains, deps);
+    const page = await fetchPage(env, article.url, now, gate.domains, deps);
+    if (page.kind === "deferred") return page;
+    if (page.kind === "body") body = page.body;
+    blocked = page.kind === "blocked";
     firstOk = body !== null;
   }
-  if (!body) {
+  if (!body && !blocked) {
     let models: ModelClient | null = null;
     body = await readWithJina(env, article, row.jina_enabled === 1, () => {
       models ??= createModelClient({
@@ -259,7 +276,9 @@ async function fetchRemote(
     if (start === 3) firstOk = body !== null;
   }
   return {
+    kind: "done",
     body,
+    reason: blocked ? "redirect_blocked" : "all_rungs_failed",
     probe: {
       sourceId: row.source_id,
       recorded,

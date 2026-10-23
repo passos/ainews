@@ -15,6 +15,19 @@ describe("parseJinaText", () => {
     ).toBe("# A\n\nbody");
   });
 
+  it("accepts CRLF line ends around the separator", () => {
+    expect(
+      parseJinaText(
+        "Title: A\r\nURL Source: u\r\n\r\nMarkdown Content:\r\nbody",
+      ),
+    ).toBe("body");
+    expect(
+      parseJinaText(
+        "Title: A\r\nWarning: Target URL returned error 404: Not Found\r\nMarkdown Content:\r\nx",
+      ),
+    ).toBeNull();
+  });
+
   it("returns null when the head reports a target error or a CAPTCHA", () => {
     expect(
       parseJinaText(

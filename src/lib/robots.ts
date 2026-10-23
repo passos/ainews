@@ -127,13 +127,17 @@ function productToken(value: string): string {
 }
 
 /**
- * Percent-encodes non-ASCII characters (as UTF-8) and makes existing
- * escapes upper case, so the URL and the pattern compare the same way
- * (§2.2.2).
+ * Normal form of a URL path or a pattern, so the two compare the same way
+ * (§2.2.2): an escape of an unreserved character (A-Z a-z 0-9 - . _ ~) is
+ * decoded, every other escape is made upper case, and non-ASCII characters
+ * are percent-encoded as UTF-8.
  */
 function encodePattern(value: string): string {
   return value
-    .replace(/%[0-9a-f]{2}/gi, (m) => m.toUpperCase())
+    .replace(/%([0-9a-f]{2})/gi, (m, hex: string) => {
+      const c = String.fromCharCode(parseInt(hex, 16));
+      return /[A-Za-z0-9\-._~]/.test(c) ? c : m.toUpperCase();
+    })
     .replace(/[\u0080-\uFFFF]+/g, (m) => encodeURIComponent(m));
 }
 

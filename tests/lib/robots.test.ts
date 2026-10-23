@@ -58,6 +58,30 @@ describe("parseRobots (RFC 9309)", () => {
     expect(r.allowed("/a.b")).toBe(false);
   });
 
+  it("compares percent-escapes per RFC 9309 2.2.2: unreserved decoded, others upper case", () => {
+    const plain = parseRobots("User-agent: *\nDisallow: /admin\n", UA);
+    expect(plain.allowed("/%61dmin")).toBe(false);
+    expect(plain.allowed("/%61DMIN")).toBe(true);
+    const escaped = parseRobots("User-agent: *\nDisallow: /%61dmin\n", UA);
+    expect(escaped.allowed("/admin")).toBe(false);
+    const tilde = parseRobots("User-agent: *\nDisallow: /%7euser\n", UA);
+    expect(tilde.allowed("/~user")).toBe(false);
+    expect(
+      parseRobots("User-agent: *\nDisallow: /~u\n", UA).allowed("/%7Eu"),
+    ).toBe(false);
+    // %2F is reserved: it stays an escape, it is not "/".
+    const slash = parseRobots("User-agent: *\nDisallow: /a%2fb\n", UA);
+    expect(slash.allowed("/a%2Fb")).toBe(false);
+    expect(slash.allowed("/a/b")).toBe(true);
+    expect(
+      parseRobots("User-agent: *\nDisallow: /a/b\n", UA).allowed("/a%2Fb"),
+    ).toBe(true);
+    // Non-ASCII is compared as UTF-8 escapes.
+    const cjk = parseRobots("User-agent: *\nDisallow: /\u4e2d\n", UA);
+    expect(cjk.allowed("/%E4%B8%AD")).toBe(false);
+    expect(cjk.allowed("/%e4%b8%ad")).toBe(false);
+  });
+
   it("no group at all allows everything", () => {
     expect(parseRobots("Disallow: /\n", UA).allowed("/a")).toBe(true);
     expect(parseRobots("", UA).allowed("/a")).toBe(true);

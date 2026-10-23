@@ -1,6 +1,6 @@
 // Fetch ladder (architecture §8): the rungs, cheapest first. Gates (host
 // whitelist, robots, crawl slot) for the first request are in body.ts; the
-// redirect hops of a page fetch are gated here.
+// redirect hops of a page fetch are gated here, crawl slot included.
 //
 //   rung 0    feed material, no request: summaryIsBody, or R2 feed/{sha}.html
 //   rung 1+2  one GET: text/markdown -> rung 1; text/html, application/pdf
@@ -13,14 +13,18 @@ import type { MarkdownMime } from "../../providers/tomarkdown";
 import { feedKey } from "../collect/collect";
 import type { SourceConfig } from "../collect/config";
 import type { PipelineEnv } from "../messages";
-import { checkRobots } from "./robots";
+import {
+  checkRobots,
+  claimHostSlot,
+  hostAllowed,
+  MAX_REDIRECTS,
+} from "./robots";
 
 /** Single body cap (architecture §8). */
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Success: at least this many non-whitespace characters. */
 export const MIN_BODY_CHARS = 200;
 export const PAGE_TIMEOUT_MS = 30_000;
-export const MAX_REDIRECTS = 5;
 export const PAGE_ACCEPT =
   "text/markdown, text/html;q=0.9, application/pdf;q=0.8";
 
@@ -44,6 +48,20 @@ export interface LadderBody {
   truncated: boolean;
 }
 
+/**
+ * Result of the page fetch. blocked: a redirect went to a scheme, host or
+ * path the gates do not allow. deferred: a redirect host's crawl slot is
+ * taken; no request was sent to it.
+ */
+export type PageResult =
+  | { kind: "body"; body: LadderBody }
+  | { kind: "failed" }
+  | { kind: "blocked" }
+  | { kind: "deferred"; delaySeconds: number };
+
+const FAILED: PageResult = { kind: "failed" };
+const BLOCKED: PageResult = { kind: "blocked" };
+
 export interface LadderArticle {
   id: number;
   url: string;
@@ -55,15 +73,6 @@ export function isBody(markdown: string | null): markdown is string {
   return (
     markdown !== null && markdown.replace(/\s/g, "").length >= MIN_BODY_CHARS
   );
-}
-
-/** `host === d || host.endsWith("." + d)` for any domain `d`. */
-export function hostAllowed(host: string, domains: readonly string[]): boolean {
-  const h = host.toLowerCase();
-  return domains.some((raw) => {
-    const d = raw.trim().toLowerCase();
-    return d !== "" && (h === d || h.endsWith(`.${d}`));
-  });
 }
 
 /** Rung 0. Sends no request. */
@@ -86,9 +95,11 @@ export async function readFeed(
 }
 
 /**
- * Rungs 1 and 2: one GET of `url` (already gated by the caller). Redirects
- * are followed by hand, so every hop is checked against the whitelist and
- * robots.txt before it is requested.
+ * Rungs 1 and 2: one GET of `url` (already gated by the caller, crawl slot
+ * included). Redirects are followed by hand, so every hop is checked against
+ * the whitelist and robots.txt, and takes the crawl slot of its host, before
+ * it is requested. A host whose slot this call already holds is not claimed
+ * again: the claim of the first request would make it wait for itself.
  */
 export async function fetchPage(
   env: Pick<PipelineEnv, "DB">,
@@ -96,15 +107,38 @@ export async function fetchPage(
   now: number,
   domains: readonly string[],
   deps: LadderDeps,
-): Promise<LadderBody | null> {
+): Promise<PageResult> {
   let target = url;
+  const held = new Set<string>();
   for (let hop = 0; ; hop++) {
-    if (hop > 0) {
-      const next = new URL(target);
-      if (next.protocol !== "https:" && next.protocol !== "http:") return null;
-      if (!hostAllowed(next.hostname, domains)) return null;
-      if (!(await checkRobots(env, target, now, deps.fetch)).allowed) {
-        return null;
+    let next: URL;
+    try {
+      next = new URL(target);
+    } catch {
+      return FAILED;
+    }
+    if (hop === 0) {
+      held.add(next.host);
+    } else {
+      if (next.protocol !== "https:" && next.protocol !== "http:") {
+        return BLOCKED;
+      }
+      if (!hostAllowed(next.hostname, domains)) return BLOCKED;
+      const robots = await checkRobots(env, target, now, deps.fetch, domains);
+      if (!robots.allowed) return BLOCKED;
+      if (!held.has(next.host)) {
+        // Deferred: the message comes back later and starts again from the
+        // article URL, so the hops before this one are fetched again.
+        const slot = await claimHostSlot(
+          env,
+          next.host,
+          robots.crawlDelaySec ?? 0,
+          now,
+        );
+        if (!slot.claimed) {
+          return { kind: "deferred", delaySeconds: slot.waitSec };
+        }
+        held.add(next.host);
       }
     }
     let page;
@@ -120,16 +154,20 @@ export async function fetchPage(
         deps.fetch,
       );
     } catch {
-      return null;
+      return FAILED;
     }
     const { res, bytes, truncated } = page;
     const location = res.headers.get("Location");
     if (res.status >= 300 && res.status < 400 && location) {
-      if (hop >= MAX_REDIRECTS) return null;
-      target = new URL(location, target).href;
+      if (hop >= MAX_REDIRECTS) return FAILED;
+      try {
+        target = new URL(location, target).href;
+      } catch {
+        return FAILED;
+      }
       continue;
     }
-    if (!res.ok) return null;
+    if (!res.ok) return FAILED;
     const type = (res.headers.get("Content-Type") ?? "").toLowerCase();
     let markdown: string | null;
     let rung: Rung;
@@ -141,13 +179,15 @@ export async function fetchPage(
       rung = 2;
     } else if (type.startsWith("application/pdf")) {
       // A cut PDF cannot be parsed.
-      if (truncated) return null;
+      if (truncated) return FAILED;
       markdown = await convert(deps, bytes, "application/pdf", target);
       rung = 2;
     } else {
-      return null;
+      return FAILED;
     }
-    return isBody(markdown) ? { markdown, rung, truncated } : null;
+    return isBody(markdown)
+      ? { kind: "body", body: { markdown, rung, truncated } }
+      : FAILED;
   }
 }
 

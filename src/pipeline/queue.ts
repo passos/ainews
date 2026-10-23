@@ -29,18 +29,26 @@ export async function runQueue(
   const deps: BodyDeps = { ...defaultDeps(env), ...overrides };
   for (const msg of batch.messages as readonly Message<IngestMessage>[]) {
     const body = msg.body;
-    switch (body.kind) {
-      case "collect":
-        await collectSource(env, body.sourceId, Date.now(), deps);
-        break;
-      case "body":
-        // A crawl-delay wait sends the message again with a delay and acks
-        // this one: msg.retry() would use up max_retries and end in the DLQ.
-        await processBody(env, body.articleId, Date.now(), deps);
-        break;
-      default:
-        // analyze: #7. The backfill cron sends these again.
-        console.log({ queue: batch.queue, kind: body.kind, handled: false });
+    // One failing message does not stop the batch. It is acked like a
+    // failed collect: the next due time or the backfill cron (requeue.ts)
+    // sends it again, and msg.retry() would only add DLQ entries.
+    try {
+      switch (body.kind) {
+        case "collect":
+          await collectSource(env, body.sourceId, Date.now(), deps);
+          break;
+        case "body":
+          // A crawl-delay wait sends the message again with a delay and acks
+          // this one: msg.retry() would use up max_retries and end in the DLQ.
+          await processBody(env, body.articleId, Date.now(), deps);
+          break;
+        default:
+          // analyze: #7. The backfill cron sends these again.
+          console.log({ queue: batch.queue, kind: body.kind, handled: false });
+      }
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      console.error({ queue: batch.queue, message: body, error });
     }
     msg.ack();
   }
