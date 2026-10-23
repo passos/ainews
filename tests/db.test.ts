@@ -28,9 +28,14 @@ it("migrations seed the three model settings", async () => {
   );
   expect(values[SETTING_SLOTS]).toEqual(DEFAULT_SLOTS);
   expect(values[SETTING_PRICES]).toEqual(DEFAULT_PRICES);
+  // Integer micro-USD per 1M tokens: $0.042/1M.
+  expect(values[SETTING_PRICES]["typesafe/jev"]).toEqual({
+    in: 42_000,
+    out: 0,
+  });
   expect(values[SETTING_BUDGET_CAPS]).toEqual({
-    workers_ai: 500_000,
-    gateway: 1_500_000,
+    workers_ai: 100_000,
+    gateway: 1_900_000,
     jina: 0,
   });
   expect(values[SETTING_BUDGET_CAPS]).toEqual(DEFAULT_BUDGET_CAPS);

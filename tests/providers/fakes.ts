@@ -70,7 +70,8 @@ export async function budgetRow(channel: string) {
 
 export async function ledgerRow(key: string) {
   return env.DB.prepare(
-    "SELECT status, attempt, sent_at, error, cost_micros FROM llm_calls WHERE logical_key = ?1",
+    `SELECT status, attempt, sent_at, error, cost_micros, estimated_micros,
+       budget_day FROM llm_calls WHERE logical_key = ?1`,
   )
     .bind(key)
     .first<{
@@ -79,5 +80,30 @@ export async function ledgerRow(key: string) {
       sent_at: number | null;
       error: string | null;
       cost_micros: number | null;
+      estimated_micros: number | null;
+      budget_day: string | null;
     }>();
+}
+
+/**
+ * env.DB, with `hook` around every batch(). `n` counts batches from 1; call
+ * `run` to execute the real batch, or throw instead. Methods are bound to the
+ * real binding (it has private fields).
+ */
+export function hookBatch(
+  hook: (n: number, run: () => Promise<D1Result[]>) => Promise<D1Result[]>,
+): D1Database {
+  let n = 0;
+  return new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop === "batch") {
+        return (statements: D1PreparedStatement[]) => {
+          n += 1;
+          return hook(n, () => target.batch(statements));
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }

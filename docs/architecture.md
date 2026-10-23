@@ -117,7 +117,7 @@ tests/
 | `reason` | `anthropic/claude-sonnet-5.5` |
 
 - 所有槽位都用 `env.AI.run(model, input, { gateway: { id: AI_GATEWAY_ID } })` 调用。模型页的代码示例对这几个模型都用 `env.AI.run`（**已验证**，`google/gemini-3.8-flash` 页面）。
-- 计费渠道按槽位存在 settings 里，由 #3 的冒烟测试填：哪些从 AI Gateway 预充的 credits 扣，哪些按 Workers AI 计费，现在**未知**。如果走 binding 不行、只能走 REST，冒烟脚本停下报告，不在实现里临时改契约。
+- 计费渠道按槽位存在 settings 里，#3 实测定案：judge、write、reason 走 AI Gateway 预充的 credits（judge 由用户在 AI Gateway 日志里确认；write、reason 按 Unified Billing 的定义，**推断**）；embed 走 Workers AI 计费（**推断**：`@cf/` 前缀是 Workers AI 自有模型，未在日志里确认）。四个槽位走 binding 都调用成功（**已验证**，#3 的冒烟测试），生产用 binding，不需要 REST。
 - Jev：结构化评估模型，输入 `state` 加一组 `noul` / `choice` / `score` 问题，输出概率和置信度；上下文 32,000 token；输入 $0.042 / 1M token，输出免费（**已验证**，模型目录页）。超过上下文时截断正文，只送标题、摘要和开头部分。
 - 模型目录里也有 OpenAI 的 `gpt-5.5` 等（**已验证**）。换成 OpenAI 等效模型只改槽位。
 - 金额一律存整数微美元（1 USD = 1,000,000）。

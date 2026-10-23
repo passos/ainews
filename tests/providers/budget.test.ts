@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { costMicros } from "../../src/providers/budget";
 import { DEFAULT_PRICES } from "../../src/providers/defaults";
 import {
   BudgetExceededError,
@@ -59,9 +60,7 @@ describe("budget reservation", () => {
     const { promptTokenCount, thoughtsTokenCount } =
       googleResponse.usageMetadata;
     const price = DEFAULT_PRICES["google/gemini-3.8-flash"];
-    const spent = Math.ceil(
-      promptTokenCount * price.in + thoughtsTokenCount * price.out,
-    );
+    const spent = costMicros(price, promptTokenCount, thoughtsTokenCount);
     expect(spent).toBe(359);
     expect(await budgetRow("gateway")).toEqual({
       cap_micros: 1_000_000,
@@ -73,5 +72,13 @@ describe("budget reservation", () => {
       attempt: 1,
       cost_micros: spent,
     });
+  });
+
+  it("computes cost in integers: 1,500 Jev input tokens cost 63", () => {
+    expect(costMicros(DEFAULT_PRICES["typesafe/jev"], 1_500, 0)).toBe(63);
+    // One rounding at the end, up: 8 * 750,000 + 94 * 3,750,000 = 358.5.
+    expect(costMicros(DEFAULT_PRICES["google/gemini-3.8-flash"], 8, 94)).toBe(
+      359,
+    );
   });
 });

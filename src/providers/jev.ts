@@ -58,7 +58,21 @@ export function estimateTokens(value: unknown): number {
   return Math.ceil(JSON.stringify(value).length / 3);
 }
 
-/** Builds the request, cutting `state.body`, then `state.summary`, to fit. */
+/** Still over JEV_MAX_INPUT_TOKENS after `body` and `summary` are cut. */
+export class JevInputTooLargeError extends RangeError {
+  constructor(tokens: number) {
+    super(
+      `Jev input is about ${tokens} tokens after truncation; the limit is ${JEV_MAX_INPUT_TOKENS}`,
+    );
+    this.name = "JevInputTooLargeError";
+  }
+}
+
+/**
+ * Builds the request, cutting `state.body`, then `state.summary`, to fit.
+ * Throws JevInputTooLargeError if the rest (title, other fields, questions)
+ * is still too large.
+ */
 export function buildJevInput(
   state: JevState,
   questions: JevQuestions,
@@ -70,10 +84,20 @@ export function buildJevInput(
       const value = input.state[field];
       if (over <= 0 || typeof value !== "string" || value === "") break;
       // Each removed character shortens the JSON by at least one character.
-      input.state[field] = value.slice(0, Math.max(0, value.length - over * 3));
+      input.state[field] = cut(value, value.length - over * 3);
     }
   }
+  const tokens = estimateTokens(input);
+  if (tokens > JEV_MAX_INPUT_TOKENS) throw new JevInputTooLargeError(tokens);
   return input;
+}
+
+/** First `length` UTF-16 units, without splitting a surrogate pair. */
+function cut(value: string, length: number): string {
+  let end = Math.max(0, length);
+  const last = value.charCodeAt(end - 1);
+  if (end < value.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return value.slice(0, end);
 }
 
 export interface JevResult<Q extends JevQuestions> {

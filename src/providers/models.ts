@@ -1,7 +1,10 @@
 // The only entry point for model calls. Every call goes through `call()`:
 //
-//   safety flag -> stored result? -> acquire lease -> reserve budget
-//     -> mark sent -> transport -> parse -> batch(ledger result + settlement)
+//   safety flag -> stored result? -> load slot -> build request + estimate
+//     -> acquire lease -> batch(reserve budget + mark sent) -> transport
+//     -> parse -> batch(settlement + ledger result)
+//
+// Anything that can fail on configuration or input runs before the lease.
 //
 // Slot configuration, prices and budget caps are read from `settings`.
 // Tests inject a fake transport; nothing here touches env.AI directly.
@@ -16,26 +19,20 @@ import {
   array,
 } from "./adapters";
 import type { TextRequest, Usage } from "./adapters";
-import {
-  costMicros,
-  ensureDay,
-  release,
-  reserve,
-  settle,
-  utcDay,
-} from "./budget";
+import { costMicros, settle, utcDay } from "./budget";
 import { SETTING_BUDGET_CAPS, SETTING_PRICES, SETTING_SLOTS } from "./defaults";
 import type { Price, Slot, SlotConfig } from "./defaults";
 import { buildJevInput, estimateTokens, parseJevOutput } from "./jev";
 import type { JevAnswers, JevQuestions, JevState } from "./jev";
 import {
+  abandon,
   acquire,
   complete,
   fail,
   findCompleted,
-  markSent,
-  rejectForBudget,
+  reserveAndMarkSent,
 } from "./ledger";
+import type { SendOutcome } from "./ledger";
 import type { ModelTransport } from "./transport";
 
 export class ModelCallsDisabledError extends Error {
@@ -98,7 +95,10 @@ const slotsSchema = z.record(
 );
 const pricesSchema = z.record(
   z.string(),
-  z.object({ in: z.number().nonnegative(), out: z.number().nonnegative() }),
+  z.object({
+    in: z.number().int().nonnegative(),
+    out: z.number().int().nonnegative(),
+  }),
 );
 const capsSchema = z.record(z.string(), z.number().int().nonnegative());
 
@@ -155,6 +155,12 @@ export function createModelClient(options: ModelClientOptions) {
 
     const config = await loadSlot(db, slot);
     const { model, channel, price } = config;
+    // Before acquire: an error here leaves no row behind.
+    const { input, maxOutputTokens } = spec.build(model);
+    const requestJson = JSON.stringify(input);
+    const estimatedInputTokens = estimateTokens(input);
+    const estimated = costMicros(price, estimatedInputTokens, maxOutputTokens);
+
     const outcome = await acquire(db, {
       logicalKey: key,
       slot,
@@ -174,47 +180,66 @@ export function createModelClient(options: ModelClientOptions) {
         throw new CallFailedError(key, outcome.error);
     }
     const { attempt } = outcome;
-
-    const { input, maxOutputTokens } = spec.build(model);
-    const requestJson = JSON.stringify(input);
-    const estimatedInputTokens = estimateTokens(input);
-    const estimated = costMicros(price, estimatedInputTokens, maxOutputTokens);
     const day = utcDay(now());
 
-    await ensureDay(db, { day, channel, capMicros: config.capMicros }).run();
-    if (!(await reserve(db, { day, channel, micros: estimated }))) {
-      await rejectForBudget(db, { logicalKey: key, attempt, now: now() }).run();
+    let send: SendOutcome;
+    try {
+      send = await reserveAndMarkSent(db, {
+        logicalKey: key,
+        attempt,
+        now: now(),
+        requestJson,
+        estimatedMicros: estimated,
+        budgetDay: day,
+        channel,
+        capMicros: config.capMicros,
+      });
+    } catch (error) {
+      // Nothing was reserved or sent, or the batch did commit and the row
+      // becomes `unknown` later. If this write fails too, the lease expires
+      // and the next acquire takes over; the first error is the useful one.
+      await abandon(db, {
+        logicalKey: key,
+        attempt,
+        now: now(),
+        error: describe(error),
+      })
+        .run()
+        .catch(() => undefined);
+      throw error;
+    }
+    if (send === "over_budget") {
       throw new BudgetExceededError(channel, day, estimated);
     }
+    if (send === "lost") throw new CallInProgressError(key);
 
-    const sent = await markSent(db, {
-      logicalKey: key,
-      attempt,
-      now: now(),
-      requestJson,
-      estimatedMicros: estimated,
-      budgetDay: day,
-    });
-    if (!sent) {
-      await release(db, { day, channel, micros: estimated }).run();
-      throw new CallInProgressError(key);
-    }
+    // From here on the call holds a reservation of `estimated`.
+    const charge = (actualMicros: number) =>
+      settle(db, {
+        logicalKey: key,
+        attempt,
+        day,
+        channel,
+        reservedMicros: estimated,
+        actualMicros,
+      });
 
     let raw: unknown;
     try {
       raw = await transport.run(model, input);
     } catch (error) {
-      // A thrown error is an answer: the request did not run to completion.
+      // A timeout or a lost connection does not prove the model did not run
+      // and bill. Count the estimate as spent; the row can be retried.
       await db.batch([
+        charge(estimated),
         fail(db, {
           logicalKey: key,
           attempt,
           now: now(),
           error: describe(error),
           responseJson: null,
-          costMicros: 0,
+          costMicros: estimated,
         }),
-        release(db, { day, channel, micros: estimated }),
       ]);
       throw error;
     }
@@ -226,6 +251,7 @@ export function createModelClient(options: ModelClientOptions) {
     } catch (error) {
       // The request was billed: count the estimate as spent.
       await db.batch([
+        charge(estimated),
         fail(db, {
           logicalKey: key,
           attempt,
@@ -233,12 +259,6 @@ export function createModelClient(options: ModelClientOptions) {
           error: `parse: ${describe(error)}`,
           responseJson,
           costMicros: estimated,
-        }),
-        settle(db, {
-          day,
-          channel,
-          reservedMicros: estimated,
-          actualMicros: estimated,
         }),
       ]);
       throw error;
@@ -250,6 +270,7 @@ export function createModelClient(options: ModelClientOptions) {
     };
     const actual = costMicros(price, usage.inputTokens, usage.outputTokens);
     await db.batch([
+      charge(actual),
       complete(db, {
         logicalKey: key,
         attempt,
@@ -258,12 +279,6 @@ export function createModelClient(options: ModelClientOptions) {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         costMicros: actual,
-      }),
-      settle(db, {
-        day,
-        channel,
-        reservedMicros: estimated,
-        actualMicros: actual,
       }),
     ]);
     return parsed.value;

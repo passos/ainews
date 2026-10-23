@@ -1,11 +1,23 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  UnsupportedModelError,
+  buildTextInput,
+} from "../../src/providers/adapters";
+import { costMicros } from "../../src/providers/budget";
+import {
+  DEFAULT_PRICES,
+  DEFAULT_SLOTS,
+  SETTING_PRICES,
+  SETTING_SLOTS,
+} from "../../src/providers/defaults";
+import { JevInputTooLargeError, estimateTokens } from "../../src/providers/jev";
+import {
   ModelCallsDisabledError,
   createModelClient,
 } from "../../src/providers/models";
 import { TransportHttpError } from "../../src/providers/transport";
-import { jevResponse } from "./fixtures";
+import { googleResponse, jevResponse } from "./fixtures";
 import {
   ENABLED,
   NOW,
@@ -16,6 +28,14 @@ import {
 } from "./fakes";
 
 const REQUEST = { system: "s", prompt: "p", maxOutputTokens: 16 };
+
+const WRITE_MODEL = DEFAULT_SLOTS.write.model;
+
+async function setSetting(key: string, value: unknown): Promise<void> {
+  await env.DB.prepare("UPDATE settings SET value = ?2 WHERE key = ?1")
+    .bind(key, JSON.stringify(value))
+    .run();
+}
 
 async function ledgerCount(): Promise<number> {
   const row = await env.DB.prepare(
@@ -118,7 +138,7 @@ describe("model client", () => {
     ]);
   });
 
-  it("marks a transport error failed and releases the reservation", async () => {
+  it("charges the estimate when the transport throws, and a retry adds its actual cost", async () => {
     const transport = fakeTransport(() => {
       throw new TransportHttpError(502, "bad gateway");
     });
@@ -132,13 +152,22 @@ describe("model client", () => {
     await expect(models.generateText("write", "boom", REQUEST)).rejects.toThrow(
       TransportHttpError,
     );
+    // The request may have run and been billed: the estimate is spent.
+    const price = DEFAULT_PRICES[WRITE_MODEL];
+    const estimate = costMicros(
+      price,
+      estimateTokens(buildTextInput(WRITE_MODEL, REQUEST)),
+      REQUEST.maxOutputTokens,
+    );
+    expect(estimate).toBeGreaterThan(0);
     expect(await ledgerRow("boom")).toMatchObject({
       status: "failed",
       attempt: 1,
+      cost_micros: estimate,
     });
     expect(await budgetRow("gateway")).toMatchObject({
       reserved_micros: 0,
-      spent_micros: 0,
+      spent_micros: estimate,
     });
 
     // A failed key can be retried.
@@ -154,6 +183,13 @@ describe("model client", () => {
     expect(await ledgerRow("boom")).toMatchObject({
       status: "completed",
       attempt: 2,
+    });
+    const { promptTokenCount, thoughtsTokenCount } =
+      googleResponse.usageMetadata;
+    expect(await budgetRow("gateway")).toMatchObject({
+      reserved_micros: 0,
+      spent_micros:
+        estimate + costMicros(price, promptTokenCount, thoughtsTokenCount),
     });
   });
 
@@ -175,6 +211,67 @@ describe("model client", () => {
     expect(await budgetRow("gateway")).toMatchObject({
       reserved_micros: 0,
       spent_micros: row?.cost_micros,
+    });
+  });
+
+  it("fails an unsupported model before taking a lease, and the key works once the slot is fixed", async () => {
+    const transport = fakeTransport();
+    const models = createModelClient({
+      db: env.DB,
+      transport,
+      env: ENABLED,
+      now: () => NOW,
+    });
+    try {
+      await setSetting(SETTING_SLOTS, {
+        ...DEFAULT_SLOTS,
+        write: { model: "mistral/unknown", channel: "gateway" },
+      });
+      await setSetting(SETTING_PRICES, {
+        ...DEFAULT_PRICES,
+        "mistral/unknown": { in: 1, out: 1 },
+      });
+
+      await expect(
+        models.generateText("write", "cfg", REQUEST),
+      ).rejects.toThrow(UnsupportedModelError);
+      expect(await ledgerRow("cfg")).toBeNull();
+      expect(transport.calls.length).toBe(0);
+    } finally {
+      await setSetting(SETTING_SLOTS, DEFAULT_SLOTS);
+      await setSetting(SETTING_PRICES, DEFAULT_PRICES);
+    }
+
+    await expect(models.generateText("write", "cfg", REQUEST)).resolves.toEqual(
+      expect.objectContaining({ text: "OK" }),
+    );
+    expect(await ledgerRow("cfg")).toMatchObject({
+      status: "completed",
+      attempt: 1,
+    });
+  });
+
+  it("rejects a Jev input that is still too large before taking a lease", async () => {
+    const transport = fakeTransport();
+    const models = createModelClient({
+      db: env.DB,
+      transport,
+      env: ENABLED,
+      now: () => NOW,
+    });
+
+    await expect(
+      models.judge(
+        "huge",
+        { title: "t".repeat(100_000), body: "b" },
+        { q: { type: "noul", instructions: "i" } },
+      ),
+    ).rejects.toThrow(JevInputTooLargeError);
+    expect(await ledgerRow("huge")).toBeNull();
+    expect(transport.calls.length).toBe(0);
+    expect(await budgetRow("workers_ai")).toMatchObject({
+      reserved_micros: 0,
+      spent_micros: 0,
     });
   });
 });

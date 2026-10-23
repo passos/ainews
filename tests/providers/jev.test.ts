@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   JEV_MAX_INPUT_TOKENS,
+  JevInputTooLargeError,
   buildJevInput,
   estimateTokens,
   parseJevOutput,
 } from "../../src/providers/jev";
 import { ResponseParseError } from "../../src/providers/adapters";
 import { jevResponse } from "./fixtures";
+
+/** String.prototype.isWellFormed (ES2024; tsconfig lib is ES2022). */
+function isWellFormed(value: string): boolean {
+  return (value as string & { isWellFormed(): boolean }).isWellFormed();
+}
 
 const QUESTIONS = {
   relevant: { type: "noul", instructions: "Is it relevant?" },
@@ -53,6 +59,26 @@ describe("jev", () => {
     expect(input.state.title).toBe("T");
     expect((input.state.summary ?? "").length).toBeGreaterThan(0);
   });
+
+  it("throws when the input is still too large after cutting body and summary", () => {
+    const state = { title: "T".repeat(100_000), summary: "s", body: "b" };
+    expect(() => buildJevInput(state, QUESTIONS)).toThrow(
+      JevInputTooLargeError,
+    );
+    expect(() => buildJevInput(state, QUESTIONS)).toThrow(RangeError);
+  });
+
+  // Each emoji is a surrogate pair; the prefix moves the cut to either parity.
+  it.each(["", "a"])(
+    "does not split a surrogate pair when cutting an emoji body (prefix %j)",
+    (prefix) => {
+      const state = { title: "T", body: prefix + "\u{1F600}".repeat(100_000) };
+      const input = buildJevInput(state, QUESTIONS);
+      expect(estimateTokens(input)).toBeLessThanOrEqual(JEV_MAX_INPUT_TOKENS);
+      expect((input.state.body ?? "").length).toBeGreaterThan(0);
+      expect(isWellFormed(input.state.body ?? "")).toBe(true);
+    },
+  );
 
   const ANSWER_QUESTIONS = {
     aboutWeather: { type: "noul", instructions: "i" },

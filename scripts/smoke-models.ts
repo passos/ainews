@@ -11,6 +11,8 @@
 //                 (env.test has no AI binding). Wrangler auth:
 //                 SMOKE_BINDING_AUTH=token (default) sets
 //                 CLOUDFLARE_API_TOKEN=$CF_AI_API_TOKEN;
+//                 SMOKE_BINDING_AUTH=deploy keeps CLOUDFLARE_API_TOKEN as the
+//                 caller set it (the ainews-deploy token) and requires it;
 //                 SMOKE_BINDING_AUTH=login removes CLOUDFLARE_API_TOKEN, so
 //                 wrangler uses the `wrangler login` session.
 // Tokens are never printed.
@@ -19,6 +21,7 @@ import { getPlatformProxy } from "wrangler";
 // Explicit extensions: Node resolves these files directly.
 import { buildTextInput, parseTextOutput } from "../src/providers/adapters.ts";
 import type { Usage } from "../src/providers/adapters.ts";
+import { costMicros } from "../src/providers/budget.ts";
 import { DEFAULT_PRICES, DEFAULT_SLOTS } from "../src/providers/defaults.ts";
 import type { Slot } from "../src/providers/defaults.ts";
 import { buildJevInput, estimateTokens } from "../src/providers/jev.ts";
@@ -59,10 +62,15 @@ const gatewayId = required("AI_GATEWAY_ID");
 const accountId = required("CLOUDFLARE_ACCOUNT_ID");
 const aiToken = required("CF_AI_API_TOKEN");
 const bindingAuth = process.env.SMOKE_BINDING_AUTH ?? "token";
-if (bindingAuth !== "token" && bindingAuth !== "login") {
-  console.error('SMOKE_BINDING_AUTH must be "token" or "login".');
+if (
+  bindingAuth !== "token" &&
+  bindingAuth !== "deploy" &&
+  bindingAuth !== "login"
+) {
+  console.error('SMOKE_BINDING_AUTH must be "token", "deploy" or "login".');
   process.exit(2);
 }
+if (bindingAuth === "deploy") required("CLOUDFLARE_API_TOKEN");
 
 // Neutral smoke inputs, not product prompts (those start in #7).
 const JEV_QUESTIONS = {
@@ -199,7 +207,7 @@ async function runOne(
       outputTokens: 0,
     };
     const micros = price
-      ? Math.ceil(usage.inputTokens * price.in + usage.outputTokens * price.out)
+      ? costMicros(price, usage.inputTokens, usage.outputTokens)
       : null;
     console.log(
       `cost: ${micros ?? "no price"} micro-USD${parsed.usage ? "" : " (usage missing, from estimate)"}`,
@@ -256,9 +264,10 @@ async function runRest(): Promise<Outcome[]> {
 async function runBinding(): Promise<Outcome[]> {
   if (bindingAuth === "token") {
     process.env.CLOUDFLARE_API_TOKEN = aiToken;
-  } else {
+  } else if (bindingAuth === "login") {
     delete process.env.CLOUDFLARE_API_TOKEN;
   }
+  // "deploy": CLOUDFLARE_API_TOKEN stays as the caller set it.
   console.log(`\nbinding auth: ${bindingAuth}, config ${CONFIG_PATH}`);
 
   let proxy: Awaited<ReturnType<typeof getPlatformProxy<{ AI: Ai }>>>;

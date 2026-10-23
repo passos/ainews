@@ -14,7 +14,10 @@ export interface SlotConfig {
   channel: Channel;
 }
 
-/** USD per 1M tokens, which is the same as micro-USD per token. */
+/**
+ * Micro-USD per 1M tokens, as integers (USD per 1M tokens x 1,000,000), so
+ * cost arithmetic stays exact. Example: $0.042/1M is 42_000.
+ */
 export interface Price {
   in: number;
   out: number;
@@ -25,7 +28,7 @@ export const SETTING_PRICES = "models.prices";
 export const SETTING_BUDGET_CAPS = "budget.caps";
 
 export const DEFAULT_SLOTS: Record<Slot, SlotConfig> = {
-  judge: { model: "typesafe/jev", channel: "workers_ai" },
+  judge: { model: "typesafe/jev", channel: "gateway" },
   embed: { model: "@cf/baai/bge-m3", channel: "workers_ai" },
   write: { model: "google/gemini-3.8-flash", channel: "gateway" },
   reason: { model: "anthropic/claude-sonnet-5.5", channel: "gateway" },
@@ -33,15 +36,15 @@ export const DEFAULT_SLOTS: Record<Slot, SlotConfig> = {
 
 /** Read from the model pages on 2026-10-22. */
 export const DEFAULT_PRICES: Record<string, Price> = {
-  "typesafe/jev": { in: 0.042, out: 0 },
-  "@cf/baai/bge-m3": { in: 0.0118, out: 0 },
-  "google/gemini-3.8-flash": { in: 0.75, out: 3.75 },
-  "anthropic/claude-sonnet-5.5": { in: 2.0, out: 10.0 },
+  "typesafe/jev": { in: 42_000, out: 0 },
+  "@cf/baai/bge-m3": { in: 11_800, out: 0 },
+  "google/gemini-3.8-flash": { in: 750_000, out: 3_750_000 },
+  "anthropic/claude-sonnet-5.5": { in: 2_000_000, out: 10_000_000 },
 };
 
 /** Micro-USD per channel per day. A cap of 0 rejects every call (fail-closed). */
 export const DEFAULT_BUDGET_CAPS: Record<string, number> = {
-  workers_ai: 500_000,
-  gateway: 1_500_000,
+  workers_ai: 100_000,
+  gateway: 1_900_000,
   jina: 0,
 };
