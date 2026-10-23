@@ -7,6 +7,26 @@ export interface ModelTransport {
   run(model: string, input: unknown): Promise<unknown>;
 }
 
+/**
+ * Sends a model to the transport of the first prefix its id starts with
+ * (`jina/` -> jinaTransport), else to `fallback`. With no match and no
+ * fallback it throws.
+ */
+export function prefixTransport(
+  routes: Record<string, ModelTransport>,
+  fallback?: ModelTransport,
+): ModelTransport {
+  return {
+    run(model, input) {
+      for (const [prefix, transport] of Object.entries(routes)) {
+        if (model.startsWith(prefix)) return transport.run(model, input);
+      }
+      if (fallback) return fallback.run(model, input);
+      return Promise.reject(new Error(`no transport for model ${model}`));
+    },
+  };
+}
+
 export class TransportHttpError extends Error {
   readonly status: number;
   /** First 2,000 characters of the response body. */

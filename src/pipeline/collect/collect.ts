@@ -3,6 +3,7 @@ import { isEnabled } from "../../lib/flags";
 import { fetchLimited, USER_AGENT } from "../../lib/http";
 import { parseFeedDate } from "../../lib/time";
 import { normalizeUrl } from "../../lib/url";
+import { checkRobots } from "../body/robots";
 import { sendIngest, type PipelineEnv } from "../messages";
 import { isExcluded, parseSourceConfig } from "./config";
 import { recordFailure, recordSuccess } from "./health";
@@ -11,6 +12,8 @@ import { parseFeed, type FeedItem } from "./rss";
 
 export const FETCH_TIMEOUT_MS = 30_000;
 export const MAX_FEED_BYTES = 5 * 1024 * 1024;
+/** sources.last_error when robots.txt disallows an html list page. */
+export const ROBOTS_DISALLOWED = "robots_disallowed";
 /** Items per D1 batch. */
 const INSERT_CHUNK = 50;
 
@@ -57,6 +60,11 @@ export async function collectSource(
   if (!source || source.status !== "active") return { status: "skipped" };
 
   try {
+    // List pages are crawled pages: robots.txt applies (#6). Feeds are not.
+    if (source.kind === "html") {
+      const robots = await checkRobots(env, source.feed_url, now, deps.fetch);
+      if (!robots.allowed) throw new Error(ROBOTS_DISALLOWED);
+    }
     const headers = new Headers({ "User-Agent": USER_AGENT });
     if (source.etag) headers.set("If-None-Match", source.etag);
     if (source.last_modified) {

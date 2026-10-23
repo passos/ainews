@@ -5,8 +5,9 @@
 //
 // No runtime imports here: scripts/smoke-models.ts loads this file in Node.
 
-export type Slot = "judge" | "embed" | "write" | "reason";
-export type Channel = "workers_ai" | "gateway";
+/** `read`: Jina Reader (fetch ladder rung 3, #6), billed on channel `jina`. */
+export type Slot = "judge" | "embed" | "write" | "reason" | "read";
+export type Channel = "workers_ai" | "gateway" | "jina";
 
 export interface SlotConfig {
   model: string;
@@ -32,6 +33,7 @@ export const DEFAULT_SLOTS: Record<Slot, SlotConfig> = {
   embed: { model: "@cf/baai/bge-m3", channel: "workers_ai" },
   write: { model: "google/gemini-3.8-flash", channel: "gateway" },
   reason: { model: "anthropic/claude-sonnet-5.5", channel: "gateway" },
+  read: { model: "jina/reader", channel: "jina" },
 };
 
 /** Read from the model pages on 2026-10-22. */
@@ -40,6 +42,9 @@ export const DEFAULT_PRICES: Record<string, Price> = {
   "@cf/baai/bge-m3": { in: 11_800, out: 0 },
   "google/gemini-3.8-flash": { in: 750_000, out: 3_750_000 },
   "anthropic/claude-sonnet-5.5": { in: 2_000_000, out: 10_000_000 },
+  // Assumption: $0.05 per 1M tokens, counted as output (x-usage-tokens).
+  // Correct it from the Jina bill.
+  "jina/reader": { in: 0, out: 50_000 },
 };
 
 /** Micro-USD per channel per day. A cap of 0 rejects every call (fail-closed). */

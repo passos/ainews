@@ -29,6 +29,20 @@
       "when": 1792748119703,
       "tag": "0003_collect",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792749795459,
+      "tag": "0004_body_fetch",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792749808512,
+      "tag": "0005_seed_read_slot",
+      "breakpoints": true
     }
   ]
 }

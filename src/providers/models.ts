@@ -17,12 +17,15 @@ import {
   parseTextOutput,
   record,
   array,
+  string,
 } from "./adapters";
 import type { TextRequest, Usage } from "./adapters";
 import { costMicros, settle, utcDay } from "./budget";
 import { SETTING_BUDGET_CAPS, SETTING_PRICES, SETTING_SLOTS } from "./defaults";
 import type { Price, Slot, SlotConfig } from "./defaults";
 import { buildJevInput, estimateTokens, parseJevOutput } from "./jev";
+import { parseJinaText } from "./jina";
+import type { JinaInput } from "./jina";
 import type { JevAnswers, JevQuestions, JevState } from "./jev";
 import {
   abandon,
@@ -88,7 +91,7 @@ export interface ModelClientOptions {
   now?: () => number;
 }
 
-const channelSchema = z.enum(["workers_ai", "gateway"]);
+const channelSchema = z.enum(["workers_ai", "gateway", "jina"]);
 const slotsSchema = z.record(
   z.string(),
   z.object({ model: z.string().min(1), channel: channelSchema }),
@@ -318,6 +321,28 @@ export function createModelClient(options: ModelClientOptions) {
       });
     },
 
+    /**
+     * Jina Reader (`read` slot, fetch ladder rung 3). At most one call per
+     * article per UTC day: a completed call is returned from the ledger.
+     */
+    readPage(url: string, articleId: number): Promise<PageRead> {
+      return call({
+        slot: "read",
+        key: `jina:${articleId}:${utcDay(now())}`,
+        build: (model) => {
+          // Before acquire: a misconfigured slot never reaches a transport.
+          if (!model.startsWith("jina/")) {
+            throw new ModelConfigError(
+              `slot read needs a jina/ model, got ${model}`,
+            );
+          }
+          const input: JinaInput = { url };
+          return { input, maxOutputTokens: READ_MAX_OUTPUT_TOKENS };
+        },
+        parse: (_model, raw) => parseRead(raw),
+      });
+    },
+
     /** `request.maxOutputTokens` must be a positive integer (RangeError). */
     async generateText(
       slot: "write" | "reason",
@@ -347,6 +372,32 @@ export function createModelClient(options: ModelClientOptions) {
 }
 
 export type ModelClient = ReturnType<typeof createModelClient>;
+
+/**
+ * Reservation of one Jina read: 40,000 tokens at the `jina/reader` price
+ * ($0.05/1M) is 2,000 micro-USD.
+ */
+export const READ_MAX_OUTPUT_TOKENS = 40_000;
+
+export interface PageRead {
+  /** Null if Jina reports that the target page failed. */
+  markdown: string | null;
+  truncated: boolean;
+}
+
+/** `x-usage-tokens` is the output; without it the whole estimate is spent. */
+function parseRead(raw: unknown): Parsed<PageRead> {
+  const r = record(raw, "response");
+  const tokens =
+    r.usageTokens === null ? null : number(r.usageTokens, "usageTokens");
+  return {
+    value: {
+      markdown: parseJinaText(string(r.text, "text")),
+      truncated: r.truncated === true,
+    },
+    usage: { inputTokens: 0, outputTokens: tokens ?? READ_MAX_OUTPUT_TOKENS },
+  };
+}
 
 function parseEmbedding(raw: unknown): number[][] {
   return array(record(raw, "response").data, "data").map((row, i) =>

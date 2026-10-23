@@ -166,6 +166,8 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | 1+2 | 一次 `fetch`，`Accept: text/markdown, text/html;q=0.9`：返回 markdown 就直接用（第 1 档）；返回 HTML 或 PDF 就交给 `env.AI.toMarkdown()`（第 2 档，支持 PDF，**已验证**） |
 | 3 | Jina Reader：全局开关 `THIRD_PARTY_READER_ENABLED`，并且信源单独打开时才用 |
 
+Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
+
 第 1 档只对在 Cloudflare 上开了 Markdown for Agents 的站点有效。arXiv 和 MIT Technology Review 都返回 HTML（**已验证**，细化 #6 时实测），所以 1、2 档合成一次请求，不多发一次。arXiv 的 robots.txt 要求 `Crawl-delay: 15`。
 
 - 需要浏览器渲染才能抓到的信源不收（使用者决定）。信源发现阶段就把它们过滤掉。

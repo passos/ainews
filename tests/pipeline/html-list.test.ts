@@ -15,6 +15,7 @@ import {
   resetPipeline,
   seedIndustry,
   seedSource,
+  sourceRow,
 } from "./helpers";
 
 const PAGE_URL = "https://www.anthropic.com/news";
@@ -114,6 +115,36 @@ describe("collectSource on an html source", () => {
       "SELECT published_at FROM articles WHERE published_raw = 'Oct 14, 2026' LIMIT 1",
     ).first<{ published_at: number }>();
     expect(row?.published_at).toBe(Date.UTC(2026, 9, 14, 7));
+  });
+
+  it("robots.txt disallows the list page: no request to it, counted as a failure", async () => {
+    const industry = await seedIndustry("ai");
+    const id = await seedSource({
+      industryId: industry,
+      feedUrl: PAGE_URL,
+      kind: "html",
+      config: { list: LIST },
+    });
+    const f = fakeFetch((req) =>
+      new URL(req.url).pathname === "/robots.txt"
+        ? new Response("User-agent: *\nDisallow: /news\n")
+        : new Response(page, { headers: { "Content-Type": "text/html" } }),
+    );
+    const result = await collectSource(
+      pipelineEnv(fakeQueue(), ON),
+      id,
+      NOW,
+      f,
+    );
+    expect(result).toEqual({ status: "failed", error: "robots_disallowed" });
+    expect(f.requests.map((r) => r.url)).toEqual([
+      "https://www.anthropic.com/robots.txt",
+    ]);
+    expect(await sourceRow(id)).toMatchObject({
+      fail_count: 1,
+      last_error: "robots_disallowed",
+    });
+    expect(await count("SELECT count(*) AS n FROM articles")).toBe(0);
   });
 
   it("fails an html source without list config", async () => {

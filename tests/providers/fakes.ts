@@ -30,13 +30,15 @@ export interface FakeFetch {
   requests: Request[];
 }
 
-export function fakeFetch(respond: () => Response): FakeFetch {
+/** `respond` gets the request, so a fake can answer by URL. */
+export function fakeFetch(respond: (req: Request) => Response): FakeFetch {
   const requests: Request[] = [];
   return {
     requests,
     fetch: async (input, init) => {
-      requests.push(new Request(input, init));
-      return respond();
+      const req = new Request(input, init);
+      requests.push(req);
+      return respond(req);
     },
   };
 }
