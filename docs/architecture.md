@@ -41,7 +41,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 ### 变量与密钥
 
 - 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics，可为空）。
-- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_ACCOUNT_ID` 只给部署用。
+- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。
 - 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
 
@@ -200,6 +200,9 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 ## 10. 测试、CI 与合并
 
 - Vitest + `@cloudflare/vitest-plugin`（原 `@cloudflare/vitest-pool-workers` 已改名并弃用，**已验证**，npm）；模型、Jina、外部网站都用本地假服务。CI 里没有 Cloudflare 凭证也必须能跑测试。
-- CI（GitHub Actions，`ci.yml`）：`typecheck`、`lint`、`test`、`build`。main 的 ruleset 要求 CI 通过；只允许 squash 合并；开启 auto-merge；合并后删除分支。
+- 本地测试和 `test:ssr` 用 `wrangler.jsonc` 里的 `env.test`（#2）。它只声明 DB、BODIES、四条队列和 vars，不包含 AI、Vectorize 和 send_email，因为这三个绑定在本地也会开一个远程代理会话，要凭证（**已验证**，#2：不用 `env.test` 时 vitest 报 "Failed to start the remote proxy session"）。它的 `routes` 和 `crons` 清空，以免测试用的 Worker 绑到生产域名上。新增的绑定如果本地测试要用，同时加进 `env.test`；用不到的，测试里用假对象。
+- 非法的 search param 由 TanStack Router 用 307 重定向到规范 URL，比如 `/?audience=bogus` 跳到 `/`（**已验证**，生产环境，2026-10-23）。冒烟测试里的 `fetch` 默认跟随重定向，只看最终状态码；要断言"不跳转"，就加 `redirect: "manual"`。
+- CI 跑在使用者 wsl 主机上的 self-hosted runner：`runs-on: [self-hosted, wsl]`，runner 是 `wsl-ainews-1` 和 `wsl-ainews-2`，用主机上的 `~/runners/setup.sh ainews:2` 注册，以 systemd 用户服务运行。原因：GitHub 托管的 runner 被账号账单拦住了（2026-10-22）。这台主机同时跑着其他仓库的 runner，`_work` 在两次运行之间不清空，所以测试和脚本不能写死端口（向系统要空闲端口），不能依赖工作目录以外的状态；每个 job 都要设 `timeout-minutes`。
+- CI（GitHub Actions，`ci.yml`）：`typecheck`、`lint`、`test`、`build`、`test:ssr`。main 的 ruleset 要求 CI 通过；只允许 squash 合并；开启 auto-merge；合并后删除分支。
 - 同一个 `ci.yml` 里的 `deploy` job：只在 main 上、CI 通过后执行迁移和 `wrangler deploy`。
 - 一个 issue 一个分支、一个 PR。PR 正文写 `Closes #n`。
