@@ -108,3 +108,14 @@ CF worker name ainews-app
 - "JS 渲染页面"和抓取梯第 4 档（Browser Run）改为以后；需要浏览器才能抓的信源不收。
 - 第一轮 01 节的四处解读照此执行：Ask 只在后台；周报进 v1、月报以后；过线自动启用，带上限；日报邮件只发管理员，读者邮件订阅以后。
 - 技术栈以 `docs/architecture.md` 为准，替代周计划 v1 的 04 节和评审文件里 Hono 相关的条目。
+
+# 第三轮决定（2026-10-22）
+
+- **Newsren 的两个缺口按推荐做**（使用者原话："两个缺口都按推荐做"）：
+  - N§2.1 My Newsren：读者偏好存在读者自己的浏览器里（`localStorage`），不发给服务器。包括解释档位、关注的板块、收藏的 watch。规格见 #10 和 #17。
+  - N§9 Usefulness：每个 Story Brief 和每份日报下面放"有用 / 没用"两个按钮，匿名、不收文字。这是公开站唯一的写入口，原始 IP 不入库，同一个人对同一项每天只算一票。规格见 #24。
+- **AI Gateway** 的 id 是 `ainews`，使用者已经建好。
+- **部署凭证**：新建了 Account API token `ainews-deploy`，原来的个人 token 不再给本项目用。`.env.prod` 和 GitHub secret `CLOUDFLARE_API_TOKEN` 都换成了它。
+- **CI 改在使用者的 wsl 主机上跑 self-hosted runner**（`wsl-ainews-1`、`wsl-ainews-2`），原因是 GitHub 托管的 runner 被账单拦住了。
+- **Zero Trust 应用和 Web Analytics 由使用者配置**。AUD tag、team domain 和 `CF_BEACON_TOKEN` 拿到后再写进 vars。
+- **分工**：ainews-design 会话负责设计和评审；ainews-impl 会话负责实现和事务性操作（push、开 PR、合并、部署、改仓库设置）。
