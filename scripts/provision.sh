@@ -20,13 +20,34 @@ VECTOR_INDEXES=(ainews-events ainews-chunks)
 VECTOR_DIMENSIONS=1024
 VECTOR_METRIC=cosine
 
-d1_id() {
-  wrangler d1 list --json | jq -r --arg name "$D1_NAME" \
-    '.[] | select(.name == $name) | .uuid'
+die() {
+  echo "error: $*" >&2
+  exit 1
 }
 
+# A failed query must stop the script: `set -e` does not catch a failure inside
+# `$(...)` that sits in `[[ ]]`, so the callers check it with `|| die`.
+d1_id() {
+  local list
+  list="$(wrangler d1 list --json)" || return 1
+  jq -r --arg name "$D1_NAME" \
+    '.[] | select(.name == $name) | .uuid' <<<"$list"
+}
+
+# Prints the number of metadata indexes on property industry_id.
+industry_index_count() {
+  local list
+  list="$(wrangler vectorize list-metadata-index ainews-events --json)" ||
+    return 1
+  jq -r '[.[] | select(.propertyName == "industry_id")] | length' <<<"$list"
+}
+
+# For the existence checks below, the exit code tells "missing". stdout is
+# dropped; stderr stays, so a failed query shows its reason.
+
 # D1
-if [[ -n "$(d1_id)" ]]; then
+existing_id="$(d1_id)" || die "cannot list D1 databases"
+if [[ -n "$existing_id" ]]; then
   echo "D1 $D1_NAME: exists"
 else
   echo "D1 $D1_NAME: creating"
@@ -34,7 +55,7 @@ else
 fi
 
 # R2
-if wrangler r2 bucket info "$R2_BUCKET" --json >/dev/null 2>&1; then
+if wrangler r2 bucket info "$R2_BUCKET" --json >/dev/null; then
   echo "R2 $R2_BUCKET: exists"
 else
   echo "R2 $R2_BUCKET: creating"
@@ -43,7 +64,7 @@ fi
 
 # Queues. Consumers and the dead letter queue link are set by `wrangler deploy`.
 for queue in "${QUEUES[@]}"; do
-  if wrangler queues info "$queue" >/dev/null 2>&1; then
+  if wrangler queues info "$queue" >/dev/null; then
     echo "Queue $queue: exists"
   else
     echo "Queue $queue: creating"
@@ -53,7 +74,7 @@ done
 
 # Vectorize
 for index in "${VECTOR_INDEXES[@]}"; do
-  if wrangler vectorize get "$index" --json >/dev/null 2>&1; then
+  if wrangler vectorize get "$index" --json >/dev/null; then
     echo "Vectorize $index: exists"
   else
     echo "Vectorize $index: creating"
@@ -64,22 +85,33 @@ for index in "${VECTOR_INDEXES[@]}"; do
 done
 
 # Vectorize metadata index: ainews-events.industry_id (number)
-has_industry_index="$(
-  wrangler vectorize list-metadata-index ainews-events --json |
-    jq -r '[.[] | select(.propertyName == "industry_id")] | length'
-)"
+has_industry_index="$(industry_index_count)" ||
+  die "cannot list metadata indexes of ainews-events"
 if [[ "$has_industry_index" != "0" ]]; then
   echo "Vectorize ainews-events metadata index industry_id: exists"
 else
   echo "Vectorize ainews-events metadata index industry_id: creating"
   wrangler vectorize create-metadata-index ainews-events \
     --propertyName=industry_id --type=number
+  # The index is created asynchronously. Wait until it is listed, or a second
+  # run would submit the create again.
+  for attempt in $(seq 1 60); do
+    count="$(industry_index_count)" ||
+      die "cannot list metadata indexes of ainews-events"
+    if [[ "$count" != "0" ]]; then
+      break
+    fi
+    echo "Vectorize ainews-events metadata index industry_id: waiting ($attempt/60)"
+    sleep 5
+  done
+  if [[ "${count:-0}" == "0" ]]; then
+    die "metadata index industry_id not listed after 300s"
+  fi
 fi
 
-id="$(d1_id)"
+id="$(d1_id)" || die "cannot list D1 databases"
 if [[ -z "$id" ]]; then
-  echo "error: D1 $D1_NAME not found after create" >&2
-  exit 1
+  die "D1 $D1_NAME not found after create"
 fi
 echo
 echo "D1 database_id: $id"

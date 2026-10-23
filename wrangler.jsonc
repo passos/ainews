@@ -75,8 +75,10 @@
     // Local tests only (vitest, test:ssr). AI, Vectorize and send_email are
     // left out: they always open a remote proxy session, which needs
     // Cloudflare credentials. Bindings and vars are not inherited, so they are
-    // repeated here.
+    // repeated here. Routes and triggers are inherited, so they are cleared.
     "test": {
+      "routes": [],
+      "triggers": { "crons": [] },
       "d1_databases": [
         {
           "binding": "DB",
