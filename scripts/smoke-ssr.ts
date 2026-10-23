@@ -96,6 +96,23 @@ async function main() {
   if (!type.includes("text/html")) fail(`GET / content-type is "${type}"`);
   if (!/<!doctype html/i.test(body)) fail("GET / has no <!doctype html>");
   if (!body.includes("Personal News")) fail('GET / has no "Personal News"');
+  const csp = home.headers.get("content-security-policy") ?? "";
+  if (!csp.includes("default-src 'self'")) {
+    fail(`GET / content-security-policy is "${csp}"`);
+  }
+
+  // The test env has empty Access vars, so every admin variant fails closed.
+  // "//admin" is not sent: vite preview parses it as a protocol-relative URL,
+  // so the worker sees http://admin/. "/%2Fadmin" reaches the worker and
+  // decodes to "//admin". tests/edge.test.ts covers "//admin" directly.
+  for (const path of ["/admin", "/Admin", "/%2Fadmin", "/%61dmin"]) {
+    const res = await fetch(`${BASE}${path}`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    await res.text();
+    if (res.status !== 403) fail(`GET ${path} returned ${res.status}`);
+  }
 
   const bogus = await fetch(`${BASE}/?audience=bogus`, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
