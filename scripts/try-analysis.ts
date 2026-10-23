@@ -144,9 +144,10 @@ async function runAll(): Promise<number> {
     return value;
   };
   need("CLOUDFLARE_API_TOKEN");
-  // The REST route answers "No route for that URI" for every model on this
-  // account, so the trial uses the AI binding as production does (the same
-  // wiring as the binding path of scripts/smoke-models.ts).
+  // The REST route returned 400 "No route for that URI" for typesafe/jev and
+  // google/gemini-3.8-flash (cause not investigated, see #39; maybe the route
+  // shape of gateway models). The trial uses the AI binding as production
+  // does (the same wiring as the binding path of scripts/smoke-models.ts).
   const proxy = await getPlatformProxy<{ AI: Ai }>({
     configPath: CONFIG_PATH,
     persist: false,

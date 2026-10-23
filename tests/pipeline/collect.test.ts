@@ -8,6 +8,7 @@ import {
   MAX_FEED_BYTES,
 } from "../../src/pipeline/collect/collect";
 import { hookBatch } from "../providers/fakes";
+import { SEED_SOURCES } from "../../src/server/db/seed/sources";
 import { parseFeed } from "../../src/pipeline/collect/rss";
 import arxivXml from "../fixtures/feeds/arxiv-cs-ai.xml?raw";
 import mitXml from "../fixtures/feeds/mit-tr.xml?raw";
@@ -26,6 +27,12 @@ import {
 
 const ARXIV = "https://rss.arxiv.org/rss/cs.AI";
 const MIT = "https://www.technologyreview.com/feed/";
+/** The config of a seeded source, so the test follows the seed. */
+const seedConfig = (name: string) => {
+  const found = SEED_SOURCES.find((x) => x.name === name);
+  if (!found) throw new Error(`no seed source ${name}`);
+  return found.config;
+};
 const xml =
   (body: string, headers: HeadersInit = {}) =>
   () =>
@@ -125,14 +132,7 @@ describe("collectSource", () => {
     const id = await seedSource({
       industryId: industryA,
       feedUrl: ARXIV,
-      config: {
-        exclude: [
-          {
-            field: "arxiv:announce_type",
-            values: ["replace", "replace-cross"],
-          },
-        ],
-      },
+      config: seedConfig("arXiv cs.AI"),
     });
     const items = parseFeed(arxivXml, ARXIV);
     const newOrCross = items.filter((i) =>
