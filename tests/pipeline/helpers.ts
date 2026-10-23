@@ -66,6 +66,8 @@ export async function resetPipeline(): Promise<void> {
   }
   await env.DB.batch(
     [
+      "reviews",
+      "analyses",
       "article_sightings",
       "articles",
       "sources",

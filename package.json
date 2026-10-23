@@ -32,6 +32,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@cfworker/json-schema": "^4.1.1",
     "@cloudflare/vite-plugin": "^1.64.0",
     "@cloudflare/vitest-plugin": "^1.4.7",
     "@eslint/js": "^10.0.1",

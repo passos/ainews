@@ -96,7 +96,7 @@ describe("runQueue", () => {
     expect((await sourceRow(source))?.fail_count).toBe(1);
   });
 
-  it("acks other queues and kinds without a handler", async () => {
+  it("acks other queues, and ingest messages whose flag is off", async () => {
     const other = batch("ainews-group", [{ kind: "body", articleId: 1 }]);
     await runQueue(other.batch, pipelineEnv(fakeQueue(), ON), ctx);
     expect(other.acked).toEqual([0]);

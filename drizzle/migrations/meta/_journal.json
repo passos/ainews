@@ -43,6 +43,13 @@
       "when": 1792749808512,
       "tag": "0005_seed_read_slot",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792755313014,
+      "tag": "0006_analyze",
+      "breakpoints": true
     }
   ]
 }
