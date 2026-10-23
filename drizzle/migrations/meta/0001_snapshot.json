@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6c561869-2773-48ee-9152-338423a5b0cb",
+  "id": "4b54c8c4-b899-4bfc-8190-f73cd7b20fec",
   "prevId": "4641e89a-02ea-451d-a54c-60e54d3cf118",
   "tables": {
     "analyses": {
@@ -714,6 +714,14 @@
         },
         "attempt": {
           "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "failures": {
+          "name": "failures",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { costMicros } from "../../src/providers/budget";
+import { costMicros, settle } from "../../src/providers/budget";
 import { DEFAULT_PRICES } from "../../src/providers/defaults";
 import {
   BudgetExceededError,
@@ -42,7 +42,8 @@ describe("budget reservation", () => {
     });
     expect(await ledgerRow("k")).toMatchObject({
       status: "failed",
-      attempt: 0,
+      attempt: 1,
+      failures: 0,
       error: "budget_exceeded",
     });
 
@@ -69,7 +70,8 @@ describe("budget reservation", () => {
     });
     expect(await ledgerRow("k")).toMatchObject({
       status: "completed",
-      attempt: 1,
+      attempt: 2,
+      failures: 0,
       cost_micros: spent,
     });
   });
@@ -80,5 +82,24 @@ describe("budget reservation", () => {
     expect(costMicros(DEFAULT_PRICES["google/gemini-3.8-flash"], 8, 94)).toBe(
       359,
     );
+  });
+
+  it("refuses a negative or fractional amount", () => {
+    const price = DEFAULT_PRICES["google/gemini-3.8-flash"];
+    expect(() => costMicros(price, -100, 0)).toThrow(RangeError);
+    expect(() => costMicros(price, 0, -100)).toThrow(RangeError);
+    expect(() => costMicros(price, Number.NaN, 0)).toThrow(RangeError);
+    const args = {
+      logicalKey: "k",
+      attempt: 1,
+      day: TODAY,
+      channel: "gateway",
+    };
+    expect(() =>
+      settle(env.DB, { ...args, reservedMicros: 10, actualMicros: -1 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      settle(env.DB, { ...args, reservedMicros: 0.5, actualMicros: 0 }),
+    ).toThrow(RangeError);
   });
 });

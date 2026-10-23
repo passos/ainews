@@ -70,13 +70,14 @@ export async function budgetRow(channel: string) {
 
 export async function ledgerRow(key: string) {
   return env.DB.prepare(
-    `SELECT status, attempt, sent_at, error, cost_micros, estimated_micros,
-       budget_day FROM llm_calls WHERE logical_key = ?1`,
+    `SELECT status, attempt, failures, sent_at, error, cost_micros,
+       estimated_micros, budget_day FROM llm_calls WHERE logical_key = ?1`,
   )
     .bind(key)
     .first<{
       status: string;
       attempt: number;
+      failures: number;
       sent_at: number | null;
       error: string | null;
       cost_micros: number | null;

@@ -1,6 +1,6 @@
 {
-  "id": "5ecdf233-af1e-40cd-89b8-33b48642a285",
-  "prevId": "6c561869-2773-48ee-9152-338423a5b0cb",
+  "id": "22de34d1-36ab-49e0-bfcd-73dac777ec70",
+  "prevId": "4b54c8c4-b899-4bfc-8190-f73cd7b20fec",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -714,6 +714,14 @@
         },
         "attempt": {
           "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "failures": {
+          "name": "failures",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

@@ -274,4 +274,25 @@ describe("model client", () => {
       spent_micros: 0,
     });
   });
+
+  it.each([-100, 0, 1.5])(
+    "rejects maxOutputTokens %s before taking a lease",
+    async (maxOutputTokens) => {
+      const transport = fakeTransport();
+      const models = createModelClient({
+        db: env.DB,
+        transport,
+        env: ENABLED,
+        now: () => NOW,
+      });
+      const before = await budgetRow("gateway");
+
+      await expect(
+        models.generateText("write", "neg", { ...REQUEST, maxOutputTokens }),
+      ).rejects.toThrow(RangeError);
+      expect(transport.calls.length).toBe(0);
+      expect(await ledgerRow("neg")).toBeNull();
+      expect(await budgetRow("gateway")).toEqual(before);
+    },
+  );
 });

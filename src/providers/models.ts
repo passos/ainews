@@ -246,8 +246,16 @@ export function createModelClient(options: ModelClientOptions) {
 
     const responseJson = JSON.stringify(raw ?? null);
     let parsed: Parsed<T>;
+    let usage: Usage;
+    let actual: number;
     try {
       parsed = spec.parse(model, raw);
+      usage = parsed.usage ?? {
+        inputTokens: estimatedInputTokens,
+        outputTokens: 0,
+      };
+      // Negative or fractional usage makes costMicros throw: a bad response.
+      actual = costMicros(price, usage.inputTokens, usage.outputTokens);
     } catch (error) {
       // The request was billed: count the estimate as spent.
       await db.batch([
@@ -264,11 +272,6 @@ export function createModelClient(options: ModelClientOptions) {
       throw error;
     }
 
-    const usage = parsed.usage ?? {
-      inputTokens: estimatedInputTokens,
-      outputTokens: 0,
-    };
-    const actual = costMicros(price, usage.inputTokens, usage.outputTokens);
     await db.batch([
       charge(actual),
       complete(db, {
@@ -315,11 +318,18 @@ export function createModelClient(options: ModelClientOptions) {
       });
     },
 
-    generateText(
+    /** `request.maxOutputTokens` must be a positive integer (RangeError). */
+    async generateText(
       slot: "write" | "reason",
       key: string,
       request: TextRequest,
     ): Promise<{ text: string; usage: Usage }> {
+      const { maxOutputTokens } = request;
+      if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
+        throw new RangeError(
+          `maxOutputTokens must be a positive integer, got ${maxOutputTokens}`,
+        );
+      }
       return call({
         slot,
         key,

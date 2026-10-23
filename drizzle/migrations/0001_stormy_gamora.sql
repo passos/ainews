@@ -104,6 +104,7 @@ CREATE TABLE `llm_calls` (
 	`channel` text NOT NULL,
 	`status` text NOT NULL,
 	`attempt` integer DEFAULT 0 NOT NULL,
+	`failures` integer DEFAULT 0 NOT NULL,
 	`lease_expires_at` integer,
 	`sent_at` integer,
 	`request_json` text,

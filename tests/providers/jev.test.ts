@@ -68,8 +68,9 @@ describe("jev", () => {
     expect(() => buildJevInput(state, QUESTIONS)).toThrow(RangeError);
   });
 
-  // Each emoji is a surrogate pair; the prefix moves the cut to either parity.
-  it.each(["", "a"])(
+  // Each emoji is a surrogate pair. With these odd prefixes the unguarded
+  // cut lands between the two halves of a pair (checked on the old code).
+  it.each(["a", "aaaaaaa"])(
     "does not split a surrogate pair when cutting an emoji body (prefix %j)",
     (prefix) => {
       const state = { title: "T", body: prefix + "\u{1F600}".repeat(100_000) };

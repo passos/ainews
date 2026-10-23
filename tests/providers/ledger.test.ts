@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { settle } from "../../src/providers/budget";
 import {
   LEASE_MS,
+  abandon,
   acquire,
   complete,
   fail,
   reserveAndMarkSent,
 } from "../../src/providers/ledger";
+import { TransportHttpError } from "../../src/providers/transport";
 import {
+  BudgetExceededError,
   CallFailedError,
   CallInProgressError,
   CallUnknownError,
@@ -44,14 +47,23 @@ async function strandedRow(
   leaseExpiresAt: number,
   sentAt: number | null,
   attempt = 1,
+  failures = 0,
 ) {
   await env.DB.prepare(
     `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt,
-       lease_expires_at, sent_at, created_at, updated_at)
+       failures, lease_expires_at, sent_at, created_at, updated_at)
      VALUES (?1, 'write', 'google/gemini-3.8-flash', 'gateway', 'in_flight', ?5,
-       ?2, ?3, ?4, ?4)`,
+       ?6, ?2, ?3, ?4, ?4)`,
   )
-    .bind(key, leaseExpiresAt, sentAt, NOW - LEASE_MS, attempt)
+    .bind(key, leaseExpiresAt, sentAt, NOW - LEASE_MS, attempt, failures)
+    .run();
+}
+
+async function raiseCap() {
+  await env.DB.prepare(
+    "UPDATE budgets SET cap_micros = 1000000 WHERE day = ?1 AND channel = 'gateway'",
+  )
+    .bind(TODAY)
     .run();
 }
 
@@ -170,7 +182,7 @@ describe("llm_calls ledger", () => {
   });
 
   it("fails a stranded unsent row on its last attempt instead of taking it over", async () => {
-    await strandedRow("last", NOW - 1, null, 3);
+    await strandedRow("last", NOW - 1, null, 3, 2);
     const { models, transport } = client();
 
     await expect(models.generateText("write", "last", REQUEST)).rejects.toThrow(
@@ -180,6 +192,7 @@ describe("llm_calls ledger", () => {
     expect(await ledgerRow("last")).toMatchObject({
       status: "failed",
       attempt: 3,
+      failures: 3,
     });
   });
 
@@ -261,7 +274,8 @@ describe("llm_calls ledger", () => {
     expect(await budgetRow("gateway")).toMatchObject({ reserved_micros: 0 });
     expect(await ledgerRow("short")).toMatchObject({
       status: "failed",
-      attempt: 0,
+      attempt: 1,
+      failures: 0,
       sent_at: null,
       error: "budget_exceeded",
     });
@@ -339,5 +353,84 @@ describe("llm_calls ledger", () => {
     ]);
     expect(await budgetRow("gateway")).toEqual(before);
     expect(await ledgerRow("late")).toMatchObject({ status: "failed" });
+  });
+
+  it("still acquires a key after three budget rejections: attempt 4, failures 0", async () => {
+    await resetLedger(0);
+    const { models, transport } = client();
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        models.generateText("write", "poor", REQUEST),
+      ).rejects.toThrow(BudgetExceededError);
+    }
+    expect(transport.calls.length).toBe(0);
+    await raiseCap();
+
+    await models.generateText("write", "poor", REQUEST);
+    expect(transport.calls.length).toBe(1);
+    expect(await ledgerRow("poor")).toMatchObject({
+      status: "completed",
+      attempt: 4,
+      failures: 0,
+    });
+  });
+
+  it("a stale holder's abandon does not touch the next holder's lease", async () => {
+    await resetLedger(0);
+    // A: attempt 1, refused by the budget.
+    const a = await acquired("ab");
+    expect(a).toBe(1);
+    expect(await send("ab", a)).toBe("over_budget");
+    // B takes the key next and gets a new attempt number.
+    const b = await acquired("ab");
+    expect(b).toBe(2);
+    // A, not knowing its batch committed, gives up on attempt 1.
+    const stale = await abandon(env.DB, {
+      logicalKey: "ab",
+      attempt: a,
+      now: NOW,
+      error: "lost the response",
+    }).run();
+    expect(stale.meta.changes).toBe(0);
+    expect(await ledgerRow("ab")).toMatchObject({
+      status: "in_flight",
+      attempt: 2,
+      failures: 0,
+    });
+
+    await raiseCap();
+    expect(await send("ab", b)).toBe("sent");
+  });
+
+  it("throws CallFailedError after three real failures; a budget rejection does not count", async () => {
+    await resetLedger(0);
+    const transport = fakeTransport(() => {
+      throw new TransportHttpError(502, "bad gateway");
+    });
+    const models = createModelClient({
+      db: env.DB,
+      transport,
+      env: ENABLED,
+      now: () => NOW,
+    });
+    await expect(models.generateText("write", "bad", REQUEST)).rejects.toThrow(
+      BudgetExceededError,
+    );
+    await raiseCap();
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        models.generateText("write", "bad", REQUEST),
+      ).rejects.toThrow(TransportHttpError);
+    }
+
+    await expect(models.generateText("write", "bad", REQUEST)).rejects.toThrow(
+      CallFailedError,
+    );
+    expect(transport.calls.length).toBe(3);
+    expect(await ledgerRow("bad")).toMatchObject({
+      status: "failed",
+      attempt: 4,
+      failures: 3,
+    });
   });
 });

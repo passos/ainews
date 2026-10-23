@@ -12,6 +12,16 @@ export function utcDay(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
+/** Every amount written to `budgets` passes here: a negative or fractional
+ * amount would move the cap. */
+export function assertMicros(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `${name} must be a non-negative integer, got ${value}`,
+    );
+  }
+}
+
 /**
  * Price is integer micro-USD per 1M tokens. Integer products and sums, one
  * rounding up at the end: 1,500 Jev input tokens cost exactly 63.
@@ -21,9 +31,11 @@ export function costMicros(
   inputTokens: number,
   outputTokens: number,
 ): number {
-  return Math.ceil(
+  const micros = Math.ceil(
     (inputTokens * price.in + outputTokens * price.out) / 1_000_000,
   );
+  assertMicros(micros, "cost");
+  return micros;
 }
 
 /** Creates the day's row with `capMicros`; an existing row keeps its cap. */
@@ -56,6 +68,8 @@ export function settle(
     actualMicros: number;
   },
 ): D1PreparedStatement {
+  assertMicros(args.reservedMicros, "reservedMicros");
+  assertMicros(args.actualMicros, "actualMicros");
   return db
     .prepare(
       `UPDATE budgets SET reserved_micros = reserved_micros - ?1,

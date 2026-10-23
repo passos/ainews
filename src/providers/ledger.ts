@@ -2,23 +2,26 @@
 //
 //   pending ──┐                     reserveAndMarkSent (one batch)
 //   failed ───┼─ acquire ─> in_flight ─┬─> sent ─> (request) ─┬─> completed
-//   (attempt < 3)           │          │                      └─> failed
-//                           │          ├─> failed, attempt - 1 (budget refused)
-//                           │          └─> failed (abandon: error before send)
-//                           ├─ lease expired, sent_at NULL, attempt < 3:
-//                           │    acquire again
-//                           ├─ lease expired, sent_at NULL, attempt = 3: failed
-//                           └─ lease expired, sent_at set:  markUnknown ─> unknown
+//   (failures < 3)          │          │                      └─> failed +1
+//                           │          ├─> failed (budget refused, +0)
+//                           │          └─> failed +1 (abandon: error before send)
+//                           ├─ lease expired, sent_at NULL:  failed +1
+//                           └─ lease expired, sent_at set:   markUnknown ─> unknown
 //
-// Every transition is a conditional UPDATE; `attempt` is the fencing token
-// that tells the lease holder whether the row is still its own. The promise
-// is "never start the same call twice, and recover", not "pay exactly once".
+//   +1: `failures` + 1. `failed` with failures = 3 is exhausted.
+//
+// Every transition is a conditional UPDATE. `attempt` is the fencing token:
+// each acquire adds 1 and it never decreases, so an attempt number names one
+// lease holder only, and a holder whose row was taken over matches nothing.
+// `failures` counts real failures and decides when a key is exhausted; a
+// budget rejection does not count. The promise is "never start the same call
+// twice, and recover", not "pay exactly once".
 //
 // Budget invariant: a reservation exists if and only if one row has
 // `sent_at` set and records its `(budget_day, channel, estimated_micros)`.
 // Reserving and marking sent commit together; settling happens in the batch
 // that ends the row, and only while the row is still `in_flight`/`unknown`.
-import { ensureDay } from "./budget";
+import { assertMicros, ensureDay } from "./budget";
 import type { Channel } from "./defaults";
 
 export const LEASE_MS = 10 * 60 * 1000;
@@ -34,6 +37,7 @@ export type AcquireOutcome =
 interface Row {
   status: string;
   attempt: number;
+  failures: number;
   lease_expires_at: number | null;
   sent_at: number | null;
   model: string;
@@ -44,7 +48,8 @@ interface Row {
 function readRow(db: D1Database, logicalKey: string): Promise<Row | null> {
   return db
     .prepare(
-      `SELECT status, attempt, lease_expires_at, sent_at, model, response_json, error
+      `SELECT status, attempt, failures, lease_expires_at, sent_at, model,
+         response_json, error
        FROM llm_calls WHERE logical_key = ?1`,
     )
     .bind(logicalKey)
@@ -81,25 +86,25 @@ export async function acquire(
          VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?5)`,
       )
       .bind(logicalKey, args.slot, args.model, args.channel, now),
-    // An unsent row whose last attempt lost its lease is out of attempts.
+    // The holder of an expired, unsent lease went away: a real failure.
     db
       .prepare(
         `UPDATE llm_calls
-         SET status = 'failed', error = 'lease expired before the request was sent',
+         SET status = 'failed', failures = failures + 1,
+             error = 'lease expired before the request was sent',
              lease_expires_at = NULL, updated_at = ?2
          WHERE logical_key = ?1 AND status = 'in_flight'
-           AND lease_expires_at < ?2 AND sent_at IS NULL AND attempt >= ?3`,
+           AND lease_expires_at < ?2 AND sent_at IS NULL`,
       )
-      .bind(logicalKey, now, MAX_ATTEMPTS),
+      .bind(logicalKey, now),
     // RETURNING: the attempt this UPDATE took, not whatever a later read sees.
     db
       .prepare(
         `UPDATE llm_calls
          SET status = 'in_flight', lease_expires_at = ?2, attempt = attempt + 1,
              sent_at = NULL, model = ?3, channel = ?4, updated_at = ?5
-         WHERE logical_key = ?1 AND attempt < ?6
-           AND (status IN ('pending', 'failed')
-             OR (status = 'in_flight' AND lease_expires_at < ?5 AND sent_at IS NULL))
+         WHERE logical_key = ?1 AND status IN ('pending', 'failed')
+           AND failures < ?6
          RETURNING attempt`,
       )
       .bind(
@@ -126,7 +131,7 @@ export async function acquire(
         responseJson: row.response_json,
       };
     case "failed":
-      if (row.attempt >= MAX_ATTEMPTS) {
+      if (row.failures >= MAX_ATTEMPTS) {
         return { kind: "exhausted", error: row.error };
       }
       break;
@@ -155,7 +160,7 @@ export type SendOutcome = "sent" | "over_budget" | "lost";
  * request as about to go out. Either both happen or neither does.
  *   "sent":        reserved and marked sent; the caller sends.
  *   "over_budget": the cap cannot cover the estimate. The row goes back to
- *                  `failed` without using up an attempt.
+ *                  `failed`; `failures` does not change.
  *   "lost":        the lease was lost (someone took over); nothing reserved.
  */
 export async function reserveAndMarkSent(
@@ -173,6 +178,7 @@ export async function reserveAndMarkSent(
 ): Promise<SendOutcome> {
   const { logicalKey, attempt, now, estimatedMicros, budgetDay, channel } =
     args;
+  assertMicros(estimatedMicros, "estimatedMicros");
   const [, sent, reserved, rejected] = await db.batch([
     ensureDay(db, { day: budgetDay, channel, capMicros: args.capMicros }),
     // Marks sent only if the row is still this attempt's and the cap has room.
@@ -212,11 +218,11 @@ export async function reserveAndMarkSent(
                AND estimated_micros = ?1)`,
       )
       .bind(estimatedMicros, budgetDay, channel, logicalKey, attempt),
-    // Still ours and not sent: the budget refused. Give the attempt back.
+    // Still ours and not sent: the budget refused. Not a failure.
     db
       .prepare(
         `UPDATE llm_calls
-         SET status = 'failed', attempt = attempt - 1, error = 'budget_exceeded',
+         SET status = 'failed', error = 'budget_exceeded',
              lease_expires_at = NULL, updated_at = ?3
          WHERE logical_key = ?1 AND attempt = ?2 AND status = 'in_flight'
            AND sent_at IS NULL`,
@@ -233,8 +239,8 @@ export async function reserveAndMarkSent(
 }
 
 /**
- * Something failed after acquire and before the request went out. Uses up
- * the attempt. No-op if the row was sent (it then has a reservation and
+ * Something failed after acquire and before the request went out. Counts as
+ * a failure. No-op if the row was sent (it then has a reservation and
  * becomes `unknown` when the lease expires) or is no longer ours.
  */
 export function abandon(
@@ -244,7 +250,8 @@ export function abandon(
   return db
     .prepare(
       `UPDATE llm_calls
-       SET status = 'failed', error = ?4, lease_expires_at = NULL, updated_at = ?3
+       SET status = 'failed', failures = failures + 1, error = ?4,
+           lease_expires_at = NULL, updated_at = ?3
        WHERE logical_key = ?1 AND attempt = ?2 AND status = 'in_flight'
          AND sent_at IS NULL`,
     )
@@ -287,6 +294,7 @@ export function complete(
     );
 }
 
+/** The request went out and failed (transport or parse). Counts as a failure. */
 export function fail(
   db: D1Database,
   args: {
@@ -301,7 +309,8 @@ export function fail(
   return db
     .prepare(
       `UPDATE llm_calls
-       SET status = 'failed', error = ?4, response_json = ?5, cost_micros = ?6,
+       SET status = 'failed', failures = failures + 1, error = ?4,
+           response_json = ?5, cost_micros = ?6,
            lease_expires_at = NULL, updated_at = ?3
        WHERE logical_key = ?1 AND attempt = ?2
          AND status IN ('in_flight', 'unknown')`,

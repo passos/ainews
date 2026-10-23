@@ -16,7 +16,10 @@ export const llmCalls = sqliteTable(
     status: text("status", {
       enum: ["pending", "in_flight", "completed", "failed", "unknown"],
     }).notNull(),
+    /** Fencing token: +1 on every acquire, never decreases. */
     attempt: integer("attempt").notNull().default(0),
+    /** Real failures; a budget rejection does not count. Max MAX_ATTEMPTS. */
+    failures: integer("failures").notNull().default(0),
     /** Epoch milliseconds. */
     leaseExpiresAt: integer("lease_expires_at"),
     /** Epoch milliseconds; set right before the request goes out. */
