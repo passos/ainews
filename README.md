@@ -49,6 +49,30 @@ npx wrangler d1 migrations apply DB --remote   # apply to production
 
 Migrations live in `drizzle/migrations/` and run through wrangler, not Drizzle.
 
+### Seed
+
+```sh
+npm run seed:local    # local D1
+npm run seed:remote   # production D1
+```
+
+Inserts the four sections (Technology, Education, Industry, Finance with
+their criteria, thresholds and `primary_domains`) and the two Technology
+sources. Every statement is `INSERT … ON CONFLICT DO NOTHING`, so the seed can
+run again and never overwrites what the admin changed. It does not turn on any
+switch (`COLLECT_ENABLED` and the others stay as they are). It is not part of
+the deploy: a deleted seed source would come back with every deploy.
+
+After the merge the owner runs `npm run seed:remote` once. The script writes
+`.seed.sql` (git-ignored) and runs it with `wrangler d1 execute`. It runs
+Node with `scripts/ts-resolve.mjs`, a preload that lets Node load the
+`src/` files that import each other without a file extension.
+
+`scripts/try-analysis.ts` runs the analysis (Jev only, no database, no ledger)
+on the articles in `tests/fixtures/analysis/real/` and prints a table. It
+calls the real model and needs `.env.prod`, so it runs only on the owner's
+machine. `--dry-run` builds and checks the requests without any call.
+
 ## Provision Cloudflare resources
 
 ```sh

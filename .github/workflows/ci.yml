@@ -27,6 +27,9 @@ jobs:
       - run: npm run test:tz
       - run: npm run build
       - run: npm run test:ssr
+      # `npm run seed:remote` runs the seed under plain Node (type stripping),
+      # which vitest and tsc do not check.
+      - run: node --import ./scripts/ts-resolve.mjs -e "await import('./src/server/db/seed/sql.ts')"
 
   deploy:
     name: deploy
