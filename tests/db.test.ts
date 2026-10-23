@@ -47,6 +47,7 @@ it("migrations create the core tables", async () => {
   ).all<{ name: string }>();
   expect(results.map((r) => r.name)).toEqual([
     "analyses",
+    "article_sightings",
     "articles",
     "budgets",
     "corrections",
@@ -59,4 +60,80 @@ it("migrations create the core tables", async () => {
     "settings",
     "sources",
   ]);
+});
+
+it("the #5 rebuild of articles keeps its indexes and foreign keys", async () => {
+  const { results: indexes } = await env.DB.prepare(
+    "PRAGMA index_list(articles)",
+  ).all<{ name: string; unique: number }>();
+  expect(indexes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "articles_canonical_url_unique",
+        unique: 1,
+      }),
+      expect.objectContaining({ name: "articles_stage_idx", unique: 0 }),
+    ]),
+  );
+  const { results: cols } = await env.DB.prepare(
+    "PRAGMA index_info(articles_canonical_url_unique)",
+  ).all<{ name: string }>();
+  expect(cols.map((c) => c.name)).toEqual(["canonical_url"]);
+
+  for (const table of [
+    "analyses",
+    "reviews",
+    "event_articles",
+    "article_sightings",
+  ]) {
+    const { results } = await env.DB.prepare(
+      `PRAGMA foreign_key_list(${table})`,
+    ).all<{ table: string; from: string }>();
+    expect(results).toContainEqual(
+      expect.objectContaining({ table: "articles", from: "article_id" }),
+    );
+  }
+  const { results: articleFks } = await env.DB.prepare(
+    "PRAGMA foreign_key_list(articles)",
+  ).all<{ table: string; from: string }>();
+  expect(articleFks.map((f) => `${f.from}->${f.table}`).sort()).toEqual([
+    "industry_id->industries",
+    "source_id->sources",
+  ]);
+  const { results: sourceIdx } = await env.DB.prepare(
+    "PRAGMA index_list(sources)",
+  ).all<{ name: string; unique: number }>();
+  expect(sourceIdx).toContainEqual(
+    expect.objectContaining({
+      name: "sources_industry_feed_unique",
+      unique: 1,
+    }),
+  );
+});
+
+it("articles.stage accepts dropped and rejects unknown stages", async () => {
+  const [industry] = (
+    await env.DB.prepare(
+      "INSERT INTO industries (slug, name, created_at) VALUES ('stage-test', 'x', 0) RETURNING id",
+    ).all<{ id: number }>()
+  ).results;
+  const source = await env.DB.prepare(
+    "INSERT INTO sources (industry_id, feed_url, kind, created_at) VALUES (?1, 'https://s/', 'rss', 0) RETURNING id",
+  )
+    .bind(industry.id)
+    .first<{ id: number }>();
+  const insert = (stage: string, url: string) =>
+    env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title,
+         fetched_at, stage, stage_updated_at) VALUES (?1, ?2, ?3, ?3, 't', 0, ?4, 0)`,
+    )
+      .bind(source!.id, industry.id, url, stage)
+      .run();
+  await insert("dropped", "https://a/1");
+  await expect(insert("bogus", "https://a/2")).rejects.toThrow(/CHECK/);
+  await expect(
+    env.DB.prepare("UPDATE sources SET paused_reason = 'bored' WHERE id = ?1")
+      .bind(source!.id)
+      .run(),
+  ).rejects.toThrow(/CHECK/);
 });

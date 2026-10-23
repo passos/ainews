@@ -22,6 +22,13 @@
       "when": 1792736503799,
       "tag": "0002_seed_model_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792748119703,
+      "tag": "0003_collect",
+      "breakpoints": true
     }
   ]
 }
