@@ -23,8 +23,12 @@ export interface SeedIndustry {
   analysis: AnalysisConfig;
 }
 
-/** Placeholder: with review mode it only decides what reaches the queue. */
-const THRESHOLDS = { prefilterMinRelevant: 0.3, select: 50 };
+/**
+ * Owner decision of 2026-10-23: `select` is 60 for Technology (arXiv alone
+ * would send about 140 articles a day to the queue at 50) and 50 for the
+ * others; recalibrate after a week with the owner's labelled samples.
+ */
+const thresholds = (select: number) => ({ prefilterMinRelevant: 0.3, select });
 
 const technology: AnalysisConfig = {
   prefilter: {
@@ -168,7 +172,7 @@ const technology: AnalysisConfig = {
     },
   },
   labels: ["publication_status", "development_stage", "claim_mode"],
-  thresholds: THRESHOLDS,
+  thresholds: thresholds(60),
   summaryGuidance:
     "Say what was released, found or announced and by whom, keep the source's own claims apart from independent evaluation, and for a paper say that it is a preprint and name the main limit the authors state.",
   guardrails: [],
@@ -304,7 +308,7 @@ const education: AnalysisConfig = {
     "outcome_measure",
     "claim_mode",
   ],
-  thresholds: THRESHOLDS,
+  thresholds: thresholds(50),
   summaryGuidance:
     "Name the group that a policy or study covers, say for a study who took part and what was measured, and do not suggest that the result applies to other groups.",
   guardrails: [],
@@ -439,7 +443,7 @@ const industry: AnalysisConfig = {
     },
   },
   labels: ["development_stage", "claim_mode"],
-  thresholds: THRESHOLDS,
+  thresholds: thresholds(50),
   summaryGuidance:
     "Say which company or regulator did what, give the figures and dates that the source gives, and mark plans, targets and projections as such.",
   guardrails: [],
@@ -575,14 +579,14 @@ const finance: AnalysisConfig = {
     },
   },
   labels: ["performance_basis", "development_stage", "claim_mode"],
-  thresholds: THRESHOLDS,
+  thresholds: thresholds(50),
   summaryGuidance:
-    "Say what was reported or decided, give the figures as the source gives them together with their period, and say whether a result comes from a backtest, a simulation or live use.",
+    "Say what was reported or decided, give the figures as the source gives them together with their period, and say whether a result comes from a backtest, a simulation or live use, with the benchmark it is compared with and the source of the figures when the source gives them.",
   guardrails: [
     "Never give buy, sell or hold advice, price targets, portfolio recommendations or personal investment advice.",
     "Never state or suggest that an AI agent can reliably beat the market.",
     "Never present a forecast, projection or target as a fact.",
-    "Always say whether a performance claim comes from a backtest, a simulation or live use, and give the period when the source gives it.",
+    "Always say whether a performance claim comes from a backtest, a simulation or live use, and give the period, the benchmark it is compared with, and the source, when the source gives them.",
   ],
 };
 

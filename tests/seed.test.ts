@@ -115,13 +115,13 @@ describe("seed on the test database", () => {
       const seed = SEED_INDUSTRIES.find((i) => i.slug === row.slug)!;
       expect(config).toEqual(seed.analysis);
       expect(JSON.parse(row.primary_domains)).toEqual(seed.primaryDomains);
-      // 4-8 categories, thresholds as the issue sets them.
+      // 4-8 categories; thresholds as the owner set them on 2026-10-23.
       const n = Object.keys(config!.categories).length;
       expect(n).toBeGreaterThanOrEqual(4);
       expect(n).toBeLessThanOrEqual(8);
       expect(config!.thresholds).toEqual({
         prefilterMinRelevant: 0.3,
-        select: 50,
+        select: row.slug === "technology" ? 60 : 50,
       });
       // Every asked label is a known label.
       for (const key of config!.labels) expect(LABELS).toHaveProperty(key);
@@ -143,6 +143,15 @@ describe("seed on the test database", () => {
       const guardrails = parseAnalysisConfig(row.config)!.guardrails;
       expect(guardrails).toHaveLength(row.slug === "finance" ? 4 : 0);
     }
+    // The fourth Finance guardrail names period, benchmark and source (owner).
+    const finance = parseAnalysisConfig(
+      rows.find((r) => r.slug === "finance")!.config,
+    )!;
+    expect(finance.guardrails[3]).toBe(
+      "Always say whether a performance claim comes from a backtest, a simulation or live use, and give the period, the benchmark it is compared with, and the source, when the source gives them.",
+    );
+    expect(finance.summaryGuidance).toContain("benchmark");
+    expect(finance.summaryGuidance).toContain("source of the figures");
   });
 
   it("the row with slug FINANCE_SLUG is never auto, even if set to auto", async () => {
