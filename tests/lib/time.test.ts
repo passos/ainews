@@ -107,6 +107,35 @@ describe("parseFeedDate", () => {
     );
   });
 
+  it("reads 12-hour times with AM/PM", () => {
+    expect(iso("Oct 22, 2026 10:00 PM")).toBe("2026-10-22T22:00:00.000Z");
+    expect(iso("Oct 22, 2026 10:00 PM", "+08:00")).toBe(
+      "2026-10-22T14:00:00.000Z",
+    );
+    expect(iso("Oct 22, 2026 12:30 AM")).toBe("2026-10-22T00:30:00.000Z");
+    expect(iso("Oct 22, 2026 12:30 PM")).toBe("2026-10-22T12:30:00.000Z");
+    expect(iso("Oct 22, 2026 1:05 am")).toBe("2026-10-22T01:05:00.000Z");
+    expect(iso("Oct 22, 2026 10:00 p.m.")).toBe("2026-10-22T22:00:00.000Z");
+    expect(iso("Oct 22, 2026 10:00 p. m.")).toBe("2026-10-22T22:00:00.000Z");
+    expect(iso("Oct 22, 2026 10:00PM")).toBe("2026-10-22T22:00:00.000Z");
+    expect(iso("2026-10-22 10:00 PM EST", "+08:00")).toBe(
+      "2026-10-23T03:00:00.000Z",
+    );
+  });
+
+  it("rejects an AM/PM hour outside 1-12", () => {
+    expect(iso("Oct 22, 2026 13:00 PM")).toBeNull();
+    expect(iso("Oct 22, 2026 0:30 AM")).toBeNull();
+  });
+
+  it("rejects letters after a date without a time", () => {
+    expect(iso("2026-10-22 foo")).toBeNull();
+    expect(iso("2026-10-22 PM")).toBeNull();
+    expect(iso("Oct 22, 2026 JST")).toBeNull();
+    // A known zone after a date alone still counts.
+    expect(iso("2026-10-22 GMT", "+08:00")).toBe("2026-10-22T00:00:00.000Z");
+  });
+
   it("returns null for what it cannot read", () => {
     expect(parseFeedDate(null, "+00:00")).toBeNull();
     expect(parseFeedDate("", "+00:00")).toBeNull();

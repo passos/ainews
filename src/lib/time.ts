@@ -34,10 +34,13 @@ const ZONE_NAMES: Record<string, string> = {
   pdt: "-07:00",
 };
 
-// Any 2-5 letter name is taken; zoneOffset() ignores the ones it does not
-// know (BST, CEST, JST are ambiguous or not RFC 822).
+// Any 2-5 letter name is taken. After a time, zoneOffset() ignores the ones
+// it does not know (BST, CEST, JST are ambiguous or not RFC 822); after a
+// date alone, an unknown name makes the string invalid.
 const ZONE = String.raw`(Z|(?:GMT|UTC)?[+-]\d{2}:?\d{2}|[a-z]{2,5})`;
-const TIME = String.raw`(\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?`;
+// The AM/PM group comes before ZONE and is greedy, so "PM" is never taken
+// as a zone name. Accepts "PM", "pm", "p.m.", "p. m.".
+const TIME = String.raw`(\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?(?:\s*([ap])\.?\s*m\.?)?`;
 
 // 2026-10-22, 2026-10-22T10:00:00.5+08:00, 2026-10-22 10:00 GMT
 const ISO = new RegExp(
@@ -65,13 +68,16 @@ interface Fields {
   minute?: string;
   second?: string;
   fraction?: string;
+  /** "a" or "p" for a 12-hour time. */
+  meridiem?: string;
   zone?: string;
 }
 
 function split(raw: string): Fields | null {
   let m = ISO.exec(raw);
   if (m) {
-    const [, year, month, day, hour, minute, second, fraction, zone] = m;
+    const [, year, month, day, hour, minute, second, fraction, meridiem, zone] =
+      m;
     return {
       year,
       month: Number(month),
@@ -80,12 +86,14 @@ function split(raw: string): Fields | null {
       minute,
       second,
       fraction,
+      meridiem,
       zone,
     };
   }
   m = DAY_MONTH.exec(raw);
   if (m) {
-    const [, day, mon, year, hour, minute, second, fraction, zone] = m;
+    const [, day, mon, year, hour, minute, second, fraction, meridiem, zone] =
+      m;
     const y = year.length === 2 ? `20${year}` : year;
     return {
       year: y,
@@ -95,12 +103,14 @@ function split(raw: string): Fields | null {
       minute,
       second,
       fraction,
+      meridiem,
       zone,
     };
   }
   m = MONTH_DAY.exec(raw);
   if (m) {
-    const [, mon, day, year, hour, minute, second, fraction, zone] = m;
+    const [, mon, day, year, hour, minute, second, fraction, meridiem, zone] =
+      m;
     return {
       year,
       month: MONTHS[mon.toLowerCase()] ?? 0,
@@ -109,6 +119,7 @@ function split(raw: string): Fields | null {
       minute,
       second,
       fraction,
+      meridiem,
       zone,
     };
   }
@@ -127,6 +138,21 @@ function zoneOffset(zone: string): string | null {
 const pad = (s: string | undefined) => (s ?? "0").padStart(2, "0");
 
 /**
+ * Hour as 0-23 text. 12-hour times: 12 AM = 0, 12 PM = 12, 1-11 PM + 12;
+ * an hour outside 1-12 with AM/PM is invalid (null).
+ */
+function to24h(
+  hour: string | undefined,
+  meridiem: string | undefined,
+): string | undefined | null {
+  if (hour === undefined || meridiem === undefined) return hour;
+  const h = Number(hour);
+  if (h < 1 || h > 12) return null;
+  const pm = meridiem.toLowerCase() === "p";
+  return String((h % 12) + (pm ? 12 : 0));
+}
+
+/**
  * Parses a feed or page date. A date with an explicit zone uses that zone;
  * otherwise `utcOffset` ("+hh:mm" / "-hh:mm", the source's setting) is used.
  * A date without a time is midnight in that zone. Returns null if the
@@ -141,12 +167,17 @@ export function parseFeedDate(
   if (!text) return null;
   const f = split(text);
   if (!f || f.month < 1 || f.month > 12) return null;
-  // An unknown zone name is ignored: the source's offset is used instead.
-  const offset = (f.zone && zoneOffset(f.zone)) || utcOffset;
+  const hour = to24h(f.hour, f.meridiem);
+  if (hour === null) return null;
+  const known = f.zone ? zoneOffset(f.zone) : null;
+  // An unknown zone name after a time is ignored (the source's offset is
+  // used); after a date alone it is not a zone but garbage ("2026-10-22 foo").
+  if (f.zone && !known && f.hour === undefined) return null;
+  const offset = known ?? utcOffset;
   if (!OFFSET.test(offset)) return null;
   const iso =
     `${f.year}-${pad(String(f.month))}-${pad(f.day)}` +
-    `T${pad(f.hour)}:${pad(f.minute)}:${pad(f.second)}${f.fraction ?? ""}` +
+    `T${pad(hour)}:${pad(f.minute)}:${pad(f.second)}${f.fraction ?? ""}` +
     offset;
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return null;
