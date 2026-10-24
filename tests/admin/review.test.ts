@@ -1,14 +1,10 @@
 import { env } from "cloudflare:workers";
-import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
   decideReview,
   listPendingArticles,
 } from "../../src/server/admin/review";
 import { updateIndustryConfig } from "../../src/server/admin/industries";
-import { getDb } from "../../src/server/db/client";
-
-const db = () => getDb(env.DB);
 
 describe("review and industry admin operations", () => {
   it("approval binds to body_sha; returning 409 on sha mismatch and returning to queue when body changes", async () => {

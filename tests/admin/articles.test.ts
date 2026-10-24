@@ -118,8 +118,8 @@ describe("article admin operations", () => {
     const artId = art!.id;
 
     await env.DB.prepare(
-      `INSERT INTO analyses (article_id, prompt_version, score_total, selected, created_at)
-       VALUES (?1, 'v1', 80, 1, 0)`,
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+       VALUES (?1, 'v1', '{}', 'news', '{}', 80, 1, 0)`,
     )
       .bind(artId)
       .run();
@@ -143,5 +143,21 @@ describe("article admin operations", () => {
       .bind(artId)
       .first<{ count: number }>();
     expect(analysesCount!.count).toBe(0);
+  });
+
+  it("creates a correction record", async () => {
+    await createCorrection({
+      data: { targetType: "article", targetId: 999, body: "Correction text" },
+      context: { admin: { email: "admin@example.com" } },
+    } as any);
+
+    const row = await env.DB.prepare(
+      "SELECT target_type, target_id, body FROM corrections WHERE target_id = 999",
+    ).first<{ target_type: string; target_id: number; body: string }>();
+    expect(row).toEqual({
+      target_type: "article",
+      target_id: 999,
+      body: "Correction text",
+    });
   });
 });
