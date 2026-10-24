@@ -129,4 +129,5 @@ CF worker name ainews-app
 
 # 第五轮决定（2026-10-23）
 
-- 2026-10-23 使用者决定：不用 Sonnet；`reason` 用 Gemini 3.8 Flash（备选 OpenAI gpt-6-luna）；Q_INGEST 消费并发限制为 2。见 #53。
+- 2026-10-23 使用者决定：不用 Sonnet；`reason` 用 Gemini 3.8 Flash（备选 OpenAI gpt-6-luna）。见 #53。
+- 2026-10-23 ainews-design 决定：Q_INGEST 消费并发上限为 2，防止补队积压时突发调用触发网关限流（05:42Z 出现 32 次 2018）。见 #53。
