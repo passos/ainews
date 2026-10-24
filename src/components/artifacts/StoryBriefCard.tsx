@@ -1,6 +1,12 @@
 import type { StoryBrief } from "../../lib/artifacts/types";
 
-export function StoryBriefCard({ brief }: { brief: StoryBrief }) {
+export function StoryBriefCard({
+  brief,
+  verifiedClaims,
+}: {
+  brief: StoryBrief;
+  verifiedClaims?: string[];
+}) {
   return (
     <section
       aria-label="Story Brief"
@@ -41,6 +47,15 @@ export function StoryBriefCard({ brief }: { brief: StoryBrief }) {
           <p className="text-sm leading-relaxed text-foreground">
             {brief.whatEvidenceExists}
           </p>
+          {verifiedClaims && verifiedClaims.length > 0 && (
+            <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+              {verifiedClaims.slice(0, 3).map((claim, idx) => (
+                <li key={idx} className="leading-snug">
+                  {claim}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">

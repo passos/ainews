@@ -1,6 +1,7 @@
 import { enqueueDueArtifacts } from "./artifacts/schedule";
 import { scheduleDueSources } from "./collect/schedule";
 import { enqueueDueDigests } from "./digest/schedule";
+import { enqueueDueEvidence } from "./evidence/schedule";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
 
@@ -15,11 +16,13 @@ export async function runScheduled(
   const requeued = await requeueStuck(env, now);
   const digests = await enqueueDueDigests(env, now);
   const artifacts = await enqueueDueArtifacts(env, now);
+  const evidence = await enqueueDueEvidence(env, now);
   console.log({
     cron: controller.cron,
     claimed: claimed.length,
     requeued: requeued.length,
     digests: digests.length,
     artifacts: artifacts.length,
+    evidence: evidence.length,
   });
 }

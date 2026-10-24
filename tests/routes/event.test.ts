@@ -170,4 +170,95 @@ describe("tests/routes/event.test.ts", () => {
     // Decoder was never generated -> null
     expect(result.data.artifacts.decoder).toBeNull();
   });
+
+  it("loads published claims and verified citations for current revision; excludes pending, stale revisions, and unverified citations", async () => {
+    const eventId = await seedEvent(
+      tech.industryId,
+      "Evidence Test Event",
+      2, // Current revision is 2
+    );
+
+    const art = await seedArticle({
+      ...tech,
+      title: "Evidence Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    // Fetch article's body_sha
+    const artRow = await env.DB.prepare(
+      "SELECT body_sha FROM articles WHERE id = ?1",
+    )
+      .bind(art)
+      .first<{ body_sha: string }>();
+    const bodySha = artRow!.body_sha;
+
+    // 1. Published Claim matching revision 2
+    const res1 = await env.DB.prepare(
+      `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, status, primary_source_preferred, created_at)
+       VALUES (?1, 2, 'pv1', 'gemini', 'Verified high-level claim', 'fact', 'verified', 'published', 1, 1000)
+       RETURNING id`,
+    )
+      .bind(eventId)
+      .first<{ id: number }>();
+    const claim1Id = res1!.id;
+
+    // 1a. Verified citation on Claim 1 (should be included)
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, stance, quote, quote_clean, start_offset, end_offset, verified, is_primary_source, created_at)
+       VALUES (?1, ?2, ?3, 'support', 'Verbatim evidence quote from approved body.', 'Verbatim evidence quote from approved body.', 10, 55, 1, 1, 1000)`,
+    )
+      .bind(claim1Id, art, bodySha)
+      .run();
+
+    // 1b. Unverified citation on Claim 1 (verified = 0, should be excluded)
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, stance, quote, quote_clean, start_offset, end_offset, verified, is_primary_source, created_at)
+       VALUES (?1, ?2, ?3, 'dispute', 'Unverified quote not matching text.', 'Unverified quote not matching text.', 0, 0, 0, 0, 1000)`,
+    )
+      .bind(claim1Id, art, bodySha)
+      .run();
+
+    // 2. Pending review Claim (should be excluded)
+    await env.DB.prepare(
+      `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, status, primary_source_preferred, created_at)
+       VALUES (?1, 2, 'pv1', 'gemini', 'Pending unapproved claim', 'interpretation', 'unverified', 'pending_review', 0, 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 3. Stale Claim matching revision 1 (should be excluded)
+    await env.DB.prepare(
+      `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, status, primary_source_preferred, created_at)
+       VALUES (?1, 1, 'pv1', 'gemini', 'Stale revision claim', 'prediction', 'verified', 'published', 0, 500)`,
+    )
+      .bind(eventId)
+      .run();
+
+    const result = await loadEvent(
+      { eventId: String(eventId) },
+      {
+        getEvent: (id) => getEvent(db(), id),
+        getEventSources: (id) => getEventSources(db(), id),
+      },
+    );
+
+    expect(result.data.evidence).toBeDefined();
+    expect(result.data.evidence.claims.length).toBe(1);
+
+    const claim = result.data.evidence.claims[0];
+    expect(claim.claimText).toBe("Verified high-level claim");
+    expect(claim.claimType).toBe("fact");
+    expect(claim.consensusStatus).toBe("verified");
+    expect(claim.primarySourcePreferred).toBe(true);
+
+    // Citations: only verified=1 citation should be returned
+    expect(claim.evidence.length).toBe(1);
+    expect(claim.evidence[0].quote).toBe(
+      "Verbatim evidence quote from approved body.",
+    );
+    expect(claim.evidence[0].verified).toBe(true);
+    expect(claim.evidence[0].isPrimarySource).toBe(true);
+  });
 });

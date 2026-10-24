@@ -95,6 +95,8 @@ it("migrations create the core tables", async () => {
     "article_sightings",
     "articles",
     "budgets",
+    "claim_evidence",
+    "claims",
     "corrections",
     "digests",
     "dlq_messages",
@@ -203,5 +205,46 @@ it("event_artifacts has status column defaulting to pending_review", async () =>
       name: "event_artifacts_event_id_status_idx",
       unique: 0,
     }),
+  );
+});
+
+it("claims and claim_evidence tables exist with proper schema and checks", async () => {
+  const { results: claimsCols } = await env.DB.prepare(
+    "PRAGMA table_info(claims)",
+  ).all<{ name: string; dflt_value: string | null; notnull: number }>();
+  expect(claimsCols.map((c) => c.name)).toEqual(
+    expect.arrayContaining([
+      "id",
+      "event_id",
+      "claim_text",
+      "claim_type",
+      "consensus_status",
+      "primary_source_preferred",
+      "status",
+      "input_revision",
+      "prompt_version",
+      "model",
+      "created_at",
+    ]),
+  );
+
+  const { results: evidenceCols } = await env.DB.prepare(
+    "PRAGMA table_info(claim_evidence)",
+  ).all<{ name: string }>();
+  expect(evidenceCols.map((c) => c.name)).toEqual(
+    expect.arrayContaining([
+      "id",
+      "claim_id",
+      "article_id",
+      "body_sha",
+      "quote",
+      "quote_clean",
+      "start_offset",
+      "end_offset",
+      "stance",
+      "is_primary_source",
+      "verified",
+      "created_at",
+    ]),
   );
 });

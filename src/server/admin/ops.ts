@@ -937,3 +937,80 @@ export async function reviewArtifact(
 
   return res.meta.changes === 1;
 }
+
+// -----------------------------------------------------------------------------
+// Claims & Evidence (M2 #14)
+// -----------------------------------------------------------------------------
+
+export interface PendingClaimRow {
+  id: number;
+  eventId: number;
+  eventTitle: string;
+  industryName: string;
+  claimText: string;
+  claimType: string;
+  consensusStatus: string;
+  primarySourcePreferred: number;
+  inputRevision: number;
+  model: string;
+  status: string;
+  createdAt: number;
+}
+
+export async function listPendingClaims(
+  database: D1Database,
+): Promise<PendingClaimRow[]> {
+  const { results } = await database
+    .prepare(
+      `SELECT
+         c.id,
+         c.event_id AS eventId,
+         e.title AS eventTitle,
+         i.name AS industryName,
+         c.claim_text AS claimText,
+         c.claim_type AS claimType,
+         c.consensus_status AS consensusStatus,
+         c.primary_source_preferred AS primarySourcePreferred,
+         c.input_revision AS inputRevision,
+         c.model,
+         c.status,
+         c.created_at AS createdAt
+       FROM claims c
+       JOIN events e ON e.id = c.event_id
+       JOIN industries i ON i.id = e.industry_id
+       WHERE c.status = 'pending_review'
+         AND c.input_revision = e.revision
+         AND c.claim_text != '[no_verifiable_claims]'
+       ORDER BY c.created_at DESC`,
+    )
+    .all<PendingClaimRow>();
+  return results ?? [];
+}
+
+export async function reviewClaim(
+  database: D1Database,
+  data: {
+    claimId: number;
+    decision: "approved" | "rejected";
+    expectedRevision: number;
+  },
+): Promise<boolean> {
+  const targetStatus = data.decision === "approved" ? "published" : "rejected";
+  const res = await database
+    .prepare(
+      `UPDATE claims
+       SET status = ?1
+       WHERE id = ?2
+         AND status = 'pending_review'
+         AND input_revision = ?3
+         AND EXISTS (
+           SELECT 1 FROM events e
+           WHERE e.id = claims.event_id
+             AND e.revision = ?3
+         )`,
+    )
+    .bind(targetStatus, data.claimId, data.expectedRevision)
+    .run();
+
+  return res.meta.changes === 1;
+}

@@ -28,13 +28,20 @@ export type ArtifactsMessage = {
   eventId: number;
 };
 
-export type GenerateMessage = DigestMessage | ArtifactsMessage;
+export type EvidenceMessage = {
+  kind: "evidence";
+  eventId: number;
+};
+
+export type GenerateMessage =
+  DigestMessage | ArtifactsMessage | EvidenceMessage;
 
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
 export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {
   Q_GROUP?: Queue;
   Q_GENERATE?: Queue;
   V_EVENTS?: VectorizeIndex;
+  V_CHUNKS?: VectorizeIndex;
   AI?: Env["AI"];
   /** Model calls go through this AI Gateway (wrangler var). */
   AI_GATEWAY_ID?: string;

@@ -5,6 +5,7 @@ import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainC
 import { PaperDecoderCard } from "../../components/artifacts/PaperDecoderCard";
 import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
 import { Disclaimer } from "../../components/Disclaimer";
+import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import { getEvent, getEventSources } from "../../server/publication/api";
 
 export async function loadEvent(
@@ -48,10 +49,13 @@ export const Route = createFileRoute("/e/$eventId")({
 function EventPage() {
   const { data, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
-  const { section, articles, corrections, title, artifacts } = data;
+  const { section, articles, corrections, title, artifacts, evidence } = data;
 
   const hasExplanations =
     artifacts?.explanations && Object.keys(artifacts.explanations).length > 0;
+  const verifiedClaims = evidence?.claims
+    ?.filter((c) => c.consensusStatus === "verified")
+    .map((c) => c.claimText);
 
   return (
     <div data-section={section.slug} className="flex flex-col gap-4 pt-4">
@@ -77,7 +81,16 @@ function EventPage() {
 
       {section.disclaimer && <Disclaimer text={section.disclaimer} />}
 
-      {artifacts?.brief && <StoryBriefCard brief={artifacts.brief} />}
+      {artifacts?.brief && (
+        <StoryBriefCard
+          brief={artifacts.brief}
+          verifiedClaims={verifiedClaims}
+        />
+      )}
+
+      {evidence && evidence.claims.length > 0 && (
+        <InspectEvidencePanel evidence={evidence} />
+      )}
 
       {hasExplanations && (
         <AudienceExplainCard
