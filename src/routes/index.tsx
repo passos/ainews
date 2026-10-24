@@ -1,34 +1,97 @@
 import { Suspense } from "react";
-import { Await, createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
-import { getSiteInfo } from "../server/publication/site";
-
-const searchSchema = z.object({
-  audience: z
-    .enum(["student", "educator", "professional"])
-    .optional()
-    .catch(undefined),
-});
+import { Await, Link, createFileRoute } from "@tanstack/react-router";
+import { ArticleCard } from "../components/ArticleCard";
+import { Disclaimer } from "../components/Disclaimer";
+import { YourSections } from "../components/YourSections";
+import { formatUtc } from "../lib/time";
+import { getHome, getRecentCorrections } from "../server/publication/api";
 
 export const Route = createFileRoute("/")({
-  validateSearch: searchSchema,
   loader: async () => ({
-    site: await getSiteInfo(),
+    home: await getHome(),
     // Not awaited: streamed to the client after the shell.
-    later: getSiteInfo(),
+    corrections: getRecentCorrections(),
   }),
   component: Home,
 });
 
 function Home() {
-  const { site, later } = Route.useLoaderData();
+  const { home, corrections } = Route.useLoaderData();
   return (
-    <main>
-      <h1>{site.name}</h1>
-      <p>Placeholder. Content comes later.</p>
-      <Suspense fallback={<p>Loading…</p>}>
-        <Await promise={later}>{(info) => <p>Streamed: {info.name}</p>}</Await>
+    <div className="flex flex-col gap-4 pt-4">
+      <YourSections sections={home.sections} />
+      <div className="grid items-start gap-x-6 gap-y-6 lg:grid-cols-2">
+        {home.sections.map((s) => (
+          <section
+            key={s.slug}
+            data-section={s.slug}
+            aria-labelledby={`sec-${s.slug}`}
+            className="flex flex-col gap-2"
+          >
+            <div className="flex items-baseline justify-between gap-3 border-t-[5px] border-sec pt-1">
+              <h1
+                id={`sec-${s.slug}`}
+                className="font-mono text-sm font-black uppercase tracking-[0.18em] text-sec-ink"
+              >
+                {s.name}
+              </h1>
+              <span className="flex gap-3 font-mono text-xs font-bold uppercase tracking-wider">
+                <Link
+                  to="/s/$section"
+                  params={{ section: s.slug }}
+                  search={(prev) => ({ audience: prev.audience })}
+                  className="underline"
+                >
+                  All {s.name}
+                </Link>
+                <a href={`/rss/${s.slug}.xml`} className="underline">
+                  RSS
+                </a>
+              </span>
+            </div>
+            {s.disclaimer && <Disclaimer text={s.disclaimer} />}
+            {s.articles.length === 0 ? (
+              <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                Nothing approved yet.
+              </p>
+            ) : (
+              s.articles.map((a) => <ArticleCard key={a.id} article={a} />)
+            )}
+          </section>
+        ))}
+      </div>
+      <Suspense fallback={null}>
+        <Await promise={corrections}>
+          {(list) =>
+            list.length === 0 ? null : (
+              <section
+                aria-labelledby="recent-corrections"
+                className="border-t-[5px] border-destructive pt-1"
+              >
+                <h1
+                  id="recent-corrections"
+                  className="font-mono text-sm font-black uppercase tracking-[0.18em] text-destructive"
+                >
+                  Recent corrections
+                </h1>
+                <ul className="mt-2 flex flex-col gap-1.5 text-sm">
+                  {list.map((c) => (
+                    <li key={c.id} className="leading-snug">
+                      <time
+                        dateTime={new Date(c.createdAt).toISOString()}
+                        className="mr-2 font-mono text-xs text-muted-foreground"
+                      >
+                        {formatUtc(c.createdAt)}
+                      </time>
+                      <strong>{c.articleTitle}</strong>: {c.body}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          }
+        </Await>
       </Suspense>
-    </main>
+    </div>
   );
 }

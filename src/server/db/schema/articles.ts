@@ -50,6 +50,10 @@ export const articles = sqliteTable(
     bodyFetchedAt: integer("body_fetched_at"),
     /** Times the backfill cron sent this row again (architecture §5). */
     requeueCount: integer("requeue_count").notNull().default(0),
+    /** Admin override of the public title; wins over the analysis (#10). */
+    titleOverride: text("title_override"),
+    /** Admin override of the public summary; wins over the analysis (#10). */
+    summaryOverride: text("summary_override"),
   },
   (t) => [
     // Backfill scans: "articles stuck in stage X since before T".

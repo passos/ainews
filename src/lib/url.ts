@@ -36,3 +36,18 @@ export function normalizeUrl(input: string): string | null {
   if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/, "");
   return url.toString();
 }
+
+/**
+ * The URL as given if it is http(s), else null. For links that come from
+ * sources: a `javascript:` or `data:` URL must never become an href.
+ */
+export function safeHttpUrl(input: string): string | null {
+  try {
+    const url = new URL(input.trim());
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? input.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}

@@ -1,12 +1,13 @@
 // SSR smoke test against the production build, served by `vite preview`.
 // Usage: npm run build && npm run test:ssr
-import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 
 const TIMEOUT_MS = 30_000;
 const FETCH_TIMEOUT_MS = 10_000;
-const TOTAL_TIMEOUT_MS = 60_000;
+const TOTAL_TIMEOUT_MS = 90_000;
+const SETUP_TIMEOUT_MS = 120_000;
 
 // Ask the OS for a free port. Another job on the same machine may hold 4173.
 function freePort(): Promise<number> {
@@ -64,6 +65,32 @@ if (!ADMIN_EMAIL) {
   console.error("FAIL: no ADMIN_EMAIL in dist/server/wrangler.json");
   process.exit(1);
 }
+
+// `vite preview` reads the local D1 under .wrangler/state. Start from an empty
+// database, apply the migrations, then load the fixture rows that the page
+// checks below depend on (tests/fixtures/publication/preview.sql).
+function wrangler(args: string[]): void {
+  const result = spawnSync("npx", ["wrangler", ...args], {
+    stdio: ["ignore", "inherit", "inherit"],
+    timeout: SETUP_TIMEOUT_MS,
+  });
+  if (result.status !== 0) {
+    console.error(`FAIL: wrangler ${args.join(" ")} (status ${result.status})`);
+    process.exit(1);
+  }
+}
+rmSync(".wrangler/state/v3/d1", { recursive: true, force: true });
+wrangler(["d1", "migrations", "apply", "DB", "--local", "--env", "test"]);
+wrangler([
+  "d1",
+  "execute",
+  "DB",
+  "--local",
+  "--env",
+  "test",
+  "--file",
+  "tests/fixtures/publication/preview.sql",
+]);
 
 const PORT = await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -186,6 +213,99 @@ async function main() {
   if (bogus.status !== 200) {
     fail(`GET /?audience=bogus returned ${bogus.status}`);
   }
+
+  // Public pages, against the fixture rows. Redirects are followed: an
+  // invalid search param is redirected to its canonical URL.
+  const page = async (path: string) => {
+    const res = await fetch(`${BASE}${path}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    return { res, text: await res.text() };
+  };
+  const DISCLAIMER = "Not investment advice";
+
+  for (const path of ["/", "/s/finance"]) {
+    const { res, text } = await page(path);
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    if (!text.includes(DISCLAIMER)) fail(`GET ${path} has no disclaimer`);
+  }
+  for (const path of ["/s/technology", "/s/education", "/s/industry"]) {
+    const { res, text } = await page(path);
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    if (text.includes(DISCLAIMER))
+      fail(`GET ${path} has the Finance disclaimer`);
+  }
+
+  const tech = await page("/s/technology");
+  for (const needle of [
+    // Analysis text, the editor's override, a correction, an evidence label.
+    "Agent handshakes cost more than the work they start",
+    "Editor-written title wins over the analysis",
+    "wrong unit",
+    "preprint",
+    'aria-label="Sections"',
+    'aria-current="page"',
+    "Published",
+    "Fetched",
+  ]) {
+    if (!tech.text.includes(needle))
+      fail(`GET /s/technology lacks "${needle}"`);
+  }
+
+  // Unapproved articles and their corrections are on no public page.
+  for (const path of ["/", "/s/technology", "/s/finance", "/s/education"]) {
+    const { text } = await page(path);
+    if (text.includes("HIDDEN"))
+      fail(`GET ${path} shows an unapproved article`);
+  }
+
+  const none = await page("/s/nope");
+  if (none.res.status !== 404) fail(`GET /s/nope returned ${none.res.status}`);
+
+  const odd = await page("/s/technology?audience=bogus&page=-3");
+  if (odd.res.status !== 200) {
+    fail(`GET /s/technology?audience=bogus&page=-3 returned ${odd.res.status}`);
+  }
+
+  // CF_BEACON_TOKEN is empty in the test env: no analytics script.
+  const home2 = await page("/");
+  if (home2.text.includes("beacon.min.js")) fail("GET / has the beacon script");
+
+  // RSS.
+  const rss = async (path: string) => {
+    const { res, text } = await page(path);
+    return {
+      status: res.status,
+      type: res.headers.get("content-type") ?? "",
+      text,
+    };
+  };
+  const techFeed = await rss("/rss/technology.xml");
+  if (techFeed.status !== 200)
+    fail(`GET /rss/technology.xml returned ${techFeed.status}`);
+  if (!techFeed.type.startsWith("application/rss+xml")) {
+    fail(`GET /rss/technology.xml content-type is "${techFeed.type}"`);
+  }
+  if (
+    !techFeed.text.includes("SR-1 Freedom") ||
+    techFeed.text.includes("HIDDEN")
+  ) {
+    fail("GET /rss/technology.xml has the wrong items");
+  }
+  const finFeed = await rss("/rss/finance.xml");
+  const channel = finFeed.text.split("<item>")[0];
+  if (finFeed.status !== 200 || !channel.includes(DISCLAIMER)) {
+    fail("GET /rss/finance.xml channel description has no disclaimer");
+  }
+  const items = finFeed.text.split("<item>").slice(1);
+  if (items.length === 0 || items.some((i) => !i.includes(DISCLAIMER))) {
+    fail("GET /rss/finance.xml has an item without the disclaimer");
+  }
+  if (finFeed.text.includes("HIDDEN"))
+    fail("GET /rss/finance.xml shows an unapproved item");
+  const noFeed = await rss("/rss/nope.xml");
+  if (noFeed.status !== 404)
+    fail(`GET /rss/nope.xml returned ${noFeed.status}`);
 
   console.log("PASS: SSR smoke test");
   clearTimeout(deadlineTimer);

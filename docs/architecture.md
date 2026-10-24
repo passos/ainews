@@ -40,7 +40,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 
 ### 变量与密钥
 
-- 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics，可为空）。
+- 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics；空字符串 = 不输出 beacon 脚本）。
 - 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。
 - 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
