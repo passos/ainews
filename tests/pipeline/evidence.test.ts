@@ -269,6 +269,60 @@ describe("Evidence Chunks & Quote Verification", () => {
         "The measured value is units per second in function foo bar().",
       ).verified,
     ).toBe(false);
+
+    // CommonMark unclosed or trailing underscores must be preserved
+    const settingBody = "The required setting is API_KEY_ for production.";
+    expect(
+      verifyQuoteInBody(
+        settingBody,
+        "The required setting is API_KEY for production.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        settingBody,
+        "The required setting is API_KEY_ for production.",
+      ).verified,
+    ).toBe(true);
+
+    // Unpaired leading underscore
+    const disabledBody = "The feature is _disabled by default.";
+    expect(
+      verifyQuoteInBody(disabledBody, "The feature is disabled by default.")
+        .verified,
+    ).toBe(false);
+
+    // Underscores as word/identifier characters: reject sub-identifier matches
+    const identBody = "function foo__bar() is called during execution.";
+    expect(
+      verifyQuoteInBody(identBody, "bar() is called during execution.")
+        .verified,
+    ).toBe(false);
+
+    const keyBody = "The variable API_KEY_SECRET is set in environment.";
+    expect(
+      verifyQuoteInBody(keyBody, "KEY_SECRET is set in environment.").verified,
+    ).toBe(false);
+  });
+
+  it("verifyQuoteInBody handles links with parentheses in URL and broken links gracefully", () => {
+    const wikiBody =
+      "Check [Apple](https://en.wikipedia.org/wiki/Apple_(disambiguation)) for details on the corporate entity.";
+    const wikiQuote = "Apple for details on the corporate entity.";
+    const wikiRes = verifyQuoteInBody(wikiBody, wikiQuote);
+    expect(wikiRes.verified).toBe(true);
+    expect(wikiBody.slice(wikiRes.startOffset, wikiRes.endOffset)).toBe(
+      "Apple](https://en.wikipedia.org/wiki/Apple_(disambiguation)) for details on the corporate entity.",
+    );
+
+    const brokenBody =
+      "[a](http://broken\n\n[Section 2](https://real.com) profit grew significantly.";
+    const brokenQuote = "Section 2 profit grew significantly.";
+    const brokenRes = verifyQuoteInBody(brokenBody, brokenQuote);
+    expect(brokenRes.verified).toBe(true);
+    expect(brokenBody.slice(brokenRes.startOffset, brokenRes.endOffset)).toBe(
+      "Section 2](https://real.com) profit grew significantly.",
+    );
   });
 
   it("verifyQuoteInBody respects Unicode code point boundaries including astral plane characters", () => {

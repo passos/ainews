@@ -1,4 +1,44 @@
+import MarkdownIt from "markdown-it";
 import type { ConsensusStatus, EvidenceStance } from "../../lib/evidence/types";
+
+const md = new MarkdownIt({ html: false, linkify: false });
+
+function findLinkClose(rawStr: string, startPos: number): number {
+  let p = rawStr.indexOf("]", startPos);
+  if (p === -1) return startPos;
+  p++; // skip ]
+  while (p < rawStr.length && /\s/.test(rawStr[p])) p++;
+  if (p >= rawStr.length) return startPos;
+  if (rawStr[p] === "(") {
+    p++;
+    let depth = 1;
+    let inAngle = false;
+    let inQuote: string | null = null;
+    while (p < rawStr.length && depth > 0) {
+      const ch = rawStr[p];
+      if (ch === "\\") {
+        p += 2;
+        continue;
+      }
+      if (inQuote) {
+        if (ch === inQuote) inQuote = null;
+      } else if (inAngle) {
+        if (ch === ">") inAngle = false;
+      } else {
+        if (ch === '"' || ch === "'") inQuote = ch;
+        else if (ch === "<") inAngle = true;
+        else if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+      }
+      p++;
+    }
+    return p;
+  } else if (rawStr[p] === "[") {
+    const end = rawStr.indexOf("]", p + 1);
+    return end !== -1 ? end + 1 : startPos;
+  }
+  return p;
+}
 
 export interface VerifiedQuoteResult {
   verified: boolean;
@@ -19,267 +59,107 @@ export function normalizeWhitespace(str: string): string {
   return str.replace(/\s+/g, " ").trim();
 }
 
-function parseImagesLinear(
-  str: string,
-  map: Int32Array<ArrayBufferLike>,
-): { str: string; map: Int32Array<ArrayBufferLike> } {
-  const len = str.length;
-  const openStack: number[] = [];
-  const images: Array<{
-    start: number;
-    altStart: number;
-    altEnd: number;
-    end: number;
-  }> = [];
-  let noMoreCloseParen = false;
-
-  for (let i = 0; i < len; i++) {
-    if (str[i] === "!" && i + 1 < len && str[i + 1] === "[") {
-      openStack.push(i);
-      i++;
-    } else if (str[i] === "]" && openStack.length > 0) {
-      const openIdx = openStack.pop()!;
-      if (!noMoreCloseParen && i + 1 < len && str[i + 1] === "(") {
-        const closeParen = str.indexOf(")", i + 2);
-        if (closeParen === -1) {
-          noMoreCloseParen = true;
-        } else {
-          images.push({
-            start: openIdx,
-            altStart: openIdx + 2,
-            altEnd: i,
-            end: closeParen + 1,
-          });
-          i = closeParen;
-          openStack.length = 0;
-        }
-      }
-    }
-  }
-
-  const parts: string[] = [];
-  const nextMap = new Int32Array(len);
-  let dest = 0;
-  let lastIndex = 0;
-
-  for (const img of images) {
-    if (img.start > lastIndex) {
-      parts.push(str.slice(lastIndex, img.start));
-      const count = img.start - lastIndex;
-      nextMap.set(map.subarray(lastIndex, img.start), dest);
-      dest += count;
-    }
-    const altLen = img.altEnd - img.altStart;
-    if (altLen > 0) {
-      parts.push(str.slice(img.altStart, img.altEnd));
-      nextMap.set(map.subarray(img.altStart, img.altEnd), dest);
-      dest += altLen;
-    }
-    lastIndex = img.end;
-  }
-
-  if (lastIndex < len) {
-    parts.push(str.slice(lastIndex));
-    const count = len - lastIndex;
-    nextMap.set(map.subarray(lastIndex, len), dest);
-    dest += count;
-  }
-
-  return { str: parts.join(""), map: nextMap.subarray(0, dest) };
-}
-
-function parseLinksLinear(
-  str: string,
-  map: Int32Array<ArrayBufferLike>,
-): { str: string; map: Int32Array<ArrayBufferLike> } {
-  const len = str.length;
-  const openStack: number[] = [];
-  const links: Array<{
-    start: number;
-    textStart: number;
-    textEnd: number;
-    end: number;
-  }> = [];
-  let noMoreCloseParen = false;
-
-  for (let i = 0; i < len; i++) {
-    if (str[i] === "[") {
-      openStack.push(i);
-    } else if (str[i] === "]" && openStack.length > 0) {
-      const openIdx = openStack.pop()!;
-      if (
-        !noMoreCloseParen &&
-        i > openIdx + 1 &&
-        i + 1 < len &&
-        str[i + 1] === "("
-      ) {
-        const closeParen = str.indexOf(")", i + 2);
-        if (closeParen === -1) {
-          noMoreCloseParen = true;
-        } else {
-          links.push({
-            start: openIdx,
-            textStart: openIdx + 1,
-            textEnd: i,
-            end: closeParen + 1,
-          });
-          i = closeParen;
-          openStack.length = 0;
-        }
-      }
-    }
-  }
-
-  const parts: string[] = [];
-  const nextMap = new Int32Array(len);
-  let dest = 0;
-  let lastIndex = 0;
-
-  for (const link of links) {
-    if (link.start > lastIndex) {
-      parts.push(str.slice(lastIndex, link.start));
-      const count = link.start - lastIndex;
-      nextMap.set(map.subarray(lastIndex, link.start), dest);
-      dest += count;
-    }
-    const textLen = link.textEnd - link.textStart;
-    parts.push(str.slice(link.textStart, link.textEnd));
-    nextMap.set(map.subarray(link.textStart, link.textEnd), dest);
-    dest += textLen;
-    lastIndex = link.end;
-  }
-
-  if (lastIndex < len) {
-    parts.push(str.slice(lastIndex));
-    const count = len - lastIndex;
-    nextMap.set(map.subarray(lastIndex, len), dest);
-    dest += count;
-  }
-
-  return { str: parts.join(""), map: nextMap.subarray(0, dest) };
-}
-
 /**
  * Strips basic Markdown formatting while tracking exact character indices back to the original text.
- * Uses bounded Int32Array mapping to avoid call stack limits or unbounded memory on large documents.
+ * Uses the canonical CommonMark markdown-it parser to ensure strict adherence to CommonMark
+ * delimiter and formatting rules while maintaining 1:1 original character offset mapping.
  */
 export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
-  const initialLen = rawStr.length;
-  let map: Int32Array<ArrayBufferLike> = new Int32Array(initialLen);
-  for (let i = 0; i < initialLen; i++) {
-    map[i] = i;
+  if (!rawStr) {
+    return { cleanText: "", origIndices: [] };
   }
 
-  // Step 1: Images !\[([^\]]*)\]\([^)]*\) in O(N)
-  const resImages = parseImagesLinear(rawStr, map);
-  const strImages = resImages.str;
-  map = resImages.map;
-
-  // Step 2: Links \[([^\]]+)\]\([^)]*\) in O(N)
-  const resLinks = parseLinksLinear(strImages, map);
-  const str = resLinks.str;
-  map = resLinks.map;
-  const len = str.length;
-
-  // Step 3 & 4: Markdown styling symbols + whitespace collapse \s+
+  const tokens = md.parse(rawStr, {});
   const outChars: string[] = [];
-  const outIndices = new Int32Array(len);
-  let outLen = 0;
+  const outIndices: number[] = [];
   let inWs = false;
-  let atLineStart = true;
-  const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
+  let srcIdx = 0;
 
-  let i = 0;
-  while (i < len) {
-    const ch = str[i];
+  for (const block of tokens) {
+    if (block.type === "inline" && block.children) {
+      for (const token of block.children) {
+        if (token.type === "text" || token.type === "code_inline") {
+          const content = token.content;
+          let s = srcIdx;
+          for (let c = 0; c < content.length; c++) {
+            const ch = content[c];
+            while (s < rawStr.length && rawStr[s] !== ch) {
+              s++;
+            }
+            const origIdx = s < rawStr.length ? s : srcIdx + c;
+            if (s < rawStr.length) s++;
 
-    // Markdown heading check: # at line start followed by # and whitespace
-    if (atLineStart && ch === "#") {
-      let j = i;
-      while (j < len && str[j] === "#") j++;
-      if (j < len && (str[j] === " " || str[j] === "\t")) {
-        while (j < len && (str[j] === " " || str[j] === "\t")) j++;
-        i = j;
-        inWs = true;
-        continue;
-      }
-    }
+            if (/\s/.test(ch)) {
+              if (!inWs) {
+                outChars.push(" ");
+                outIndices.push(origIdx);
+                inWs = true;
+              }
+            } else {
+              outChars.push(ch);
+              outIndices.push(origIdx);
+              inWs = false;
+            }
+          }
+          srcIdx = s;
+        } else if (token.type === "image") {
+          const alt = token.content;
+          const imgStart = rawStr.indexOf("![", srcIdx);
+          if (imgStart !== -1) {
+            let s = imgStart + 2;
+            for (let c = 0; c < alt.length; c++) {
+              const ch = alt[c];
+              while (s < rawStr.length && rawStr[s] !== ch) {
+                s++;
+              }
+              const origIdx = s < rawStr.length ? s : imgStart + 2 + c;
+              if (s < rawStr.length) s++;
 
-    if (ch === "\n") {
-      atLineStart = true;
-      if (!inWs) {
-        outChars.push(" ");
-        outIndices[outLen++] = map[i];
-        inWs = true;
-      }
-      i++;
-      continue;
-    }
-
-    if (/\S/.test(ch)) {
-      atLineStart = false;
-    }
-
-    // Markdown emphasis symbols: *, ~, ` omitted without inserting space
-    if (ch === "*" || ch === "~" || ch === "`") {
-      i++;
-      continue;
-    }
-
-    // Underscores: keep isolated (' _ ') and word-internal (foo_bar, foo__bar)
-    // omit emphasis delimiters (_italic_, __bold__) without inserting space
-    if (ch === "_") {
-      let j = i;
-      while (j < len && str[j] === "_") j++;
-      const before = i > 0 ? str[i - 1] : " ";
-      const after = j < len ? str[j] : " ";
-
-      const beforeIsWs = /\s/.test(before);
-      const afterIsWs = /\s/.test(after);
-      const beforeIsWord = isWordChar(before);
-      const afterIsWord = isWordChar(after);
-
-      if ((beforeIsWs && afterIsWs) || (beforeIsWord && afterIsWord)) {
-        for (let k = i; k < j; k++) {
-          outChars.push("_");
-          outIndices[outLen++] = map[k];
+              if (/\s/.test(ch)) {
+                if (!inWs) {
+                  outChars.push(" ");
+                  outIndices.push(origIdx);
+                  inWs = true;
+                }
+              } else {
+                outChars.push(ch);
+                outIndices.push(origIdx);
+                inWs = false;
+              }
+            }
+            srcIdx = findLinkClose(rawStr, s);
+          }
+        } else if (token.type === "link_close") {
+          srcIdx = findLinkClose(rawStr, srcIdx);
+        } else if (token.type === "softbreak" || token.type === "hardbreak") {
+          if (!inWs) {
+            outChars.push(" ");
+            outIndices.push(srcIdx);
+            inWs = true;
+          }
         }
-        inWs = false;
       }
-      i = j;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
       if (!inWs) {
         outChars.push(" ");
-        outIndices[outLen++] = map[i];
+        outIndices.push(Math.min(rawStr.length - 1, srcIdx));
         inWs = true;
       }
-    } else {
-      outChars.push(ch);
-      outIndices[outLen++] = map[i];
-      inWs = false;
     }
-    i++;
   }
 
-  // Step 5: Trim leading and trailing whitespace
+  // Trim leading and trailing whitespace
   let start = 0;
-  while (start < outLen && outChars[start] === " ") {
+  while (start < outChars.length && outChars[start] === " ") {
     start++;
   }
-  let end = outLen;
+  let end = outChars.length;
   while (end > start && outChars[end - 1] === " ") {
     end--;
   }
 
-  const cleanText = outChars.slice(start, end).join("");
-  const finalIndices = Array.from(outIndices.subarray(start, end));
-
   return {
-    cleanText,
-    origIndices: finalIndices,
+    cleanText: outChars.slice(start, end).join(""),
+    origIndices: outIndices.slice(start, end),
   };
 }
 
@@ -312,7 +192,7 @@ export function verifyQuoteInBody(
     };
   }
 
-  const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
+  const isWordChar = (c: string) => /[\p{L}\p{N}_]/u.test(c);
 
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness
   const { cleanText: bodyClean, origIndices } = cleanMarkdownWithMap(bodyMd);
