@@ -72,6 +72,8 @@ export interface VerifiedQuoteResult {
 export interface CleanMarkdownMapResult {
   cleanText: string;
   origIndices: number[];
+  origStarts: number[];
+  origEnds: number[];
 }
 
 /**
@@ -88,13 +90,14 @@ export function normalizeWhitespace(str: string): string {
  */
 export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
   if (!rawStr) {
-    return { cleanText: "", origIndices: [] };
+    return { cleanText: "", origIndices: [], origStarts: [], origEnds: [] };
   }
 
   const tokens = md.parse(rawStr, {});
   const lineOffsets = computeLineOffsets(rawStr);
   const outChars: string[] = [];
-  const outIndices: number[] = [];
+  const outStarts: number[] = [];
+  const outEnds: number[] = [];
   let inWs = false;
 
   for (const block of tokens) {
@@ -120,12 +123,15 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
               }
               s++;
             }
-            const origIdx = s < blockEnd ? s : -1;
+            const origStart = s < blockEnd ? s : -1;
+            let origEnd = -1;
             if (s < blockEnd) {
               if (rawStr[s] === "&" && rawStr[s] !== ch) {
                 const semi = rawStr.indexOf(";", s);
-                s = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+                origEnd = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+                s = origEnd;
               } else {
+                origEnd = s + 1;
                 s++;
               }
             }
@@ -133,12 +139,14 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
             if (/\s/.test(ch)) {
               if (!inWs) {
                 outChars.push(" ");
-                outIndices.push(origIdx);
+                outStarts.push(origStart);
+                outEnds.push(origEnd);
                 inWs = true;
               }
             } else {
               outChars.push(ch);
-              outIndices.push(origIdx);
+              outStarts.push(origStart);
+              outEnds.push(origEnd);
               inWs = false;
             }
           }
@@ -157,12 +165,15 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
                 }
                 s++;
               }
-              const origIdx = s < blockEnd ? s : -1;
+              const origStart = s < blockEnd ? s : -1;
+              let origEnd = -1;
               if (s < blockEnd) {
                 if (rawStr[s] === "&" && rawStr[s] !== ch) {
                   const semi = rawStr.indexOf(";", s);
-                  s = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+                  origEnd = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+                  s = origEnd;
                 } else {
+                  origEnd = s + 1;
                   s++;
                 }
               }
@@ -170,12 +181,14 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
               if (/\s/.test(ch)) {
                 if (!inWs) {
                   outChars.push(" ");
-                  outIndices.push(origIdx);
+                  outStarts.push(origStart);
+                  outEnds.push(origEnd);
                   inWs = true;
                 }
               } else {
                 outChars.push(ch);
-                outIndices.push(origIdx);
+                outStarts.push(origStart);
+                outEnds.push(origEnd);
                 inWs = false;
               }
             }
@@ -194,14 +207,18 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
         } else if (token.type === "softbreak" || token.type === "hardbreak") {
           if (!inWs) {
             outChars.push(" ");
-            outIndices.push(Math.min(blockEnd - 1, srcIdx));
+            const pos = Math.min(blockEnd - 1, srcIdx);
+            outStarts.push(pos);
+            outEnds.push(pos + 1);
             inWs = true;
           }
         }
       }
       if (!inWs) {
         outChars.push(" ");
-        outIndices.push(Math.min(blockEnd - 1, srcIdx));
+        const pos = Math.min(blockEnd - 1, srcIdx);
+        outStarts.push(pos);
+        outEnds.push(pos + 1);
         inWs = true;
       }
     } else if (block.type === "fence") {
@@ -213,24 +230,29 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
         while (s < blockEnd && rawStr[s] !== ch) {
           s++;
         }
-        const origIdx = s < blockEnd ? s : -1;
+        const origStart = s < blockEnd ? s : -1;
+        const origEnd = s < blockEnd ? s + 1 : -1;
         if (s < blockEnd) s++;
 
         if (/\s/.test(ch)) {
           if (!inWs) {
             outChars.push(" ");
-            outIndices.push(origIdx);
+            outStarts.push(origStart);
+            outEnds.push(origEnd);
             inWs = true;
           }
         } else {
           outChars.push(ch);
-          outIndices.push(origIdx);
+          outStarts.push(origStart);
+          outEnds.push(origEnd);
           inWs = false;
         }
       }
       if (!inWs) {
         outChars.push(" ");
-        outIndices.push(Math.min(blockEnd - 1, s));
+        const pos = Math.min(blockEnd - 1, s);
+        outStarts.push(pos);
+        outEnds.push(pos + 1);
         inWs = true;
       }
     } else if (block.type === "code_block") {
@@ -241,24 +263,29 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
         while (s < blockEnd && rawStr[s] !== ch) {
           s++;
         }
-        const origIdx = s < blockEnd ? s : -1;
+        const origStart = s < blockEnd ? s : -1;
+        const origEnd = s < blockEnd ? s + 1 : -1;
         if (s < blockEnd) s++;
 
         if (/\s/.test(ch)) {
           if (!inWs) {
             outChars.push(" ");
-            outIndices.push(origIdx);
+            outStarts.push(origStart);
+            outEnds.push(origEnd);
             inWs = true;
           }
         } else {
           outChars.push(ch);
-          outIndices.push(origIdx);
+          outStarts.push(origStart);
+          outEnds.push(origEnd);
           inWs = false;
         }
       }
       if (!inWs) {
         outChars.push(" ");
-        outIndices.push(Math.min(blockEnd - 1, s));
+        const pos = Math.min(blockEnd - 1, s);
+        outStarts.push(pos);
+        outEnds.push(pos + 1);
         inWs = true;
       }
     }
@@ -274,9 +301,14 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
     end--;
   }
 
+  const origStarts = outStarts.slice(start, end);
+  const origEnds = outEnds.slice(start, end);
+
   return {
     cleanText: outChars.slice(start, end).join(""),
-    origIndices: outIndices.slice(start, end),
+    origIndices: origStarts,
+    origStarts,
+    origEnds,
   };
 }
 
@@ -312,7 +344,11 @@ export function verifyQuoteInBody(
   const isWordChar = (c: string) => /[\p{L}\p{N}_]/u.test(c);
 
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness
-  const { cleanText: bodyClean, origIndices } = cleanMarkdownWithMap(bodyMd);
+  const {
+    cleanText: bodyClean,
+    origStarts,
+    origEnds,
+  } = cleanMarkdownWithMap(bodyMd);
   let cleanIndex = bodyClean.indexOf(quoteClean);
 
   while (cleanIndex !== -1) {
@@ -329,8 +365,8 @@ export function verifyQuoteInBody(
     const charAfter = Array.from(afterSlice)[0] ?? " ";
 
     if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
-      const startOffset = origIndices[cleanIndex];
-      const endOffset = origIndices[cleanIndex + quoteClean.length - 1] + 1;
+      const startOffset = origStarts[cleanIndex];
+      const endOffset = origEnds[cleanIndex + quoteClean.length - 1];
 
       if (
         startOffset >= 0 &&

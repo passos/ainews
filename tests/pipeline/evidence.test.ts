@@ -343,6 +343,26 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
   });
 
+  it("verifyQuoteInBody correctly slices quotes ending in decimal or named HTML entities without truncation", () => {
+    const body =
+      "Revenue increased by 1&#48;&#48; in the latest fiscal quarter.";
+    const quote = "Revenue increased by 100";
+    const res = verifyQuoteInBody(body, quote);
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "Revenue increased by 1&#48;&#48;",
+    );
+
+    const namedBody =
+      "Reported operating result &mdash; which was audited by experts.";
+    const namedQuote = "Reported operating result —";
+    const namedRes = verifyQuoteInBody(namedBody, namedQuote);
+    expect(namedRes.verified).toBe(true);
+    expect(namedBody.slice(namedRes.startOffset, namedRes.endOffset)).toBe(
+      "Reported operating result &mdash;",
+    );
+  });
+
   it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
     const autoBody =
       "Visit <https://example.com> for more information and see [other link](https://test.com) as well.";
@@ -1860,5 +1880,98 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     const stances = citations.results.map((c) => c.stance);
     expect(stances).toContain("support");
     expect(stances).toContain("dispute");
+  });
+
+  it("getEventEvidence returns atomically consistent claims and evidence and respects event revision", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('atomic-ev-ind', 'Atomic Ev', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://atomic/feed', 'atomic.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-atomic-1', 'https://example.com/art-atomic-1', 'Atomic Article 1', 'Summary', 'shaAtomic1', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-atomic-2', 'https://example.com/art-atomic-2', 'Atomic Article 2', 'Summary', 'shaAtomic2', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaAtomic1', 'approved', 'auto', 1000)",
+    )
+      .bind(art1!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Atomic Evidence Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art1!.id)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art2!.id)
+      .run();
+
+    // Insert published claim for revision 1
+    const claim = await env.DB.prepare(
+      `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, primary_source_preferred, status, created_at)
+       VALUES (?1, 1, 'test-prompt-v1', 'test-model', 'Atomic Claim Text', 'fact', 'verified', 0, 'published', 1000) RETURNING id`,
+    )
+      .bind(event!.id)
+      .first<{ id: number }>();
+
+    // Insert valid citation for approved article 1
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at)
+       VALUES (?1, ?2, 'shaAtomic1', 'Quote 1', 'Quote 1', 0, 10, 'support', 1, 1, 1000)`,
+    )
+      .bind(claim!.id, art1!.id)
+      .run();
+
+    // Insert citation for unapproved article 2
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at)
+       VALUES (?1, ?2, 'shaAtomic2', 'Quote 2', 'Quote 2', 0, 10, 'support', 0, 1, 1000)`,
+    )
+      .bind(claim!.id, art2!.id)
+      .run();
+
+    // Query publication layer
+    const view1 = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(view1.claims).toHaveLength(1);
+    expect(view1.claims[0].id).toBe(claim!.id);
+    // Only approved article 1 evidence should be included, unapproved article 2 evidence excluded
+    expect(view1.claims[0].evidence).toHaveLength(1);
+    expect(view1.claims[0].evidence[0].articleId).toBe(art1!.id);
+    expect(view1.claims[0].evidence[0].articleUrl).toBe(
+      "https://example.com/art-atomic-1",
+    );
+
+    // If event revision changes to 2, old revision 1 claim should not be returned
+    await env.DB.prepare("UPDATE events SET revision = 2 WHERE id = ?1")
+      .bind(event!.id)
+      .run();
+    const view2 = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(view2.claims).toHaveLength(0);
   });
 });
