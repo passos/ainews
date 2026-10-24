@@ -303,6 +303,14 @@ async function main() {
     }
   }
 
+  const homePage = await page("/");
+  if (!homePage.text.includes("lg:columns-2")) {
+    fail("GET / lacks 'lg:columns-2' multi-column flow layout");
+  }
+  if (!homePage.text.includes("break-inside-avoid")) {
+    fail("GET / lacks 'break-inside-avoid' on sections");
+  }
+
   const tech = await page("/s/technology");
   for (const needle of [
     // Analysis text, the editor's override, a correction, an evidence label.

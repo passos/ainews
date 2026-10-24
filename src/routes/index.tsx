@@ -20,13 +20,13 @@ function Home() {
   return (
     <div className="flex flex-col gap-4 pt-4">
       <YourSections sections={home.sections} />
-      <div className="grid items-start gap-x-6 gap-y-6 lg:grid-cols-2">
+      <div className="space-y-6 lg:columns-2 lg:gap-x-6 lg:space-y-0">
         {home.sections.map((s) => (
           <section
             key={s.slug}
             data-section={s.slug}
             aria-labelledby={`sec-${s.slug}`}
-            className="flex flex-col gap-2"
+            className="mb-6 flex break-inside-avoid flex-col gap-2"
           >
             <div className="flex items-baseline justify-between gap-3 border-t-[5px] border-sec pt-1">
               <h1
