@@ -29,7 +29,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 |---|---|---|
 | `DB` | D1 `ainews` | 全部业务数据，Drizzle 访问 |
 | `BODIES` | R2 `ainews-bodies` | 正文，按版本存，不覆盖；`feed/` 原始输入除外 |
-| `Q_INGEST` | Queue | 采集 → 正文 → 分析，可并发 |
+| `Q_INGEST` | Queue，`max_concurrency = 2` | 采集 → 正文 → 分析，可并发（上限 2，防突发，#53） |
 | `Q_GROUP` | Queue，`max_concurrency = 1` | 归组，批内顺序处理 |
 | `Q_GENERATE` | Queue | 事件产物、报告、watch、Ask、发现 |
 | `Q_DLQ` | Queue | 三条队列共用的死信队列；它的消费者把消息存进 `dlq_messages` 表，后台从表里查看和重放（Worker 不能直接列出队列里的消息） |
@@ -114,7 +114,7 @@ tests/
 | `judge` | `typesafe/jev` |
 | `embed` | `@cf/baai/bge-m3` |
 | `write` | `google/gemini-3.8-flash` |
-| `reason` | `anthropic/claude-sonnet-5.5` |
+| `reason` | `google/gemini-3.8-flash` |
 
 - 所有槽位都用 `env.AI.run(model, input, { gateway: { id: AI_GATEWAY_ID } })` 调用。模型页的代码示例对这几个模型都用 `env.AI.run`（**已验证**，`google/gemini-3.8-flash` 页面）。
 - 计费渠道按槽位存在 settings 里，#3 实测定案：judge、write、reason 走 AI Gateway 预充的 credits（judge 由用户在 AI Gateway 日志里确认；write、reason 按 Unified Billing 的定义，**推断**）；embed 走 Workers AI 计费（**推断**：`@cf/` 前缀是 Workers AI 自有模型，未在日志里确认）。四个槽位走 binding 都调用成功（**已验证**，#3 的冒烟测试），生产用 binding，不需要 REST。

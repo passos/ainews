@@ -126,3 +126,7 @@ CF worker name ainews-app
 - **Jev 从 AI Gateway credits 扣费**（使用者在 Gateway 日志里确认）。嵌入模型 bge-m3 的计费渠道还没确认，记在 #9 的待办里。
 - **Zero Trust 应用由 ainews-impl 用 API 建**：`ainews-admin`，只保护 `news.ioenv.com/admin`，只允许 `simon.jinyu.liu@gmail.com`，会话 24 小时。使用者登录后，后台页面和 Check session 都显示了邮箱，M0 完成。
 - **已知限制**：架构测试 R1/R2 只查直接导入，不查传递导入（经过 `components/` 或后台 helper 间接导入 `server/db`、`providers/`）。后续单独开 issue 补。
+
+# 第五轮决定（2026-10-23）
+
+- 2026-10-23 使用者决定：不用 Sonnet；`reason` 用 Gemini 3.8 Flash（备选 OpenAI gpt-6-luna）；Q_INGEST 消费并发限制为 2。见 #53。

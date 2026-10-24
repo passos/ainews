@@ -86,7 +86,7 @@ describe("model client", () => {
     });
 
     const first = await models.generateText("reason", "done", REQUEST);
-    expect(first.text).toBe("Hello, world");
+    expect(first.text).toBe("OK");
     expect(transport.calls.length).toBe(1);
 
     const second = await models.generateText("reason", "done", REQUEST);

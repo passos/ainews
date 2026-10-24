@@ -42,7 +42,7 @@
 **生产数据**：两个信源（arXiv cs.AI、MIT Technology Review）每小时抓一次。四个板块都是 `publish_mode='review'`，
 所以**没有任何文章被批准，公开站是空的**。批准要等后台审核队列（#9）上线。
 
-**预算**：每天 $2，按渠道存在 `settings` 的 `budget.caps`：`gateway` $1.90（Jev、Gemini、Sonnet），
+**预算**：每天 $2，按渠道存在 `settings` 的 `budget.caps`：`gateway` $1.90（Jev、Gemini），
 `workers_ai` $0.10（嵌入），`jina` $0。账本 `llm_calls` 在超出上限前拒绝调用。
 
 **执行中**（接手时先看 GitHub 上的实际状态）：

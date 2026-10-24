@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { asc } from "drizzle-orm";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import {
   DEFAULT_BUDGET_CAPS,
   DEFAULT_PRICES,
@@ -11,6 +11,7 @@ import {
 } from "../src/providers/defaults";
 import { getDb } from "../src/server/db/client";
 import { settings } from "../src/server/db/schema";
+import reasonMigration from "../drizzle/migrations/0009_reason_slot_gemini.sql?raw";
 
 it("migrations seed the three model settings", async () => {
   const rows = await getDb(env.DB)
@@ -39,6 +40,50 @@ it("migrations seed the three model settings", async () => {
     jina: 0,
   });
   expect(values[SETTING_BUDGET_CAPS]).toEqual(DEFAULT_BUDGET_CAPS);
+});
+
+// Run the statements of migration 0009 against the settings row, as a deploy would.
+async function runReasonMigration() {
+  for (const statement of reasonMigration.split("--> statement-breakpoint")) {
+    await env.DB.prepare(statement).run();
+  }
+}
+
+async function setReasonModel(model: string) {
+  await env.DB.prepare(
+    "UPDATE settings SET value = json_set(value, '$.reason.model', ?) WHERE key = ?",
+  )
+    .bind(model, SETTING_SLOTS)
+    .run();
+}
+
+async function readReasonModel() {
+  const row = await env.DB.prepare(
+    "SELECT json_extract(value, '$.reason.model') AS model FROM settings WHERE key = ?",
+  )
+    .bind(SETTING_SLOTS)
+    .first<{ model: string }>();
+  return row?.model;
+}
+
+// The tests below change the settings row; put the seed value back.
+afterEach(() => setReasonModel(DEFAULT_SLOTS.reason.model));
+
+it("migrations seed the reason slot with Gemini 3.8 Flash", async () => {
+  expect(await readReasonModel()).toBe("google/gemini-3.8-flash");
+  expect(DEFAULT_SLOTS.reason.model).toBe("google/gemini-3.8-flash");
+});
+
+it("migration 0009 rewrites the old Sonnet seed value", async () => {
+  await setReasonModel("anthropic/claude-sonnet-5.5");
+  await runReasonMigration();
+  expect(await readReasonModel()).toBe("google/gemini-3.8-flash");
+});
+
+it("migration 0009 keeps a reason model that was set by hand", async () => {
+  await setReasonModel("openai/gpt-6-luna");
+  await runReasonMigration();
+  expect(await readReasonModel()).toBe("openai/gpt-6-luna");
 });
 
 it("migrations create the core tables", async () => {
