@@ -746,6 +746,15 @@ export async function replayDlqMessage(
 // Digests
 // -----------------------------------------------------------------------------
 
+export interface AdminDigestItem {
+  eventId: number;
+  eventRevision?: number;
+  title: string;
+  oneLiner: string;
+  sourceName: string;
+  articleCount: number;
+}
+
 export interface AdminDigestRow {
   id: number;
   industryId: number;
@@ -755,6 +764,7 @@ export interface AdminDigestRow {
   status: string;
   intro: string;
   itemCount: number;
+  items: AdminDigestItem[];
   createdAt: number;
   publishedAt: number | null;
   emailedAt: number | null;
@@ -775,6 +785,7 @@ export async function listAdminDigests(database: D1Database): Promise<{
         d.status,
         d.intro,
         json_array_length(d.items_json) AS itemCount,
+        d.items_json AS itemsJson,
         d.created_at AS createdAt,
         d.published_at AS publishedAt,
         d.emailed_at AS emailedAt
@@ -783,16 +794,49 @@ export async function listAdminDigests(database: D1Database): Promise<{
       WHERE d.status = 'ready'
       ORDER BY d.period_start DESC, d.id DESC`,
     )
-    .all<AdminDigestRow>();
+    .all<{
+      id: number;
+      industryId: number;
+      industrySlug: string;
+      industryName: string;
+      periodStart: string;
+      status: string;
+      intro: string;
+      itemCount: number;
+      itemsJson: string;
+      createdAt: number;
+      publishedAt: number | null;
+      emailedAt: number | null;
+    }>();
 
   const pending: AdminDigestRow[] = [];
   const published: AdminDigestRow[] = [];
 
   for (const r of rows) {
+    let items: AdminDigestItem[];
+    try {
+      items = JSON.parse(r.itemsJson || "[]");
+    } catch {
+      items = [];
+    }
+    const itemRow: AdminDigestRow = {
+      id: r.id,
+      industryId: r.industryId,
+      industrySlug: r.industrySlug,
+      industryName: r.industryName,
+      periodStart: r.periodStart,
+      status: r.status,
+      intro: r.intro,
+      itemCount: r.itemCount ?? items.length,
+      items,
+      createdAt: r.createdAt,
+      publishedAt: r.publishedAt,
+      emailedAt: r.emailedAt,
+    };
     if (r.publishedAt === null) {
-      pending.push(r);
+      pending.push(itemRow);
     } else {
-      published.push(r);
+      published.push(itemRow);
     }
   }
 

@@ -104,6 +104,34 @@ function AdminDigestsPage() {
                   </p>
                 )}
 
+                {d.items && d.items.length > 0 && (
+                  <div className="flex flex-col gap-2 pt-2 border-t">
+                    <span className="font-mono text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Stories Preview ({d.items.length}):
+                    </span>
+                    <ul className="flex flex-col gap-2">
+                      {d.items.map((item) => (
+                        <li
+                          key={item.eventId}
+                          className="rounded-md border bg-muted/20 p-3 text-xs flex flex-col gap-1"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-sm text-foreground">
+                              {item.title}
+                            </span>
+                            <span className="font-mono text-[0.7rem] text-muted-foreground shrink-0 rounded bg-muted px-1.5 py-0.5">
+                              {item.sourceName}
+                            </span>
+                          </div>
+                          <p className="text-foreground/80 leading-relaxed">
+                            {item.oneLiner}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between font-mono text-xs text-muted-foreground pt-1">
                   <span>
                     Generated: {new Date(d.createdAt).toLocaleString()}

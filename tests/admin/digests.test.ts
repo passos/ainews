@@ -9,18 +9,34 @@ describe("admin digests operations", () => {
     ).first<{ id: number }>();
     const indId = indRes!.id;
 
-    // 1. Insert unpublished digest
+    // 1. Insert unpublished digest with items preview
+    const itemsJson = JSON.stringify([
+      {
+        eventId: 42,
+        title: "Preview Story Title",
+        oneLiner: "Key reason why this story matters.",
+        sourceName: "Finance Wire",
+        articleCount: 2,
+      },
+    ]);
     const ins = await env.DB.prepare(
       `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
-       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Intro text', '[]', 1000, NULL) RETURNING id`,
+       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Intro text', ?2, 1000, NULL) RETURNING id`,
     )
-      .bind(indId)
+      .bind(indId, itemsJson)
       .first<{ id: number }>();
     const digestId = ins!.id;
 
-    // 2. Query admin list: pending has digestId, published does not
+    // 2. Query admin list: pending has digestId with full item preview, published does not
     const before = await listAdminDigests(env.DB);
-    expect(before.pending.some((d) => d.id === digestId)).toBe(true);
+    const pendingItem = before.pending.find((d) => d.id === digestId);
+    expect(pendingItem).toBeDefined();
+    expect(pendingItem!.items).toHaveLength(1);
+    expect(pendingItem!.items[0].title).toBe("Preview Story Title");
+    expect(pendingItem!.items[0].oneLiner).toBe(
+      "Key reason why this story matters.",
+    );
+    expect(pendingItem!.items[0].sourceName).toBe("Finance Wire");
     expect(before.published.some((d) => d.id === digestId)).toBe(false);
 
     // 3. Publish digest
