@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   reconcileUnknownCall,
   updateDailyCap,
-} from "../../src/server/admin/ledger";
+} from "../../src/server/admin/ops";
 import { utcDay } from "../../src/providers/budget";
 
 describe("ledger and budget admin operations", () => {
@@ -29,10 +29,11 @@ describe("ledger and budget admin operations", () => {
     const callId = callRes!.id;
 
     // Reconcile: unknown -> completed with actual cost 10,000 micros ($0.01)
-    await reconcileUnknownCall({
-      data: { callId, status: "completed", costMicros: 10000 },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await reconcileUnknownCall(env.DB, {
+      callId,
+      status: "completed",
+      costMicros: 10000,
+    });
 
     // Verify budget updated: reserved_micros decreased by 50,000 (now 0), spent_micros increased by 10,000 (now 110,000)
     const budget = await env.DB.prepare(
@@ -44,18 +45,21 @@ describe("ledger and budget admin operations", () => {
     expect(budget!.spent_micros).toBe(110000);
 
     // Reconcile again: should return 409 and not change budget
-    let error: any = null;
+    let error: unknown = null;
     try {
-      await reconcileUnknownCall({
-        data: { callId, status: "completed", costMicros: 20000 },
-        context: { admin: { email: "admin@example.com" } },
-      } as any);
+      await reconcileUnknownCall(env.DB, {
+        callId,
+        status: "completed",
+        costMicros: 20000,
+      });
     } catch (e) {
       error = e;
     }
     expect(error).toBeDefined();
     expect(
-      error?.status || (error instanceof Response ? error.status : 0),
+      error instanceof Response
+        ? error.status
+        : (error as { status?: number })?.status,
     ).toBe(409);
 
     const budgetAfter = await env.DB.prepare(
@@ -77,10 +81,11 @@ describe("ledger and budget admin operations", () => {
       .bind(today)
       .run();
 
-    await updateDailyCap({
-      data: { channel: "workers_ai", capMicros: 250000 },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await updateDailyCap(
+      env.DB,
+      { channel: "workers_ai", capMicros: 250000 },
+      today,
+    );
 
     const budget = await env.DB.prepare(
       "SELECT cap_micros FROM budgets WHERE day = ?1 AND channel = 'workers_ai'",

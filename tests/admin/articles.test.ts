@@ -5,7 +5,7 @@ import {
   createCorrection,
   reanalyzeArticle,
   updateArticleOverride,
-} from "../../src/server/admin/articles";
+} from "../../src/server/admin/ops";
 
 describe("article admin operations", () => {
   it("clears overrides as NULL when empty or whitespace", async () => {
@@ -27,10 +27,11 @@ describe("article admin operations", () => {
     const artId = art!.id;
 
     // Set whitespace-only overrides -> should become NULL
-    await updateArticleOverride({
-      data: { articleId: artId, titleOverride: "   ", summaryOverride: "" },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await updateArticleOverride(env.DB, {
+      articleId: artId,
+      titleOverride: "   ",
+      summaryOverride: "",
+    });
 
     const row = await env.DB.prepare(
       "SELECT title_override, summary_override FROM articles WHERE id = ?1",
@@ -66,7 +67,7 @@ describe("article admin operations", () => {
     const artId = art!.id;
 
     const event = await env.DB.prepare(
-      "INSERT INTO events (industry_id, title, status, revision, created_at, updated_at) VALUES (?1, 'E1', 'active', 1, 0, 0) RETURNING id",
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'E1', 1, 0, 0) RETURNING id",
     )
       .bind(ind1!.id)
       .first<{ id: number }>();
@@ -77,18 +78,20 @@ describe("article admin operations", () => {
       .run();
 
     // Try to move to ind2
-    let error: any = null;
+    let error: unknown = null;
     try {
-      await changeArticleIndustry({
-        data: { articleId: artId, industryId: ind2!.id },
-        context: { admin: { email: "admin@example.com" } },
-      } as any);
+      await changeArticleIndustry(env.DB, {
+        articleId: artId,
+        industryId: ind2!.id,
+      });
     } catch (e) {
       error = e;
     }
     expect(error).toBeDefined();
     expect(
-      error?.status || (error instanceof Response ? error.status : 0),
+      error instanceof Response
+        ? error.status
+        : (error as { status?: number })?.status,
     ).toBe(409);
 
     const artRow = await env.DB.prepare(
@@ -124,10 +127,7 @@ describe("article admin operations", () => {
       .bind(artId)
       .run();
 
-    await reanalyzeArticle({
-      data: { articleId: artId },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await reanalyzeArticle(env.DB, env.Q_INGEST, artId);
 
     const artRow = await env.DB.prepare(
       "SELECT stage, requeue_count FROM articles WHERE id = ?1",
@@ -146,10 +146,11 @@ describe("article admin operations", () => {
   });
 
   it("creates a correction record", async () => {
-    await createCorrection({
-      data: { targetType: "article", targetId: 999, body: "Correction text" },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await createCorrection(env.DB, {
+      targetType: "article",
+      targetId: 999,
+      body: "Correction text",
+    });
 
     const row = await env.DB.prepare(
       "SELECT target_type, target_id, body FROM corrections WHERE target_id = 999",

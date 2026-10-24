@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   decideReview,
   listPendingArticles,
-} from "../../src/server/admin/review";
-import { updateIndustryConfig } from "../../src/server/admin/industries";
+  updateIndustryConfig,
+} from "../../src/server/admin/ops";
 
 describe("review and industry admin operations", () => {
   it("approval binds to body_sha; returning 409 on sha mismatch and returning to queue when body changes", async () => {
@@ -31,24 +31,26 @@ describe("review and industry admin operations", () => {
     const artId = artRes!.id;
 
     // 2. Query pending articles: artId should be present
-    const pending1 = await listPendingArticles({
-      data: { industryId: indId },
-    } as any);
-    expect(pending1.some((a: any) => a.id === artId)).toBe(true);
+    const pending1 = await listPendingArticles(env.DB, { industryId: indId });
+    expect(pending1.some((a) => a.id === artId)).toBe(true);
 
     // 3. Submitting mismatched bodySha should throw 409 and not change reviews count
-    let error: any = null;
+    let error: unknown = null;
     try {
-      await decideReview({
-        data: { articleId: artId, bodySha: "sha-WRONG", decision: "approved" },
-        context: { admin: { email: "admin@example.com" } },
-      } as any);
+      await decideReview(env.DB, {
+        articleId: artId,
+        bodySha: "sha-WRONG",
+        decision: "approved",
+        reviewer: "admin@example.com",
+      });
     } catch (e) {
       error = e;
     }
     expect(error).toBeDefined();
     expect(
-      error?.status || (error instanceof Response ? error.status : 0),
+      error instanceof Response
+        ? error.status
+        : (error as { status?: number })?.status,
     ).toBe(409);
 
     const reviewsCount1 = await env.DB.prepare(
@@ -59,16 +61,16 @@ describe("review and industry admin operations", () => {
     expect(reviewsCount1!.count).toBe(0);
 
     // 4. Approve with matching bodySha = 'sha-A'
-    await decideReview({
-      data: { articleId: artId, bodySha: "sha-A", decision: "approved" },
-      context: { admin: { email: "admin@example.com" } },
-    } as any);
+    await decideReview(env.DB, {
+      articleId: artId,
+      bodySha: "sha-A",
+      decision: "approved",
+      reviewer: "admin@example.com",
+    });
 
     // Article should now NOT be in pending list
-    const pending2 = await listPendingArticles({
-      data: { industryId: indId },
-    } as any);
-    expect(pending2.some((a: any) => a.id === artId)).toBe(false);
+    const pending2 = await listPendingArticles(env.DB, { industryId: indId });
+    expect(pending2.some((a) => a.id === artId)).toBe(false);
 
     // 5. Change article body_sha to 'sha-B'
     await env.DB.prepare("UPDATE articles SET body_sha = 'sha-B' WHERE id = ?1")
@@ -76,10 +78,8 @@ describe("review and industry admin operations", () => {
       .run();
 
     // 6. Article should be back in pending list because approval was for sha-A
-    const pending3 = await listPendingArticles({
-      data: { industryId: indId },
-    } as any);
-    expect(pending3.some((a: any) => a.id === artId)).toBe(true);
+    const pending3 = await listPendingArticles(env.DB, { industryId: indId });
+    expect(pending3.some((a) => a.id === artId)).toBe(true);
   });
 
   it("rejects publish_mode = 'auto' for Finance section", async () => {
@@ -88,22 +88,24 @@ describe("review and industry admin operations", () => {
     ).first<{ id: number }>();
     const finId = finRes!.id;
 
-    let error: any = null;
+    let error: unknown = null;
     try {
-      await updateIndustryConfig({
-        data: {
-          id: finId,
-          publishMode: "auto",
-          primaryDomains: [],
-          config: "{}",
-          disclaimer: null,
-        },
-        context: { admin: { email: "admin@example.com" } },
-      } as any);
+      await updateIndustryConfig(env.DB, {
+        id: finId,
+        publishMode: "auto",
+        primaryDomains: [],
+        config: "{}",
+        disclaimer: null,
+      });
     } catch (e) {
       error = e;
     }
     expect(error).toBeDefined();
+    expect(
+      error instanceof Response
+        ? error.status
+        : (error as { status?: number })?.status,
+    ).toBe(400);
 
     const finRow = await env.DB.prepare(
       "SELECT publish_mode FROM industries WHERE id = ?1",
