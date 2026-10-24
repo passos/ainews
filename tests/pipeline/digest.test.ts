@@ -927,4 +927,131 @@ describe("handleGenerateBatch consumer", () => {
     await buildDailyDigest(pipelineEnv, msg, 2000);
     expect(fakeEmail.sent).toHaveLength(0);
   });
+
+  it("digest logical key includes input payload hash so candidate revision change does not reuse stale model call", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('key-hash-ind', 'Key Hash Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, site_domain, created_at) VALUES (?1, 'rss', 'Src', 'http://s/feed', 's.com', 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, 'http://s.com/kh-1', 'http://s.com/kh-1', 'KH Story', 'Summary KH', 'grouped', 'sha-kh', 1000, 1000, 1000) RETURNING id`,
+    )
+      .bind(indId, source!.id)
+      .first<{ id: number }>();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Event KH', 0, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha-kh', 'approved', 'auto', ?2)",
+    )
+      .bind(art!.id, Date.parse("2026-10-21T05:00:00Z"))
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, created_at, selected)
+       VALUES (?1, 'v1', '{}', 'report', '{}', 80, 1000, 1)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const testTransport: ModelTransport = {
+      run: async () => ({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                {
+                  text: JSON.stringify({
+                    intro: "Generated intro",
+                    items: [
+                      { event_id: event!.id, one_liner: "Generated one liner" },
+                    ],
+                  }),
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 10 },
+      }),
+    };
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL_ENABLED: "false",
+      MODEL_CALLS_ENABLED: "true",
+    };
+
+    const msg: DigestMessage = {
+      kind: "digest",
+      industryId: indId,
+      digestKind: "daily",
+      periodStart: "2026-10-21",
+    };
+
+    const runNow = Date.parse("2026-10-22T01:00:00Z");
+    await env.DB.prepare(
+      `INSERT INTO budgets (day, channel, cap_micros, spent_micros, reserved_micros)
+       VALUES ('2026-10-22', 'gateway', 10000000, 0, 0)
+       ON CONFLICT (day, channel) DO UPDATE SET cap_micros = 10000000`,
+    ).run();
+
+    // First run with revision 0
+    await buildDailyDigest(pipelineEnv, msg, runNow, {
+      transport: testTransport,
+    });
+
+    // Inspect llm_calls row key
+    const callRows1 = await env.DB.prepare(
+      "SELECT logical_key FROM llm_calls WHERE logical_key LIKE ?1",
+    )
+      .bind(`digest:${indId}:%`)
+      .all<{ logical_key: string }>();
+    expect(callRows1.results).toHaveLength(1);
+    const key1 = callRows1.results[0].logical_key;
+
+    // Delete digest row to simulate retry before commit, and bump event revision
+    await env.DB.prepare("DELETE FROM digests WHERE industry_id = ?1")
+      .bind(indId)
+      .run();
+    await env.DB.prepare("UPDATE events SET revision = 1 WHERE id = ?1")
+      .bind(event!.id)
+      .run();
+
+    // Second run with revision 1
+    await buildDailyDigest(pipelineEnv, msg, runNow, {
+      transport: testTransport,
+    });
+
+    const callRows2 = await env.DB.prepare(
+      "SELECT logical_key FROM llm_calls WHERE logical_key LIKE ?1 ORDER BY id ASC",
+    )
+      .bind(`digest:${indId}:%`)
+      .all<{ logical_key: string }>();
+    expect(callRows2.results).toHaveLength(2);
+    const key2 = callRows2.results[1].logical_key;
+
+    // Because revision changed, the logical key is different and did not reuse stale row
+    expect(key2).not.toBe(key1);
+  });
 });

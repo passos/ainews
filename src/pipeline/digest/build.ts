@@ -28,6 +28,16 @@ interface EventRow {
   article_count: number;
 }
 
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function buildDailyDigest(
   env: PipelineEnv,
   msg: DigestMessage,
@@ -231,7 +241,19 @@ export async function buildDailyDigest(
   let usedModel: string | null = null;
   const promptVersion = DIGEST_PROMPT_VERSION;
 
-  const logicalKey = `digest:${industry.id}:daily:${msg.periodStart}:${DIGEST_PROMPT_VERSION}`;
+  const candidatePayload = JSON.stringify(
+    candidates.map((c) => [
+      c.id,
+      c.revision,
+      c.title,
+      c.summary,
+      c.sourceName,
+      c.score,
+      c.articleCount,
+    ]),
+  );
+  const inputSha = (await sha256Hex(candidatePayload)).slice(0, 16);
+  const logicalKey = `digest:${industry.id}:daily:${msg.periodStart}:${inputSha}:${DIGEST_PROMPT_VERSION}`;
 
   if (isEnabled(env, "MODEL_CALLS_ENABLED") && deps.transport) {
     try {
