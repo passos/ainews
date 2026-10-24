@@ -34,7 +34,8 @@ export const SEED_SOURCES: SeedSource[] = [
     industry: "technology",
     name: "MIT Technology Review",
     kind: "rss",
-    feedUrl: "https://www.technologyreview.com/feed/",
+    feedUrl:
+      "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
     siteDomain: "technologyreview.com",
     config: { exclude: [{ field: "category", values: ["sponsored"] }] },
   },

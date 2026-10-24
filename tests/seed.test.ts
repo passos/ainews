@@ -233,7 +233,8 @@ describe("seed sources", () => {
     });
     expect(rows[1]).toMatchObject({
       name: "MIT Technology Review",
-      feed_url: "https://www.technologyreview.com/feed/",
+      feed_url:
+        "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
       site_domain: "technologyreview.com",
     });
     expect(parseSourceConfig(rows[1].config)).toEqual({
