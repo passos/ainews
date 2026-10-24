@@ -66,7 +66,7 @@
     "AI_GATEWAY_ID": "ainews",
     "SEC_USER_AGENT": "Personal News simon.jinyu.liu@gmail.com",
     "COLLECT_ENABLED": "true",
-    "MODEL_CALLS_ENABLED": "true",
+    "MODEL_CALLS_ENABLED": "false",
     "EMAIL_ENABLED": "false",
     "THIRD_PARTY_READER_ENABLED": "false",
     "DISCOVERY_ENABLED": "false",
