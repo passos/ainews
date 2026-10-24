@@ -57,6 +57,33 @@ describe("AudienceExplainCard", () => {
     expect(html).toContain("Def 1");
   });
 
+  it("selects initialAudience when provided in props", () => {
+    const student: AudienceExplain = {
+      audience: "student",
+      overview: "Student overview text",
+      keyPoints: ["Point A"],
+      implications: ["Takeaway 1"],
+      glossary: [],
+    };
+    const professional: AudienceExplain = {
+      audience: "professional",
+      overview: "Professional overview text",
+      keyPoints: ["Pro point"],
+      implications: ["Pro implication"],
+      glossary: [],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(AudienceExplainCard, {
+        explanations: { student, professional },
+        initialAudience: "professional",
+      }),
+    );
+
+    expect(html).toContain("Professional overview text");
+    expect(html).toContain("Pro point");
+  });
+
   it("returns null when no explanations are available", () => {
     const html = renderToStaticMarkup(
       createElement(AudienceExplainCard, {

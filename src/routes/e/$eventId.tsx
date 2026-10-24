@@ -47,6 +47,7 @@ export const Route = createFileRoute("/e/$eventId")({
 
 function EventPage() {
   const { data, sources } = Route.useLoaderData();
+  const { audience } = Route.useSearch();
   const { section, articles, corrections, title, artifacts } = data;
 
   const hasExplanations =
@@ -79,7 +80,10 @@ function EventPage() {
       {artifacts?.brief && <StoryBriefCard brief={artifacts.brief} />}
 
       {hasExplanations && (
-        <AudienceExplainCard explanations={artifacts.explanations} />
+        <AudienceExplainCard
+          explanations={artifacts.explanations}
+          initialAudience={audience}
+        />
       )}
 
       {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}

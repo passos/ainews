@@ -1,4 +1,4 @@
-import { DEFAULT_SLOTS } from "../../providers/defaults";
+import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import { FINANCE_SLUG } from "../../server/admin/ops";
 import { parseAnalysisConfig } from "../analyze/config";
 import { createModelClient, type ModelClient } from "../../providers/models";
@@ -115,64 +115,86 @@ export async function generateEventArtifacts(
 ): Promise<ArtifactGenerationResult> {
   const deps = defaultDeps(env, overrides, commitNow);
 
-  // 1. Atomic input snapshot: query event and its approved articles
-  const event = await deps.db
-    .prepare(
-      `SELECT
-         e.id AS event_id,
-         e.title AS event_title,
-         e.revision AS event_revision,
-         i.id AS industry_id,
-         i.slug AS industry_slug,
-         i.name AS industry_name,
-         i.publish_mode AS industry_publish_mode,
-         i.disclaimer AS industry_disclaimer,
-         i.config AS industry_config
-       FROM events e
-       JOIN industries i ON i.id = e.industry_id
-       WHERE e.id = ?1`,
-    )
-    .bind(eventId)
-    .first<EventRow>();
+  // 1. Atomic input snapshot: query event and its approved articles in a single batch
+  const [eventBatchResult, articleBatchResult, slotBatchResult] =
+    await deps.db.batch([
+      deps.db
+        .prepare(
+          `SELECT
+             e.id AS event_id,
+             e.title AS event_title,
+             e.revision AS event_revision,
+             i.id AS industry_id,
+             i.slug AS industry_slug,
+             i.name AS industry_name,
+             i.publish_mode AS industry_publish_mode,
+             i.disclaimer AS industry_disclaimer,
+             i.config AS industry_config
+           FROM events e
+           JOIN industries i ON i.id = e.industry_id
+           WHERE e.id = ?1`,
+        )
+        .bind(eventId),
+      deps.db
+        .prepare(
+          `SELECT
+             a.id,
+             COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
+             COALESCE(NULLIF(a.summary_override, ''), NULLIF(an.summary_en, ''), a.summary) AS summary,
+             a.body_sha,
+             a.published_at,
+             COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
+             s.site_domain AS source_domain,
+             an.total_score,
+             an.content_type,
+             an.evidence_tags
+           FROM event_articles ea
+           JOIN articles a ON a.id = ea.article_id
+           JOIN sources s ON s.id = a.source_id
+           JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+           LEFT JOIN analyses an ON an.id = (
+             SELECT id FROM analyses
+             WHERE article_id = a.id AND selected = 1
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1
+           )
+           WHERE ea.event_id = ?1
+           ORDER BY a.id ASC`,
+        )
+        .bind(eventId),
+      deps.db
+        .prepare("SELECT value FROM settings WHERE key = ?1")
+        .bind(SETTING_SLOTS),
+    ]);
 
+  const event = (eventBatchResult.results?.[0] as EventRow | undefined) ?? null;
   if (!event) {
     return { status: "skipped", eventId, reason: "event_not_found" };
   }
 
-  const { results: articleRows } = await deps.db
-    .prepare(
-      `SELECT
-         a.id,
-         a.title,
-         a.summary,
-         a.body_sha,
-         a.published_at,
-         COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
-         s.site_domain AS source_domain,
-         an.total_score,
-         an.content_type,
-         an.evidence_tags
-       FROM event_articles ea
-       JOIN articles a ON a.id = ea.article_id
-       JOIN sources s ON s.id = a.source_id
-       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       LEFT JOIN analyses an ON an.id = (
-         SELECT id FROM analyses
-         WHERE article_id = a.id AND selected = 1
-         ORDER BY created_at DESC, id DESC
-         LIMIT 1
-       )
-       WHERE ea.event_id = ?1
-       ORDER BY a.id ASC`,
-    )
-    .bind(eventId)
-    .all<ApprovedArticleRow>();
-
-  if (!articleRows || articleRows.length === 0) {
+  const articleRows =
+    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? [];
+  if (articleRows.length === 0) {
     return { status: "skipped", eventId, reason: "no_approved_articles" };
   }
 
   const inputRevision = event.event_revision;
+
+  // Resolve write slot model name from settings if configured
+  let modelName = DEFAULT_SLOTS.write.model;
+  const slotVal = (
+    slotBatchResult.results?.[0] as { value?: string } | undefined
+  )?.value;
+  if (slotVal) {
+    try {
+      const parsed = JSON.parse(slotVal);
+      if (parsed?.write?.model) {
+        modelName = parsed.write.model;
+      }
+    } catch {
+      // ignore JSON parse error in settings
+    }
+  }
 
   // 2. Parse thresholds and calculate event score
   const analysisCfg = parseAnalysisConfig(event.industry_config);
@@ -189,7 +211,12 @@ export async function generateEventArtifacts(
     let parsedTags: string[] = [];
     if (r.evidence_tags) {
       try {
-        parsedTags = JSON.parse(r.evidence_tags);
+        const raw = JSON.parse(r.evidence_tags);
+        if (Array.isArray(raw)) {
+          parsedTags = raw.map(String);
+        } else if (raw && typeof raw === "object") {
+          parsedTags = Object.values(raw).map(String);
+        }
       } catch {
         parsedTags = [];
       }
@@ -237,7 +264,7 @@ export async function generateEventArtifacts(
 
   const material: ArtifactEventMaterial = {
     eventId,
-    eventTitle: event.event_title,
+    eventTitle: articleMaterials[0]?.title || event.event_title,
     industryName: event.industry_name,
     industrySlug: event.industry_slug,
     disclaimer: event.industry_disclaimer,
@@ -315,7 +342,6 @@ export async function generateEventArtifacts(
       }
 
       const contentJson = JSON.stringify(parsed);
-      const modelName = DEFAULT_SLOTS.write.model;
 
       // Atomic conditional insert: only write if events.revision is still inputRevision
       const insertResult = await deps.db

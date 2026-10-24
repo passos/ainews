@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   type ArtifactAudience,
   type AudienceExplain,
@@ -7,16 +7,31 @@ import {
 
 export function AudienceExplainCard({
   explanations,
+  initialAudience,
 }: {
   explanations: Partial<Record<ArtifactAudience, AudienceExplain>>;
+  initialAudience?: ArtifactAudience;
 }) {
   const availableAudiences = ARTIFACT_AUDIENCES.filter(
     (aud) => !!explanations[aud],
   );
 
+  const resolveAudience = (pref?: ArtifactAudience): ArtifactAudience => {
+    if (pref && availableAudiences.includes(pref)) {
+      return pref;
+    }
+    return availableAudiences[0] || "student";
+  };
+
   const [selectedAudience, setSelectedAudience] = useState<ArtifactAudience>(
-    () => availableAudiences[0] || "student",
+    () => resolveAudience(initialAudience),
   );
+
+  useEffect(() => {
+    if (initialAudience && availableAudiences.includes(initialAudience)) {
+      setSelectedAudience(initialAudience);
+    }
+  }, [initialAudience, availableAudiences]);
 
   if (availableAudiences.length === 0) {
     return null;

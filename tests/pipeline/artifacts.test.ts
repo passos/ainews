@@ -418,7 +418,7 @@ describe("generateEventArtifacts", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'research_paper', '["paper_preprint"]', 88, 0.95, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'research_paper', '{"empirical_evidence":"paper_preprint"}', 88, 0.95, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -911,5 +911,120 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(event!.id)
       .first<{ id: number }>();
     expect(row).toBeDefined();
+  });
+
+  it("uses article title and summary overrides in generated prompt material", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('override-ind', 'Override Industry', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://test/feed', 'test.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, title_override, summary_override, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test/override', 'https://test/override', 'Original Title', 'Original Summary', 'Hand-Crafted Override Title', 'Hand-Crafted Override Summary', 'shaOver', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaOver', 'approved', 'human', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Original Event Title', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    let capturedPrompt = "";
+    const transport = makeFakeTransport((_model, input) => {
+      capturedPrompt = JSON.stringify(input);
+      return {
+        whatHappened: "Verified override happened.",
+        whatIsNew: "Novel override.",
+        whatEvidenceExists: "Evidence exists.",
+        whatToWatchNext: "Watch next.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    expect(capturedPrompt).toContain("Hand-Crafted Override Title");
+    expect(capturedPrompt).toContain("Hand-Crafted Override Summary");
+    expect(capturedPrompt).not.toContain("Original Title");
+  });
+
+  it("generates Story Brief even when article score is below selectThreshold", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('low-ind', 'Low Score Industry', 'review', '{\"thresholds\":{\"select\":70}}', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://test/low', 'test.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test/low-score', 'https://test/low-score', 'Low Score Article', 'Low summary', 'shaLow', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaLow', 'approved', 'human', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'news', '{}', 35, 0.9, 1, 'cat', 'none', 0, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Low Score Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      whatHappened: "Low score event brief.",
+      whatIsNew: "Novelty.",
+      whatEvidenceExists: "Evidence.",
+      whatToWatchNext: "Next.",
+    }));
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    expect(res.generatedCount).toBe(1);
   });
 });

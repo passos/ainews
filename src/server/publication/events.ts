@@ -74,6 +74,7 @@ export async function getEvent(
     WHERE ea.event_id = ${eventId}
       AND ea.status = 'published'
       AND ea.input_revision = e.revision
+    ORDER BY ea.created_at ASC, ea.id ASC
   `);
 
   const artifacts: EventArtifactsView = {

@@ -141,7 +141,7 @@ describe("tests/routes/event.test.ts", () => {
     // 4. Stale revision artifact matching revision 1 (should be excluded)
     await env.DB.prepare(
       `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
-       VALUES (?1, 'story_brief', '', 1, 'pv1', 'gemini', '{"whatHappened":"Old brief"}', 'published', 500)`,
+       VALUES (?1, 'research_paper_decoder', '', 1, 'pv1', 'gemini', '{"hypothesis":"Old hyp","method":"Old met","findings":"Old find","limitations":"Old lim","applications":"Old app"}', 'published', 500)`,
     )
       .bind(eventId)
       .run();

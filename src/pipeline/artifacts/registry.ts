@@ -49,8 +49,8 @@ export const ARTIFACT_REGISTRY: Record<ArtifactType, ArtifactDefinition> = {
     audiences: [""],
     promptVersion: STORY_BRIEF_PROMPT_VERSION,
     isEligible: (ctx) => {
-      // Story Brief is generated for all events with approved articles (eventScore >= selectThreshold)
-      return ctx.articles.length > 0 && ctx.eventScore >= ctx.selectThreshold;
+      // Story Brief is standard for all events with approved articles
+      return ctx.articles.length > 0;
     },
     buildRequest: (material) => buildStoryBriefRequest(material),
     parseOutput: (rawText) => parseStoryBriefOutput(rawText),
@@ -84,8 +84,9 @@ export const ARTIFACT_REGISTRY: Record<ArtifactType, ArtifactDefinition> = {
         const isArxiv = a.sourceDomain.toLowerCase().includes("arxiv");
         const isPaperType = a.contentType === "research_paper";
         const hasPaperTag =
-          a.evidenceTags.includes("paper_preprint") ||
-          a.evidenceTags.includes("peer_reviewed");
+          Array.isArray(a.evidenceTags) &&
+          (a.evidenceTags.includes("paper_preprint") ||
+            a.evidenceTags.includes("peer_reviewed"));
         return isArxiv || isPaperType || hasPaperTag;
       });
     },
