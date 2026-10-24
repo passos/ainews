@@ -14,6 +14,8 @@ import {
   parseClaimsOutput,
   type ArticleEvidenceInput,
   type EventEvidenceInput,
+  type RawClaim,
+  type RawCitation,
 } from "./prompts";
 import {
   evaluateClaimConsensus,
@@ -447,8 +449,44 @@ export async function generateEventEvidence(
       .bind(eventId, inputRevision),
   );
 
-  // 3. Process and assemble verified claims & evidence statements
-  for (const rawClaim of parsed.claims) {
+  // 3. Deduplicate and merge duplicate claims by normalized claimText so citations from
+  // duplicated entries combine before consensus evaluation.
+  const mergedClaimsMap = new Map<
+    string,
+    {
+      claimText: string;
+      claimType: RawClaim["claimType"];
+      citations: RawCitation[];
+    }
+  >();
+
+  for (const raw of parsed.claims) {
+    const key = raw.claimText.trim();
+    const existing = mergedClaimsMap.get(key);
+    if (!existing) {
+      mergedClaimsMap.set(key, {
+        claimText: key,
+        claimType: raw.claimType,
+        citations: [...raw.citations],
+      });
+    } else {
+      for (const cit of raw.citations) {
+        if (
+          !existing.citations.some(
+            (c) =>
+              c.articleId === cit.articleId &&
+              c.quote === cit.quote &&
+              c.stance === cit.stance,
+          )
+        ) {
+          existing.citations.push(cit);
+        }
+      }
+    }
+  }
+
+  // 4. Process and assemble verified claims & evidence statements
+  for (const rawClaim of mergedClaimsMap.values()) {
     const verifiedCitations: Array<{
       articleId: number;
       bodySha: string;
@@ -571,8 +609,8 @@ export async function generateEventEvidence(
     }
   }
 
-  // 4. Mark completion of the evidence batch
-  if (parsed.claims.length > 0) {
+  // 5. Mark completion of the evidence batch
+  if (mergedClaimsMap.size > 0) {
     batchStatements.push(
       deps.db
         .prepare(

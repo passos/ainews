@@ -33,7 +33,15 @@ export const rawCitationSchema = z.strictObject({
 export type RawCitation = z.infer<typeof rawCitationSchema>;
 
 export const rawClaimSchema = z.strictObject({
-  claimText: z.string().min(5),
+  claimText: z
+    .string()
+    .min(5)
+    .refine(
+      (text) => !(text.trim().startsWith("[") && text.trim().endsWith("]")),
+      {
+        message: "claimText must not use reserved bracket sentinel format",
+      },
+    ),
   claimType: z.enum(CLAIM_TYPES),
   citations: z.array(rawCitationSchema).min(1),
 });

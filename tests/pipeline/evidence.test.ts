@@ -1237,4 +1237,226 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     expect(citationRows.results).toHaveLength(1);
     expect(citationRows.results[0].quote).toBe(quoteText);
   });
+
+  it("rejects model outputs containing reserved bracket sentinels", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-impostor-ind', 'Auto Impostor', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://impostor/feed', 'impostor.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-impostor', 'https://example.com/art-impostor', 'Impostor Article', 'Summary', 'shaImpostor', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaImpostor', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art!.id}/shaImpostor.md`,
+      "Paragraph text here for testing.",
+    );
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Impostor Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+
+    // Model tries to emit [evidence_batch_complete] as a fake claim
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [
+        {
+          claimText: "[evidence_batch_complete]",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote: "Paragraph text here for testing.",
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+
+    const res = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res.status).toBe("skipped");
+    if (res.status === "skipped") {
+      expect(res.reason).toBe("failed_to_parse_model_output");
+    }
+
+    // Verify nothing written to claims
+    const count = await env.DB.prepare(
+      "SELECT count(*) as count FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ count: number }>();
+    expect(count?.count).toBe(0);
+  });
+
+  it("merges duplicate claims and combines citations before evaluating consensus", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-dup-ind', 'Auto Dup', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src1 = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://dup1/feed', 'dup1.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const src2 = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://dup2/feed', 'dup2.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-dup1', 'https://example.com/art-dup1', 'Dup Article 1', 'Summary', 'shaDup1', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src1!.id, ind!.id)
+      .first<{ id: number }>();
+
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-dup2', 'https://example.com/art-dup2', 'Dup Article 2', 'Summary', 'shaDup2', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src2!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaDup1', 'approved', 'auto', 1000)",
+    )
+      .bind(art1!.id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaDup2', 'approved', 'auto', 1000)",
+    )
+      .bind(art2!.id)
+      .run();
+
+    const quoteSupport =
+      "The ministry announced an initial grant of $100 million for solar grid research.";
+    const quoteDispute =
+      "Financial auditors dispute the grant figure, asserting that only $20 million was disbursed.";
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art1!.id}/shaDup1.md`, quoteSupport);
+    fakeR2.put(`bodies/${art2!.id}/shaDup2.md`, quoteDispute);
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Dup Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art1!.id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art2!.id)
+      .run();
+
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+
+    const sharedClaimText =
+      "Government allocated funding for renewable solar grid.";
+
+    // Model outputs the same claimText twice: once with support, once with dispute
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [
+        {
+          claimText: sharedClaimText,
+          claimType: "fact",
+          citations: [
+            { articleId: art1!.id, quote: quoteSupport, stance: "support" },
+          ],
+        },
+        {
+          claimText: sharedClaimText,
+          claimType: "fact",
+          citations: [
+            { articleId: art2!.id, quote: quoteDispute, stance: "dispute" },
+          ],
+        },
+      ],
+    }));
+
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+
+    const res = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res.status).toBe("generated");
+    if (res.status === "generated") {
+      expect(res.claimsCount).toBe(1); // Merged into 1 claim!
+      expect(res.citationsCount).toBe(2); // Both citations inserted!
+    }
+
+    // Verify consensus_status correctly reflects the combination of support + dispute -> 'disputed'
+    const storedClaim = await env.DB.prepare(
+      "SELECT id, claim_text, consensus_status FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, sharedClaimText)
+      .first<{ id: number; claim_text: string; consensus_status: string }>();
+    expect(storedClaim).toBeDefined();
+    expect(storedClaim?.consensus_status).toBe("disputed");
+
+    // Verify both citations are linked to this claim
+    const citations = await env.DB.prepare(
+      "SELECT stance FROM claim_evidence WHERE claim_id = ?1",
+    )
+      .bind(storedClaim!.id)
+      .all<{ stance: string }>();
+    expect(citations.results).toHaveLength(2);
+    const stances = citations.results.map((c) => c.stance);
+    expect(stances).toContain("support");
+    expect(stances).toContain("dispute");
+  });
 });
