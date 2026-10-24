@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { generateEventEvidence } from "../../src/pipeline/evidence/build";
 import { chunkMarkdownBody } from "../../src/pipeline/evidence/chunks";
 import { enqueueDueEvidence } from "../../src/pipeline/evidence/schedule";
@@ -385,6 +385,28 @@ describe("Evidence Chunks & Quote Verification", () => {
     expect(verifyQuoteInBody(body, badQuote).verified).toBe(false);
   });
 
+  it("verifyQuoteInBody does not leak code fence language identifier into verified offsets", () => {
+    const body =
+      'The code example is below:\n\n```python\nprint("hello world")\n```\n';
+    const quote = 'print("hello world")';
+    const res = verifyQuoteInBody(body, quote);
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      'print("hello world")',
+    );
+  });
+
+  it("verifyQuoteInBody correctly parses reference link shortcuts without leaking link definitions", () => {
+    const body =
+      "See [target][ref] for info.\n\n[ref]: https://example.com/target";
+    const quote = "target for info.";
+    const res = verifyQuoteInBody(body, quote);
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "target][ref] for info.",
+    );
+  });
+
   it("verifyQuoteInBody respects Unicode code point boundaries including astral plane characters", () => {
     const body = "The initial funding round was 𝟙15 million in capital.";
     const badQuote = "15 million in capital";
@@ -508,6 +530,76 @@ describe("generateEventEvidence Integration", () => {
     expect((res as { reason: string }).reason).toBe("missing_article_bodies");
 
     // Verify NO sentinel or claims were inserted, keeping event eligible for retry
+    const count = await env.DB.prepare(
+      "SELECT count(*) as cnt FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ cnt: number }>();
+    expect(count?.cnt).toBe(0);
+  });
+
+  it("propagates Vectorize indexing errors and leaves event eligible for retry without completion sentinels", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('vec-fail-ind', 'Vec Fail Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://test.org/vfeed', 'test.org', 'Test Org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test.org/v1', 'https://test.org/v1', 'Article Vec', 'sum', 'shaVec', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaVec', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Vec Fail Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art!.id}/shaVec.md`,
+      "Full text of article with important facts.",
+    );
+
+    // Vectorize throws error
+    const failingVectors = {
+      upsert: vi
+        .fn()
+        .mockRejectedValue(new Error("Vectorize temporary outage")),
+    };
+
+    const transport = makeFakeTransport(() => ({}));
+
+    await expect(
+      generateEventEvidence(testEnv, event!.id, 1000, {
+        transport,
+        bodies: fakeR2 as unknown as R2Bucket,
+        vectors: failingVectors as unknown as Pick<VectorizeIndex, "upsert">,
+      }),
+    ).rejects.toThrow("Vectorize temporary outage");
+
+    // Sentinel must NOT be written, event must remain eligible for retry
     const count = await env.DB.prepare(
       "SELECT count(*) as cnt FROM claims WHERE event_id = ?1",
     )

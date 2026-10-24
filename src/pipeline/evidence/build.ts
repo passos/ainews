@@ -245,20 +245,12 @@ export async function generateEventEvidence(
 
       // Index chunks into V_CHUNKS if bodies and vectorize available
       if (deps.vectors && a.body_sha) {
-        try {
-          await indexArticleChunks(
-            { vectors: deps.vectors, models: deps.models },
-            a.id,
-            a.body_sha,
-            bodyText,
-          );
-        } catch (err) {
-          console.warn({
-            warning: "failed to index article chunks into V_CHUNKS",
-            articleId: a.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        await indexArticleChunks(
+          { vectors: deps.vectors, models: deps.models },
+          a.id,
+          a.body_sha,
+          bodyText,
+        );
       }
     }
 

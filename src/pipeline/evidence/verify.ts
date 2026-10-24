@@ -3,27 +3,40 @@ import type { ConsensusStatus, EvidenceStance } from "../../lib/evidence/types";
 
 const md = new MarkdownIt({ html: false, linkify: false });
 
-function findLinkClose(rawStr: string, startPos: number): number {
+function computeLineOffsets(str: string): number[] {
+  const offsets = [0];
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === "\n") {
+      offsets.push(i + 1);
+    }
+  }
+  return offsets;
+}
+
+function findLinkClose(
+  rawStr: string,
+  startPos: number,
+  blockEnd: number,
+): number {
   let p = rawStr.indexOf("]", startPos);
-  if (p === -1) return startPos;
+  if (p === -1 || p >= blockEnd) return startPos;
   p++; // skip ]
-  while (p < rawStr.length && /\s/.test(rawStr[p])) p++;
-  if (p >= rawStr.length) return startPos;
+  while (p < blockEnd && /\s/.test(rawStr[p])) p++;
+  if (p >= blockEnd) return startPos;
   if (rawStr[p] === "(") {
     p++;
     let depth = 1;
     let inAngle = false;
     let inTitleQuote: string | null = null;
     let hasSeenSpace = false;
-    while (p < rawStr.length && depth > 0) {
+    while (p < blockEnd && depth > 0) {
       const ch = rawStr[p];
       if (ch === "\\") {
         p += 2;
         continue;
       }
       if (inTitleQuote) {
-        if (ch === inTitleQuote) inTitleQuote = null;
-        else if (ch === "\n") inTitleQuote = null;
+        if (ch === inTitleQuote || ch === "\n") inTitleQuote = null;
       } else if (inAngle) {
         if (ch === ">") inAngle = false;
       } else {
@@ -44,7 +57,7 @@ function findLinkClose(rawStr: string, startPos: number): number {
     return p;
   } else if (rawStr[p] === "[") {
     const end = rawStr.indexOf("]", p + 1);
-    return end !== -1 ? end + 1 : startPos;
+    return end !== -1 && end < blockEnd ? end + 1 : startPos;
   }
   return p;
 }
@@ -79,31 +92,39 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
   }
 
   const tokens = md.parse(rawStr, {});
+  const lineOffsets = computeLineOffsets(rawStr);
   const outChars: string[] = [];
   const outIndices: number[] = [];
   let inWs = false;
-  let srcIdx = 0;
 
   for (const block of tokens) {
+    if (!block.map) continue;
+    const startLine = block.map[0];
+    const endLine = block.map[1];
+    const blockStart = lineOffsets[startLine] ?? 0;
+    const blockEnd =
+      endLine < lineOffsets.length ? lineOffsets[endLine] : rawStr.length;
+
     if (block.type === "inline" && block.children) {
+      let srcIdx = blockStart;
       for (const token of block.children) {
         if (token.type === "text" || token.type === "code_inline") {
           const content = token.content;
           let s = srcIdx;
           for (let c = 0; c < content.length; c++) {
             const ch = content[c];
-            while (s < rawStr.length && rawStr[s] !== ch) {
+            while (s < blockEnd && rawStr[s] !== ch) {
               if (rawStr[s] === "&") {
                 const semi = rawStr.indexOf(";", s);
-                if (semi !== -1 && semi - s <= 10) break;
+                if (semi !== -1 && semi < blockEnd && semi - s <= 10) break;
               }
               s++;
             }
-            const origIdx = s < rawStr.length ? s : -1;
-            if (s < rawStr.length) {
+            const origIdx = s < blockEnd ? s : -1;
+            if (s < blockEnd) {
               if (rawStr[s] === "&" && rawStr[s] !== ch) {
                 const semi = rawStr.indexOf(";", s);
-                s = semi !== -1 ? semi + 1 : s + 1;
+                s = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
               } else {
                 s++;
               }
@@ -125,22 +146,22 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
         } else if (token.type === "image") {
           const alt = token.content;
           const imgStart = rawStr.indexOf("![", srcIdx);
-          if (imgStart !== -1) {
+          if (imgStart !== -1 && imgStart < blockEnd) {
             let s = imgStart + 2;
             for (let c = 0; c < alt.length; c++) {
               const ch = alt[c];
-              while (s < rawStr.length && rawStr[s] !== ch) {
+              while (s < blockEnd && rawStr[s] !== ch) {
                 if (rawStr[s] === "&") {
                   const semi = rawStr.indexOf(";", s);
-                  if (semi !== -1 && semi - s <= 10) break;
+                  if (semi !== -1 && semi < blockEnd && semi - s <= 10) break;
                 }
                 s++;
               }
-              const origIdx = s < rawStr.length ? s : -1;
-              if (s < rawStr.length) {
+              const origIdx = s < blockEnd ? s : -1;
+              if (s < blockEnd) {
                 if (rawStr[s] === "&" && rawStr[s] !== ch) {
                   const semi = rawStr.indexOf(";", s);
-                  s = semi !== -1 ? semi + 1 : s + 1;
+                  s = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
                 } else {
                   s++;
                 }
@@ -158,38 +179,42 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
                 inWs = false;
               }
             }
-            srcIdx = findLinkClose(rawStr, s);
+            srcIdx = findLinkClose(rawStr, s, blockEnd);
           }
         } else if (token.type === "link_close") {
           if (token.markup === "autolink") {
             const closeAngle = rawStr.indexOf(">", srcIdx);
-            srcIdx = closeAngle !== -1 ? closeAngle + 1 : srcIdx;
+            srcIdx =
+              closeAngle !== -1 && closeAngle < blockEnd
+                ? closeAngle + 1
+                : srcIdx;
           } else {
-            srcIdx = findLinkClose(rawStr, srcIdx);
+            srcIdx = findLinkClose(rawStr, srcIdx, blockEnd);
           }
         } else if (token.type === "softbreak" || token.type === "hardbreak") {
           if (!inWs) {
             outChars.push(" ");
-            outIndices.push(srcIdx);
+            outIndices.push(Math.min(blockEnd - 1, srcIdx));
             inWs = true;
           }
         }
       }
       if (!inWs) {
         outChars.push(" ");
-        outIndices.push(Math.min(rawStr.length - 1, srcIdx));
+        outIndices.push(Math.min(blockEnd - 1, srcIdx));
         inWs = true;
       }
-    } else if (block.type === "fence" || block.type === "code_block") {
+    } else if (block.type === "fence") {
+      const contentStartLine = startLine + 1;
+      let s = lineOffsets[contentStartLine] ?? blockStart;
       const content = block.content;
-      let s = srcIdx;
       for (let c = 0; c < content.length; c++) {
         const ch = content[c];
-        while (s < rawStr.length && rawStr[s] !== ch) {
+        while (s < blockEnd && rawStr[s] !== ch) {
           s++;
         }
-        const origIdx = s < rawStr.length ? s : -1;
-        if (s < rawStr.length) s++;
+        const origIdx = s < blockEnd ? s : -1;
+        if (s < blockEnd) s++;
 
         if (/\s/.test(ch)) {
           if (!inWs) {
@@ -203,10 +228,37 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
           inWs = false;
         }
       }
-      srcIdx = s;
       if (!inWs) {
         outChars.push(" ");
-        outIndices.push(Math.min(rawStr.length - 1, srcIdx));
+        outIndices.push(Math.min(blockEnd - 1, s));
+        inWs = true;
+      }
+    } else if (block.type === "code_block") {
+      let s = blockStart;
+      const content = block.content;
+      for (let c = 0; c < content.length; c++) {
+        const ch = content[c];
+        while (s < blockEnd && rawStr[s] !== ch) {
+          s++;
+        }
+        const origIdx = s < blockEnd ? s : -1;
+        if (s < blockEnd) s++;
+
+        if (/\s/.test(ch)) {
+          if (!inWs) {
+            outChars.push(" ");
+            outIndices.push(origIdx);
+            inWs = true;
+          }
+        } else {
+          outChars.push(ch);
+          outIndices.push(origIdx);
+          inWs = false;
+        }
+      }
+      if (!inWs) {
+        outChars.push(" ");
+        outIndices.push(Math.min(blockEnd - 1, s));
         inWs = true;
       }
     }
