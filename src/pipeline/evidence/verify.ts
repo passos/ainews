@@ -408,11 +408,16 @@ export function verifyQuoteInBody(
     charA: string,
   ): boolean {
     const quoteStartsDigit = /^[\p{N}]/u.test(quoteClean);
+    const quoteStartsCurrency = /^[\p{Sc}]/u.test(quoteClean);
     const quoteEndsDigit = /[\p{N}]$/u.test(quoteClean);
 
     if (quoteStartsDigit) {
       // Cannot be preceded by minus/plus signs (negation or sign clipping: -15, +15, −15, ±15)
       if (/^[-+−±]$/u.test(charB)) {
+        return false;
+      }
+      // Cannot be preceded by currency symbol ($15 quoted as 15)
+      if (/^[\p{Sc}]$/u.test(charB)) {
         return false;
       }
       // Cannot be preceded by decimal point or thousands separator (.15, 0.15, 1,015)
@@ -421,8 +426,23 @@ export function verifyQuoteInBody(
       }
     }
 
-    // If quote starts with an explicit sign and digit (e.g. -15), cannot be preceded by another sign
-    const quoteStartsSign = /^[-+−±][\p{N}]/u.test(quoteClean);
+    if (quoteStartsCurrency) {
+      // Cannot be preceded by minus/plus signs (-$15 quoted as $15, −€15 quoted as €15)
+      if (/^[-+−±]$/u.test(charB)) {
+        return false;
+      }
+      // Also catch '- $15' where whitespace separates the minus sign from the currency symbol
+      const beforeTrimmed = bodyClean.slice(0, cleanIdx).trimEnd();
+      if (/[-+−±]$/u.test(beforeTrimmed)) {
+        const beforeSign = beforeTrimmed.slice(0, -1).trimEnd();
+        if (!/[\p{N}\p{Sc}]$/u.test(beforeSign)) {
+          return false;
+        }
+      }
+    }
+
+    // If quote starts with an explicit sign (e.g. -15 or -$15), cannot be preceded by another sign
+    const quoteStartsSign = /^[-+−±]/u.test(quoteClean);
     if (quoteStartsSign && /^[-+−±]$/u.test(charB)) {
       return false;
     }
@@ -459,18 +479,30 @@ export function verifyQuoteInBody(
     const negationRegex =
       /(?:\b\w+n['’]t|\bnot|\bcannot|\bnever|\bno|\bneither|\bnor|\bhardly|\bbarely|\bscarcely|\bfailed\s+to|\bfails\s+to|\bdenied|\bdenies|\bwithout)\b/i;
 
-    const match = negationRegex.exec(sentencePrefix);
-    if (!match) return false;
-
-    // If there is a negation in the sentence prefix, check if an adversative conjunction separates it from the quote
-    const afterNegation = sentencePrefix.slice(match.index + match[0].length);
-    const contrastRegex =
-      /\b(but|however|yet|nevertheless|although|though|whereas|while)\b/i;
-    if (contrastRegex.test(afterNegation)) {
-      return false; // Negation was in a contrasting clause prior to "but", "however", etc.
+    // If there is no negation in the sentence prefix, no negation was dropped
+    if (!negationRegex.test(sentencePrefix)) {
+      return false;
     }
 
-    return true;
+    // Identify contrasting clause boundaries that can start a new affirmative clause:
+    // 1. Semicolons: ';' (e.g., '; however,', '; nevertheless,')
+    // 2. Conjunctions introducing a contrasting coordinate clause: ', but', '; but', '— but', ', yet'
+    // Note: Parenthetical ', however,' or ', nevertheless,' without a semicolon does NOT start a new clause.
+    const clauseBoundaryRegex =
+      /(?:;|[,;—]\s*(?:but|yet|whereas)\b|\bbut\s+(?:it|they|he|she|we|the|this|that)\b)/gi;
+
+    let lastBoundaryEnd = -1;
+    let match: RegExpExecArray | null;
+    while ((match = clauseBoundaryRegex.exec(sentencePrefix)) !== null) {
+      lastBoundaryEnd = match.index + match[0].length;
+    }
+
+    const quoteClausePrefix =
+      lastBoundaryEnd === -1
+        ? sentencePrefix
+        : sentencePrefix.slice(lastBoundaryEnd);
+
+    return negationRegex.test(quoteClausePrefix);
   }
 
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness

@@ -446,11 +446,97 @@ describe("Evidence Chunks & Quote Verification", () => {
       ).verified,
     ).toBe(true);
 
+    const howeverParentheticalBody =
+      "The treatment did not, however, reduce mortality in the trial.";
+    expect(
+      verifyQuoteInBody(
+        howeverParentheticalBody,
+        "reduce mortality in the trial.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        howeverParentheticalBody,
+        "did not, however, reduce mortality in the trial.",
+      ).verified,
+    ).toBe(true);
+
     const butContrastBody =
       "The drug did not cure cancer, but it improved quality of life.";
     expect(
       verifyQuoteInBody(butContrastBody, "it improved quality of life.")
         .verified,
+    ).toBe(true);
+    expect(
+      verifyQuoteInBody(butContrastBody, "improved quality of life.").verified,
+    ).toBe(true);
+
+    const butNegationBody =
+      "The drug did not cure cancer, but it did not cause harm.";
+    expect(verifyQuoteInBody(butNegationBody, "cause harm.").verified).toBe(
+      false,
+    );
+    expect(
+      verifyQuoteInBody(butNegationBody, "did not cause harm.").verified,
+    ).toBe(true);
+
+    const semicolonHoweverBody =
+      "The drug did not cure cancer; however, it improved quality of life.";
+    expect(
+      verifyQuoteInBody(semicolonHoweverBody, "it improved quality of life.")
+        .verified,
+    ).toBe(true);
+
+    const semicolonHoweverNegationBody =
+      "The drug was well tolerated; however, it did not reduce tumors.";
+    expect(
+      verifyQuoteInBody(semicolonHoweverNegationBody, "reduce tumors.")
+        .verified,
+    ).toBe(false);
+
+    // Negative currency clipping
+    const negativeCurrencyBody =
+      "The company reported -$15 million in net income last quarter.";
+    expect(
+      verifyQuoteInBody(
+        negativeCurrencyBody,
+        "$15 million in net income last quarter.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        negativeCurrencyBody,
+        "15 million in net income last quarter.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        negativeCurrencyBody,
+        "-$15 million in net income last quarter.",
+      ).verified,
+    ).toBe(true);
+
+    const unicodeNegativeEuroBody = "The firm incurred −€20 million in losses.";
+    expect(
+      verifyQuoteInBody(unicodeNegativeEuroBody, "€20 million in losses.")
+        .verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(unicodeNegativeEuroBody, "20 million in losses.")
+        .verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(unicodeNegativeEuroBody, "−€20 million in losses.")
+        .verified,
+    ).toBe(true);
+
+    const positiveCurrencyBody =
+      "The company reported $15 million in net income last quarter.";
+    expect(
+      verifyQuoteInBody(
+        positiveCurrencyBody,
+        "$15 million in net income last quarter.",
+      ).verified,
     ).toBe(true);
 
     const failedBody = "The company failed to meet quarterly revenue targets.";
