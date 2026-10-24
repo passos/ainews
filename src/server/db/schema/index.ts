@@ -3,6 +3,7 @@ export * from "./article-sightings";
 export * from "./articles";
 export * from "./budgets";
 export * from "./corrections";
+export * from "./digests";
 export * from "./dlq-messages";
 export * from "./event-articles";
 export * from "./event-artifacts";

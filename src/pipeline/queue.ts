@@ -4,15 +4,24 @@ import { analyzeArticle, type AnalyzeDeps } from "./analyze/analyze";
 import { processBody, type BodyDeps } from "./body/body";
 import { collectSource } from "./collect/collect";
 import { persistDeadLetters } from "./dlq";
+import {
+  handleGenerateBatch,
+  type GenerateConsumerDeps,
+} from "./generate/consumer";
 import { handleGroupBatch, type GroupConsumerDeps } from "./group/consumer";
 import {
+  GENERATE_QUEUE,
   GROUP_QUEUE,
   INGEST_QUEUE,
+  type GenerateMessage,
   type IngestMessage,
   type PipelineEnv,
 } from "./messages";
 
-export type QueueDeps = BodyDeps & AnalyzeDeps & GroupConsumerDeps;
+export type QueueDeps = BodyDeps &
+  AnalyzeDeps &
+  GroupConsumerDeps &
+  GenerateConsumerDeps;
 
 /** fetch, env.AI.toMarkdown() and env.AI.run() via AI Gateway; tests pass fakes. */
 function defaultDeps(env: PipelineEnv): QueueDeps {
@@ -47,6 +56,14 @@ export async function runQueue(
   }
   if (batch.queue === GROUP_QUEUE) {
     await handleGroupBatch(batch, env, overrides);
+    return;
+  }
+  if (batch.queue === GENERATE_QUEUE) {
+    await handleGenerateBatch(
+      batch as MessageBatch<GenerateMessage>,
+      env,
+      overrides,
+    );
     return;
   }
   if (batch.queue !== INGEST_QUEUE) {

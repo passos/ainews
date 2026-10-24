@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminDigestsRouteImport } from './routes/admin/digests'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
 import { Route as AdminReviewRouteImport } from './routes/admin/review'
@@ -23,6 +24,8 @@ import { Route as AdminIndustriesIndexRouteImport } from './routes/admin/industr
 import { Route as AdminIndustriesIndustryIdRouteImport } from './routes/admin/industries/$industryId'
 import { Route as AdminSourcesIndexRouteImport } from './routes/admin/sources/index'
 import { Route as AdminSourcesSourceIdRouteImport } from './routes/admin/sources/$sourceId'
+import { Route as DigestSectionDateRouteImport } from './routes/digest/$section/$date'
+import { Route as RssDigestChar123sectionChar125DotxmlRouteImport } from './routes/rss/digest/{$section}[.]xml'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -37,6 +40,11 @@ const AdminRouteRoute = AdminRouteRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminDigestsRoute = AdminDigestsRouteImport.update({
+  id: '/digests',
+  path: '/digests',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminDlqRoute = AdminDlqRouteImport.update({
@@ -96,10 +104,22 @@ const AdminSourcesSourceIdRoute = AdminSourcesSourceIdRouteImport.update({
   path: '/sources/$sourceId',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const DigestSectionDateRoute = DigestSectionDateRouteImport.update({
+  id: '/digest/$section/$date',
+  path: '/digest/$section/$date',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RssDigestChar123sectionChar125DotxmlRoute =
+  RssDigestChar123sectionChar125DotxmlRouteImport.update({
+    id: '/rss/digest/{$section}.xml',
+    path: '/rss/digest/{$section}.xml',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
@@ -110,11 +130,14 @@ export interface FileRoutesByFullPath {
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/digest/$section/$date': typeof DigestSectionDateRoute
+  '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
   '/admin/industries/': typeof AdminIndustriesIndexRoute
   '/admin/sources/': typeof AdminSourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
@@ -125,6 +148,8 @@ export interface FileRoutesByTo {
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/digest/$section/$date': typeof DigestSectionDateRoute
+  '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
   '/admin/industries': typeof AdminIndustriesIndexRoute
   '/admin/sources': typeof AdminSourcesIndexRoute
 }
@@ -132,6 +157,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
@@ -142,6 +168,8 @@ export interface FileRoutesById {
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/digest/$section/$date': typeof DigestSectionDateRoute
+  '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
   '/admin/industries/': typeof AdminIndustriesIndexRoute
   '/admin/sources/': typeof AdminSourcesIndexRoute
 }
@@ -150,6 +178,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
@@ -160,11 +189,14 @@ export interface FileRouteTypes {
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
+    | '/digest/$section/$date'
+    | '/rss/digest/{$section}.xml'
     | '/admin/industries/'
     | '/admin/sources/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
@@ -175,12 +207,15 @@ export interface FileRouteTypes {
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
+    | '/digest/$section/$date'
+    | '/rss/digest/{$section}.xml'
     | '/admin/industries'
     | '/admin/sources'
   id:
     | '__root__'
     | '/'
     | '/admin'
+    | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
@@ -191,6 +226,8 @@ export interface FileRouteTypes {
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
+    | '/digest/$section/$date'
+    | '/rss/digest/{$section}.xml'
     | '/admin/industries/'
     | '/admin/sources/'
   fileRoutesById: FileRoutesById
@@ -201,6 +238,8 @@ export interface RootRouteChildren {
   EEventIdRoute: typeof EEventIdRoute
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
+  DigestSectionDateRoute: typeof DigestSectionDateRoute
+  RssDigestChar123sectionChar125DotxmlRoute: typeof RssDigestChar123sectionChar125DotxmlRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -224,6 +263,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/digests': {
+      id: '/admin/digests'
+      path: '/digests'
+      fullPath: '/admin/digests'
+      preLoaderRoute: typeof AdminDigestsRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/dlq': {
@@ -303,10 +349,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSourcesSourceIdRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/digest/$section/$date': {
+      id: '/digest/$section/$date'
+      path: '/digest/$section/$date'
+      fullPath: '/digest/$section/$date'
+      preLoaderRoute: typeof DigestSectionDateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rss/digest/{$section}.xml': {
+      id: '/rss/digest/{$section}.xml'
+      path: '/rss/digest/{$section}.xml'
+      fullPath: '/rss/digest/{$section}.xml'
+      preLoaderRoute: typeof RssDigestChar123sectionChar125DotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 interface AdminRouteRouteChildren {
+  AdminDigestsRoute: typeof AdminDigestsRoute
   AdminDlqRoute: typeof AdminDlqRoute
   AdminLedgerRoute: typeof AdminLedgerRoute
   AdminReviewRoute: typeof AdminReviewRoute
@@ -319,6 +380,7 @@ interface AdminRouteRouteChildren {
 }
 
 const AdminRouteRouteChildren: AdminRouteRouteChildren = {
+  AdminDigestsRoute: AdminDigestsRoute,
   AdminDlqRoute: AdminDlqRoute,
   AdminLedgerRoute: AdminLedgerRoute,
   AdminReviewRoute: AdminReviewRoute,
@@ -340,6 +402,9 @@ const rootRouteChildren: RootRouteChildren = {
   EEventIdRoute: EEventIdRoute,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,
+  DigestSectionDateRoute: DigestSectionDateRoute,
+  RssDigestChar123sectionChar125DotxmlRoute:
+    RssDigestChar123sectionChar125DotxmlRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

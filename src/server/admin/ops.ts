@@ -741,3 +741,74 @@ export async function replayDlqMessage(
     .bind(Date.now(), messageId)
     .run();
 }
+
+// -----------------------------------------------------------------------------
+// Digests
+// -----------------------------------------------------------------------------
+
+export interface AdminDigestRow {
+  id: number;
+  industryId: number;
+  industrySlug: string;
+  industryName: string;
+  periodStart: string;
+  status: string;
+  intro: string;
+  itemCount: number;
+  createdAt: number;
+  publishedAt: number | null;
+  emailedAt: number | null;
+}
+
+export async function listAdminDigests(database: D1Database): Promise<{
+  pending: AdminDigestRow[];
+  published: AdminDigestRow[];
+}> {
+  const { results: rows } = await database
+    .prepare(
+      `SELECT
+        d.id,
+        d.industry_id AS industryId,
+        i.slug AS industrySlug,
+        i.name AS industryName,
+        d.period_start AS periodStart,
+        d.status,
+        d.intro,
+        json_array_length(d.items_json) AS itemCount,
+        d.created_at AS createdAt,
+        d.published_at AS publishedAt,
+        d.emailed_at AS emailedAt
+      FROM digests d
+      JOIN industries i ON i.id = d.industry_id
+      WHERE d.status = 'ready'
+      ORDER BY d.period_start DESC, d.id DESC`,
+    )
+    .all<AdminDigestRow>();
+
+  const pending: AdminDigestRow[] = [];
+  const published: AdminDigestRow[] = [];
+
+  for (const r of rows) {
+    if (r.publishedAt === null) {
+      pending.push(r);
+    } else {
+      published.push(r);
+    }
+  }
+
+  return { pending, published };
+}
+
+export async function publishDigest(
+  database: D1Database,
+  digestId: number,
+  now = Date.now(),
+): Promise<boolean> {
+  const res = await database
+    .prepare(
+      "UPDATE digests SET published_at = ?1 WHERE id = ?2 AND published_at IS NULL",
+    )
+    .bind(now, digestId)
+    .run();
+  return res.meta.changes === 1;
+}

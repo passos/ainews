@@ -96,6 +96,7 @@ it("migrations create the core tables", async () => {
     "articles",
     "budgets",
     "corrections",
+    "digests",
     "dlq_messages",
     "event_articles",
     "event_artifacts",
