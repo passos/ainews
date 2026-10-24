@@ -401,6 +401,46 @@ describe("Evidence Chunks & Quote Verification", () => {
     ).toBe(true);
   });
 
+  it("verifyQuoteInBody preserves character offsets across multi-code-unit HTML entities (emoji)", () => {
+    const rawBody =
+      "Revenue reached &#x1F4B0; and industry analysts dispute that profit grew.";
+    const quote = "industry analysts dispute that profit grew.";
+    const res = verifyQuoteInBody(rawBody, quote);
+    expect(res.verified).toBe(true);
+    expect(rawBody.slice(res.startOffset, res.endOffset)).toBe(
+      "industry analysts dispute that profit grew.",
+    );
+
+    const imgBody =
+      "![Reward &#x1F4B0;](https://test.com/img.png) The team confirmed positive results.";
+    const imgQuote = "The team confirmed positive results.";
+    const imgRes = verifyQuoteInBody(imgBody, imgQuote);
+    expect(imgRes.verified).toBe(true);
+    expect(imgBody.slice(imgRes.startOffset, imgRes.endOffset)).toBe(
+      "The team confirmed positive results.",
+    );
+  });
+
+  it("verifyQuoteInBody rejects quotes stripped of preceding negation context in the same clause", () => {
+    const trialBody = "The treatment did not reduce mortality in the trial.";
+    expect(
+      verifyQuoteInBody(trialBody, "reduce mortality in the trial.").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(trialBody, "did not reduce mortality in the trial.")
+        .verified,
+    ).toBe(true);
+
+    const failedBody = "The company failed to meet quarterly revenue targets.";
+    expect(
+      verifyQuoteInBody(failedBody, "meet quarterly revenue targets.").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(failedBody, "failed to meet quarterly revenue targets.")
+        .verified,
+    ).toBe(true);
+  });
+
   it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
     const autoBody =
       "Visit <https://example.com> for more information and see [other link](https://test.com) as well.";

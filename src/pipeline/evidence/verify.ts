@@ -116,6 +116,10 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
           let s = srcIdx;
           for (let c = 0; c < content.length; c++) {
             const ch = content[c];
+            const codePoint = content.codePointAt(c);
+            const isSurrogatePair =
+              codePoint !== undefined && codePoint > 0xffff;
+
             while (s < blockEnd && rawStr[s] !== ch) {
               if (rawStr[s] === "&") {
                 const semi = rawStr.indexOf(";", s);
@@ -123,6 +127,31 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
               }
               s++;
             }
+
+            if (
+              isSurrogatePair &&
+              s < blockEnd &&
+              rawStr[s] === "&" &&
+              rawStr[s] !== ch
+            ) {
+              const semi = rawStr.indexOf(";", s);
+              const origStart = s;
+              const origEnd = semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+              s = origEnd;
+
+              outChars.push(content[c]);
+              outStarts.push(origStart);
+              outEnds.push(origEnd);
+
+              outChars.push(content[c + 1]);
+              outStarts.push(origStart);
+              outEnds.push(origEnd);
+
+              inWs = false;
+              c++; // skip low surrogate
+              continue;
+            }
+
             const origStart = s < blockEnd ? s : -1;
             let origEnd = -1;
             if (s < blockEnd) {
@@ -158,6 +187,10 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
             let s = imgStart + 2;
             for (let c = 0; c < alt.length; c++) {
               const ch = alt[c];
+              const codePoint = alt.codePointAt(c);
+              const isSurrogatePair =
+                codePoint !== undefined && codePoint > 0xffff;
+
               while (s < blockEnd && rawStr[s] !== ch) {
                 if (rawStr[s] === "&") {
                   const semi = rawStr.indexOf(";", s);
@@ -165,6 +198,32 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
                 }
                 s++;
               }
+
+              if (
+                isSurrogatePair &&
+                s < blockEnd &&
+                rawStr[s] === "&" &&
+                rawStr[s] !== ch
+              ) {
+                const semi = rawStr.indexOf(";", s);
+                const origStart = s;
+                const origEnd =
+                  semi !== -1 && semi < blockEnd ? semi + 1 : s + 1;
+                s = origEnd;
+
+                outChars.push(alt[c]);
+                outStarts.push(origStart);
+                outEnds.push(origEnd);
+
+                outChars.push(alt[c + 1]);
+                outStarts.push(origStart);
+                outEnds.push(origEnd);
+
+                inWs = false;
+                c++;
+                continue;
+              }
+
               const origStart = s < blockEnd ? s : -1;
               let origEnd = -1;
               if (s < blockEnd) {
@@ -386,6 +445,25 @@ export function verifyQuoteInBody(
     return true;
   }
 
+  function hasDroppedNegation(cleanIdx: number): boolean {
+    const beforeText = bodyClean.slice(0, cleanIdx);
+    const lastBoundary = Math.max(
+      beforeText.lastIndexOf("."),
+      beforeText.lastIndexOf("!"),
+      beforeText.lastIndexOf("?"),
+      beforeText.lastIndexOf("\n"),
+      beforeText.lastIndexOf(";"),
+      beforeText.lastIndexOf(","),
+      beforeText.lastIndexOf("—"),
+    );
+    const clausePrefix = beforeText.slice(
+      lastBoundary === -1 ? 0 : lastBoundary + 1,
+    );
+    const negationRegex =
+      /(?:\b\w+n['’]t|\bnot|\bcannot|\bnever|\bno|\bneither|\bnor|\bhardly|\bbarely|\bscarcely|\bfailed\s+to|\bfails\s+to|\bdenied|\bdenies|\bwithout)\b/i;
+    return negationRegex.test(clausePrefix);
+  }
+
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness
   const {
     cleanText: bodyClean,
@@ -410,7 +488,8 @@ export function verifyQuoteInBody(
     if (
       !isWordChar(charBefore) &&
       !isWordChar(charAfter) &&
-      isValidNumericBoundary(cleanIndex, charBefore, charAfter)
+      isValidNumericBoundary(cleanIndex, charBefore, charAfter) &&
+      !hasDroppedNegation(cleanIndex)
     ) {
       const startOffset = origStarts[cleanIndex];
       const endOffset = origEnds[cleanIndex + quoteClean.length - 1];
