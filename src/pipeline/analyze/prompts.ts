@@ -24,9 +24,21 @@ Output only one JSON object and nothing else: {"title": string, "summary": strin
 
 /**
  * The JSON itself is about 200 tokens, but Gemini's thinking tokens count
- * against the limit (adapters.ts): a small cap can leave an empty reply.
+ * against the limit (adapters.ts). With 2000, thinking used 1916-1921 tokens
+ * and cut the JSON off (finishReason MAX_TOKENS, #43).
  */
-export const WRITE_MAX_OUTPUT_TOKENS = 2000;
+export const WRITE_MAX_OUTPUT_TOKENS = 4000;
+
+/**
+ * generationConfig.thinkingConfig of the write request. Real calls on
+ * google/gemini-3.8-flash (#43): without it the model thinks 1600-1900 tokens
+ * for a ~200-token summary; "low" gave 0 thinking tokens and STOP in 5 of 5
+ * calls; "minimal" is rejected (7003). Re-run scripts/probe-write.ts before
+ * changing it.
+ */
+export const WRITE_THINKING: Record<string, unknown> | undefined = {
+  thinkingLevel: "low",
+};
 
 /** Material given to `write`; the body beyond this is not sent. */
 export const WRITE_MAX_BODY_CHARS = 40_000;
@@ -61,6 +73,7 @@ export function buildWriteRequest(
     system: parts.join("\n\n"),
     prompt: `Untrusted article (JSON):\n${JSON.stringify(article)}`,
     maxOutputTokens: WRITE_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
   };
 }
 

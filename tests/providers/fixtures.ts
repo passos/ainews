@@ -34,6 +34,35 @@ export const googleResponse = {
   responseId: "x",
 };
 
+// Shape of the real write response in llm_calls id 175 (2026-10-24): the
+// gateway wrapped the usual body in {state, result}. Thinking used the
+// output cap, so the JSON is cut off.
+export const googleWrappedResponse = {
+  state: "Completed",
+  result: {
+    candidates: [
+      {
+        content: {
+          role: "model",
+          parts: [{ text: '{"title": "MIT researchers design a nuclear' }],
+        },
+        finishReason: "MAX_TOKENS",
+        index: 0,
+      },
+    ],
+    usageMetadata: {
+      promptTokenCount: 3412,
+      candidatesTokenCount: 78,
+      totalTokenCount: 5408,
+      trafficType: "ON_DEMAND",
+      promptTokensDetails: [{ modality: "TEXT", tokenCount: 3412 }],
+      thoughtsTokenCount: 1918,
+    },
+    modelVersion: "gemini-3.8-flash",
+    responseId: "y",
+  },
+};
+
 export const openaiResponse = {
   id: "chatcmpl-1",
   object: "chat.completion",

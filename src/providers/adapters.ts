@@ -8,6 +8,8 @@ export interface TextRequest {
   system: string;
   prompt: string;
   maxOutputTokens: number;
+  /** Google only: sent as generationConfig.thinkingConfig when set. */
+  thinkingConfig?: Record<string, unknown>;
 }
 
 export interface Usage {
@@ -18,6 +20,8 @@ export interface Usage {
 export interface TextResult {
   text: string;
   usage: Usage;
+  /** Google only: candidates[0].finishReason, e.g. "STOP" or "MAX_TOKENS". */
+  finishReason?: string;
   raw: unknown;
 }
 
@@ -49,7 +53,7 @@ export function buildTextInput(
   model: string,
   request: TextRequest,
 ): Record<string, unknown> {
-  const { system, prompt, maxOutputTokens } = request;
+  const { system, prompt, maxOutputTokens, thinkingConfig } = request;
   switch (family(model)) {
     case "anthropic":
       return {
@@ -61,7 +65,10 @@ export function buildTextInput(
       return {
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens },
+        generationConfig:
+          thinkingConfig === undefined
+            ? { maxOutputTokens }
+            : { maxOutputTokens, thinkingConfig },
       };
     case "openai":
       return {
@@ -94,17 +101,33 @@ export function parseTextOutput(model: string, raw: unknown): TextResult {
       };
     }
     case "google": {
-      const body = record(raw, "response");
+      const body = googleBody(record(raw, "response"));
       const candidate = record(
         array(body.candidates, "candidates")[0],
         "candidates[0]",
       );
-      const content = record(candidate.content, "candidates[0].content");
-      const text = array(content.parts, "candidates[0].content.parts")
-        .map((part, i) => record(part, `parts[${i}]`))
-        .filter((part) => part.text !== undefined)
-        .map((part, i) => string(part.text, `parts[${i}].text`))
-        .join("");
+      // Read finishReason first: a thinking-only cut-off has no content, and
+      // the reason must reach the error message.
+      const finishReason =
+        candidate.finishReason === undefined
+          ? undefined
+          : string(candidate.finishReason, "candidates[0].finishReason");
+      let text: string;
+      try {
+        const content = record(candidate.content, "candidates[0].content");
+        text = array(content.parts, "candidates[0].content.parts")
+          .map((part, i) => record(part, `parts[${i}]`))
+          .filter((part) => part.text !== undefined)
+          .map((part, i) => string(part.text, `parts[${i}].text`))
+          .join("");
+      } catch (error) {
+        if (error instanceof ResponseParseError && finishReason !== undefined) {
+          throw new ResponseParseError(
+            `${error.message} (finishReason ${finishReason})`,
+          );
+        }
+        throw error;
+      }
       const usage = record(body.usageMetadata, "usageMetadata");
       // Thinking tokens are billed as output. A thinking-only reply has no
       // candidatesTokenCount.
@@ -117,6 +140,7 @@ export function parseTextOutput(model: string, raw: unknown): TextResult {
           outputTokens:
             count("candidatesTokenCount") + count("thoughtsTokenCount"),
         },
+        finishReason,
         raw,
       };
     }
@@ -138,6 +162,20 @@ export function parseTextOutput(model: string, raw: unknown): TextResult {
       };
     }
   }
+}
+
+/**
+ * The gateway sometimes wraps the body in `{ state, result }` (llm_calls
+ * id 175). Only a completed result is parsed.
+ */
+function googleBody(body: Record<string, unknown>): Record<string, unknown> {
+  if (!("state" in body && "result" in body)) return body;
+  if (body.state !== "Completed") {
+    throw new ResponseParseError(
+      `response state ${JSON.stringify(body.state)}: expected "Completed"`,
+    );
+  }
+  return record(body.result, "result");
 }
 
 // Narrowing helpers. Each throws ResponseParseError naming the bad field.

@@ -256,7 +256,7 @@ async function write(
   bodyMd: string,
   key: string,
 ): Promise<WriteOutput | null> {
-  const { text } = await models.generateText(
+  const { text, finishReason } = await models.generateText(
     "write",
     key,
     buildWriteRequest(config, {
@@ -266,6 +266,11 @@ async function write(
       source: row.source_name,
     }),
   );
+  // The ledger row stays completed; the warning makes the cut-off findable
+  // in the logs.
+  if (finishReason === "MAX_TOKENS") {
+    console.warn({ analyze: row.id, write: key, finishReason });
+  }
   return parseWriteOutput(text);
 }
 

@@ -9,7 +9,12 @@ import {
 } from "../../src/pipeline/analyze/analyze";
 import type { AnalysisConfig } from "../../src/pipeline/analyze/config";
 import { LABELS } from "../../src/pipeline/analyze/labels";
-import { UNTRUSTED } from "../../src/pipeline/analyze/prompts";
+import {
+  UNTRUSTED,
+  WRITE_MAX_OUTPUT_TOKENS,
+  WRITE_THINKING,
+  buildWriteRequest,
+} from "../../src/pipeline/analyze/prompts";
 import {
   buildAnalysisRequest,
   promptVersion,
@@ -55,9 +60,11 @@ const GOOD_WRITE = JSON.stringify({
 });
 const config = fakeAnalysisConfig();
 
-function googleText(text: string) {
+function googleText(text: string, finishReason?: string) {
   return {
-    candidates: [{ content: { role: "model", parts: [{ text }] } }],
+    candidates: [
+      { content: { role: "model", parts: [{ text }] }, finishReason },
+    ],
     usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 },
   };
 }
@@ -372,6 +379,59 @@ describe("publish mode", () => {
     });
     expect((await articleRow(id))?.stage).toBe("analyzed");
     expect(await reviewRows(id)).toEqual([]);
+  });
+});
+
+describe("write output cap", () => {
+  it("the write request has the 4000-token cap and the thinking config", () => {
+    const request = buildWriteRequest(config, {
+      title: "t",
+      summary: "s",
+      body: "b",
+      source: "src",
+    });
+    expect(WRITE_MAX_OUTPUT_TOKENS).toBe(4000);
+    expect(request.maxOutputTokens).toBe(4000);
+    // "low" is the value the real probe accepted (prompts.ts); "minimal" is not.
+    expect(WRITE_THINKING).toStrictEqual({ thinkingLevel: "low" });
+    expect(request.thinkingConfig).toBe(WRITE_THINKING);
+  });
+
+  it("finishReason MAX_TOKENS: a warning names the write ledger key; the ledger row stays completed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+    const t = fakeTransport(async (model) =>
+      model === "typesafe/jev"
+        ? jevResponse(fakeAnswers(config))
+        : googleText('{"title": "cut', "MAX_TOKENS"),
+    );
+    const result = await run(id, t);
+    expect(result).toMatchObject({ stage: "analyzed", written: false });
+    const key = await keyOf("write", id);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(warn.mock.calls[0])).toContain(key);
+    expect(JSON.stringify(warn.mock.calls[0])).toContain("MAX_TOKENS");
+    expect(await ledgerRow(key)).toMatchObject({ status: "completed" });
+    // The body sent: the new cap and the thinking level.
+    const sent = t.calls.find((c) => c.model.startsWith("google/"));
+    expect(
+      (sent?.input as { generationConfig: unknown }).generationConfig,
+    ).toStrictEqual({
+      maxOutputTokens: 4000,
+      thinkingConfig: { thinkingLevel: "low" },
+    });
+  });
+
+  it("finishReason STOP: no warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+    const t = fakeTransport(async (model) =>
+      model === "typesafe/jev"
+        ? jevResponse(fakeAnswers(config))
+        : googleText(GOOD_WRITE, "STOP"),
+    );
+    expect(await run(id, t)).toMatchObject({ written: true });
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

@@ -36,4 +36,27 @@ describe("promptVersion", () => {
     expect(after).toMatch(/^[0-9a-f]{16}$/);
     expect(after).not.toBe(before);
   });
+
+  it("changes when the write thinking config changes", async () => {
+    const config = fakeAnalysisConfig();
+    const before = await (await import(QUESTIONS)).promptVersion(config);
+    vi.resetModules();
+    vi.doMock(PROMPTS, async (importOriginal) => {
+      const real =
+        await importOriginal<
+          typeof import("../../src/pipeline/analyze/prompts")
+        >();
+      return {
+        ...real,
+        buildWriteRequest: (
+          ...args: Parameters<typeof real.buildWriteRequest>
+        ) => ({
+          ...real.buildWriteRequest(...args),
+          thinkingConfig: { thinkingBudget: 1 },
+        }),
+      };
+    });
+    const after = await (await import(QUESTIONS)).promptVersion(config);
+    expect(after).not.toBe(before);
+  });
 });
