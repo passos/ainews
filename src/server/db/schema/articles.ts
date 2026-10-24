@@ -50,10 +50,21 @@ export const articles = sqliteTable(
     bodyFetchedAt: integer("body_fetched_at"),
     /** Times the backfill cron sent this row again (architecture §5). */
     requeueCount: integer("requeue_count").notNull().default(0),
+    /** Admin override of the public title; wins over the analysis (#10). */
+    titleOverride: text("title_override"),
+    /** Admin override of the public summary; wins over the analysis (#10). */
+    summaryOverride: text("summary_override"),
   },
   (t) => [
     // Backfill scans: "articles stuck in stage X since before T".
     index("articles_stage_idx").on(t.stage, t.stageUpdatedAt),
+    // Public pages: "newest approved articles of one section". The sort
+    // expression is the same as NEWEST_FIRST in publication/articles.ts.
+    index("articles_industry_newest_idx").on(
+      t.industryId,
+      sql`COALESCE(published_at, fetched_at) DESC`,
+      sql`id DESC`,
+    ),
     check(
       "articles_stage_check",
       sql`${t.stage} IN ('collected', 'body_ready', 'analyzed', 'grouped', 'dropped')`,

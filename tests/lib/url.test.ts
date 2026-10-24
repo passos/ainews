@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeUrl } from "../../src/lib/url";
+import { normalizeUrl, safeHttpUrl } from "../../src/lib/url";
 
 describe("normalizeUrl", () => {
   it("lowercases the host, drops www., tracking params, fragment and trailing slash, sorts params", () => {
@@ -62,5 +62,26 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("https://x.com/a/?q=b/")).toBe(
       "https://x.com/a?q=b%2F",
     );
+  });
+});
+
+describe("safeHttpUrl", () => {
+  it("keeps http and https URLs as given", () => {
+    expect(safeHttpUrl("https://x.com/a?b=1")).toBe("https://x.com/a?b=1");
+    expect(safeHttpUrl("http://x.com/")).toBe("http://x.com/");
+  });
+
+  it("returns null for any other scheme or garbage", () => {
+    for (const bad of [
+      "javascript:alert(1)",
+      " JavaScript:alert(1)",
+      "data:text/html,<script>1</script>",
+      "ftp://x.com",
+      "//x.com/a",
+      "not a url",
+      "",
+    ]) {
+      expect(safeHttpUrl(bad)).toBeNull();
+    }
   });
 });

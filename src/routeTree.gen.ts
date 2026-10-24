@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as RssChar123sectionChar125DotxmlRouteImport } from './routes/rss/{$section}[.]xml'
+import { Route as SSectionRouteImport } from './routes/s/$section'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,30 +24,49 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/admin/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RssChar123sectionChar125DotxmlRoute =
+  RssChar123sectionChar125DotxmlRouteImport.update({
+    id: '/rss/{$section}.xml',
+    path: '/rss/{$section}.xml',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const SSectionRoute = SSectionRouteImport.update({
+  id: '/s/$section',
+  path: '/s/$section',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
+  '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
+  '/s/$section': typeof SSectionRoute
   '/admin': typeof AdminIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
+  '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin/'
+  fullPaths: '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin'
-  id: '__root__' | '/' | '/admin/'
+  to: '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin'
+  id: '__root__' | '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
+  SSectionRoute: typeof SSectionRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
@@ -65,11 +86,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rss/{$section}.xml': {
+      id: '/rss/{$section}.xml'
+      path: '/rss/{$section}.xml'
+      fullPath: '/rss/{$section}.xml'
+      preLoaderRoute: typeof RssChar123sectionChar125DotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/s/$section': {
+      id: '/s/$section'
+      path: '/s/$section'
+      fullPath: '/s/$section'
+      preLoaderRoute: typeof SSectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
+  SSectionRoute: SSectionRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
 export const routeTree = rootRouteImport

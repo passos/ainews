@@ -2,7 +2,7 @@
 // test:tz). The expected values are fixed UTC instants, so a result that
 // depends on the machine's time zone fails in one of the two runs.
 import { describe, expect, it } from "vitest";
-import { parseFeedDate } from "../../src/lib/time";
+import { formatUtc, parseFeedDate } from "../../src/lib/time";
 
 const iso = (raw: string, offset = "+00:00") =>
   parseFeedDate(raw, offset)?.toISOString() ?? null;
@@ -143,5 +143,28 @@ describe("parseFeedDate", () => {
     expect(parseFeedDate("2026-02-31", "+00:00")).toBeNull();
     expect(parseFeedDate("2026-13-01", "+00:00")).toBeNull();
     expect(parseFeedDate("2026-10-22", "Asia/Shanghai")).toBeNull();
+  });
+});
+
+describe("formatUtc", () => {
+  // 2026-10-22T02:05:00Z is 10:05 in Asia/Shanghai: a local-time format
+  // would show 10:05 AM in one of the two runs.
+  const ms = Date.UTC(2026, 9, 22, 2, 5);
+
+  it("formats in UTC with a UTC suffix, whatever the machine time zone", () => {
+    expect(formatUtc(ms)).toBe("Oct 22, 2026, 2:05 AM UTC");
+  });
+
+  it("uses a plain space before AM/PM (ICU may emit U+202F)", () => {
+    expect(formatUtc(Date.UTC(2026, 9, 22, 15, 30))).toBe(
+      "Oct 22, 2026, 3:30 PM UTC",
+    );
+    expect(formatUtc(ms)).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it("crosses the date line in UTC, not locally", () => {
+    expect(formatUtc(Date.UTC(2026, 11, 31, 23, 59))).toBe(
+      "Dec 31, 2026, 11:59 PM UTC",
+    );
   });
 });

@@ -1,12 +1,20 @@
 // SSR smoke test against the production build, served by `vite preview`.
 // Usage: npm run build && npm run test:ssr
-import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { resolve } from "node:path";
 import { createServer } from "node:net";
 
 const TIMEOUT_MS = 30_000;
 const FETCH_TIMEOUT_MS = 10_000;
-const TOTAL_TIMEOUT_MS = 60_000;
+const TOTAL_TIMEOUT_MS = 90_000;
+const SETUP_TIMEOUT_MS = 120_000;
 
 // Ask the OS for a free port. Another job on the same machine may hold 4173.
 function freePort(): Promise<number> {
@@ -57,13 +65,59 @@ const PUBLIC_FN_ID = serverFnId(
   "getSiteInfo",
   "src/server/publication/site.ts",
 );
-const ADMIN_EMAIL: string = JSON.parse(
-  readFileSync("dist/server/wrangler.json", "utf8"),
-).vars.ADMIN_EMAIL;
+const BUILT_CONFIG = "dist/server/wrangler.json";
+const builtConfig = JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
+const ADMIN_EMAIL: string = builtConfig.vars.ADMIN_EMAIL;
 if (!ADMIN_EMAIL) {
-  console.error("FAIL: no ADMIN_EMAIL in dist/server/wrangler.json");
+  console.error(`FAIL: no ADMIN_EMAIL in ${BUILT_CONFIG}`);
   process.exit(1);
 }
+// The test env has an empty CF_BEACON_TOKEN. Give the built worker a token, as
+// a deploy would, so the check below sees the real <Beacon> in the HTML.
+const BEACON_TOKEN = "t1";
+builtConfig.vars.CF_BEACON_TOKEN = BEACON_TOKEN;
+writeFileSync(BUILT_CONFIG, JSON.stringify(builtConfig, null, 2));
+
+// `vite preview` reads the local D1 from a state directory that only this
+// script uses (vite.config.ts reads AINEWS_SMOKE_STATE), so a developer's
+// own local D1 under .wrangler/state is never touched. Start from an empty
+// database, apply the migrations, then load the fixture rows that the page
+// checks below depend on (tests/fixtures/publication/preview.sql).
+const SMOKE_STATE = resolve(".wrangler/smoke-state");
+function wrangler(args: string[]): void {
+  const result = spawnSync("npx", ["wrangler", ...args], {
+    stdio: ["ignore", "inherit", "inherit"],
+    timeout: SETUP_TIMEOUT_MS,
+  });
+  if (result.status !== 0) {
+    console.error(`FAIL: wrangler ${args.join(" ")} (status ${result.status})`);
+    process.exit(1);
+  }
+}
+rmSync(SMOKE_STATE, { recursive: true, force: true });
+wrangler([
+  "d1",
+  "migrations",
+  "apply",
+  "DB",
+  "--local",
+  "--env",
+  "test",
+  "--persist-to",
+  SMOKE_STATE,
+]);
+wrangler([
+  "d1",
+  "execute",
+  "DB",
+  "--local",
+  "--env",
+  "test",
+  "--persist-to",
+  SMOKE_STATE,
+  "--file",
+  "tests/fixtures/publication/preview.sql",
+]);
 
 const PORT = await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -79,7 +133,11 @@ const server = spawn(
     String(PORT),
     "--strictPort",
   ],
-  { stdio: ["ignore", "inherit", "inherit"], detached: true },
+  {
+    stdio: ["ignore", "inherit", "inherit"],
+    detached: true,
+    env: { ...process.env, AINEWS_SMOKE_STATE: SMOKE_STATE },
+  },
 );
 
 function stop() {
@@ -186,6 +244,143 @@ async function main() {
   if (bogus.status !== 200) {
     fail(`GET /?audience=bogus returned ${bogus.status}`);
   }
+
+  // Public pages, against the fixture rows. Redirects are followed: an
+  // invalid search param is redirected to its canonical URL.
+  const page = async (path: string) => {
+    const res = await fetch(`${BASE}${path}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    return { res, text: await res.text() };
+  };
+  const DISCLAIMER = "Not investment advice";
+
+  // The disclaimer text is also in the serialized loader data (<script>), so
+  // count the rendered <Disclaimer> asides (role="note") outside of scripts.
+  const notes = (html: string): string[] =>
+    [
+      ...html
+        .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+        .matchAll(/<aside\b[^>]*role="note"[^>]*>[\s\S]*?<\/aside>/g),
+    ].map((m) => m[0]);
+  const EXPECTED_NOTES: Record<string, number> = {
+    "/": 1,
+    "/s/finance": 1,
+    "/s/technology": 0,
+    "/s/education": 0,
+    "/s/industry": 0,
+  };
+  for (const [path, count] of Object.entries(EXPECTED_NOTES)) {
+    const { res, text } = await page(path);
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    const found = notes(text);
+    if (found.length !== count) {
+      fail(`GET ${path} has ${found.length} disclaimer notes, want ${count}`);
+    }
+    if (found.some((n) => !n.includes(DISCLAIMER))) {
+      fail(`GET ${path} has a note without the Finance disclaimer`);
+    }
+  }
+
+  const tech = await page("/s/technology");
+  for (const needle of [
+    // Analysis text, the editor's override, a correction, an evidence label.
+    "Agent handshakes cost more than the work they start",
+    "Editor-written title wins over the analysis",
+    "wrong unit",
+    "preprint",
+    'aria-label="Sections"',
+    'aria-current="page"',
+    "Published",
+    "Fetched",
+  ]) {
+    if (!tech.text.includes(needle))
+      fail(`GET /s/technology lacks "${needle}"`);
+  }
+
+  // Unapproved articles and their corrections are on no public page.
+  for (const path of ["/", "/s/technology", "/s/finance", "/s/education"]) {
+    const { text } = await page(path);
+    if (text.includes("HIDDEN"))
+      fail(`GET ${path} shows an unapproved article`);
+  }
+
+  const none = await page("/s/nope");
+  if (none.res.status !== 404) fail(`GET /s/nope returned ${none.res.status}`);
+
+  // Invalid search params: TanStack redirects (307) to the canonical URL
+  // without them. The redirect target serves page 1.
+  const oddPath = "/s/technology?audience=bogus&page=-3";
+  const oddRes = await fetch(`${BASE}${oddPath}`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  await oddRes.text();
+  if (oddRes.status !== 307) fail(`GET ${oddPath} returned ${oddRes.status}`);
+  const target = new URL(oddRes.headers.get("location") ?? "", BASE);
+  if (target.pathname !== "/s/technology" || target.search !== "") {
+    fail(`GET ${oddPath} redirects to ${target.pathname}${target.search}`);
+  }
+  const odd = await page(`${target.pathname}${target.search}`);
+  if (odd.res.status !== 200) {
+    fail(
+      `GET ${target.pathname} after the redirect returned ${odd.res.status}`,
+    );
+  }
+  if (
+    !odd.text.includes("Agent handshakes cost more than the work they start")
+  ) {
+    fail("GET /s/technology after the redirect is not page 1");
+  }
+
+  // The built worker has CF_BEACON_TOKEN (set above): the beacon script is in
+  // the HTML, outside of the serialized loader data.
+  for (const path of ["/", "/s/technology"]) {
+    const { text } = await page(path);
+    const tag = text.match(/<script\b[^>]*beacon\.min\.js[^>]*>/)?.[0] ?? "";
+    if (!tag.includes("static.cloudflareinsights.com/beacon.min.js")) {
+      fail(`GET ${path} has no beacon script`);
+    }
+    if (!tag.includes(`&quot;token&quot;:&quot;${BEACON_TOKEN}&quot;`)) {
+      fail(`GET ${path} beacon script lacks the token`);
+    }
+  }
+
+  // RSS.
+  const rss = async (path: string) => {
+    const { res, text } = await page(path);
+    return {
+      status: res.status,
+      type: res.headers.get("content-type") ?? "",
+      text,
+    };
+  };
+  const techFeed = await rss("/rss/technology.xml");
+  if (techFeed.status !== 200)
+    fail(`GET /rss/technology.xml returned ${techFeed.status}`);
+  if (!techFeed.type.startsWith("application/rss+xml")) {
+    fail(`GET /rss/technology.xml content-type is "${techFeed.type}"`);
+  }
+  if (
+    !techFeed.text.includes("SR-1 Freedom") ||
+    techFeed.text.includes("HIDDEN")
+  ) {
+    fail("GET /rss/technology.xml has the wrong items");
+  }
+  const finFeed = await rss("/rss/finance.xml");
+  const channel = finFeed.text.split("<item>")[0];
+  if (finFeed.status !== 200 || !channel.includes(DISCLAIMER)) {
+    fail("GET /rss/finance.xml channel description has no disclaimer");
+  }
+  const items = finFeed.text.split("<item>").slice(1);
+  if (items.length === 0 || items.some((i) => !i.includes(DISCLAIMER))) {
+    fail("GET /rss/finance.xml has an item without the disclaimer");
+  }
+  if (finFeed.text.includes("HIDDEN"))
+    fail("GET /rss/finance.xml shows an unapproved item");
+  const noFeed = await rss("/rss/nope.xml");
+  if (noFeed.status !== 404)
+    fail(`GET /rss/nope.xml returned ${noFeed.status}`);
 
   console.log("PASS: SSR smoke test");
   clearTimeout(deadlineTimer);

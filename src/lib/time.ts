@@ -193,3 +193,19 @@ function offsetMs(offset: string): number {
   const [h, m] = offset.slice(1).split(":").map(Number);
   return sign * (h * 60 + m) * 60_000;
 }
+
+// One shared format for server and client render, so hydration matches.
+// Never uses the browser time zone.
+const UTC_FORMAT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC",
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/**
+ * "Oct 22, 2026, 2:05 AM UTC" for epoch milliseconds. ICU 72+ puts U+202F
+ * before AM/PM; engines differ, so it becomes a plain space.
+ */
+export function formatUtc(ms: number): string {
+  return `${UTC_FORMAT.format(ms).replace(/\p{Zs}/gu, " ")} UTC`;
+}
