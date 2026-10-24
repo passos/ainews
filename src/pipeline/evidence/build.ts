@@ -402,48 +402,52 @@ export async function generateEventEvidence(
     return { status: "skipped", eventId, reason: "already_exists" };
   }
 
-  // Clean up any partial claims from previously aborted attempts on this revision.
-  // Must NOT delete if completed sentinel exists to prevent concurrent tasks from deleting completed data.
-  // First delete child citations in claim_evidence to satisfy foreign key constraints.
-  await deps.db
-    .prepare(
-      `DELETE FROM claim_evidence
-       WHERE claim_id IN (
-         SELECT id FROM claims
-         WHERE event_id = ?1
-           AND input_revision = ?2
-           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM claims
-         WHERE event_id = ?1
-           AND input_revision = ?2
-           AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
-       )`,
-    )
-    .bind(eventId, inputRevision)
-    .run();
+  // Assemble cleanup, claims, citations, and completion sentinel into a SINGLE atomic D1 batch
+  // to eliminate race conditions between separate roundtrips.
+  const batchStatements: D1PreparedStatement[] = [];
+  const claimIndices: number[] = [];
+  const citationIndices: number[] = [];
 
-  await deps.db
-    .prepare(
-      `DELETE FROM claims
-       WHERE event_id = ?1
-         AND input_revision = ?2
-         AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+  // 1. Delete child citations from previously aborted attempts on this revision
+  batchStatements.push(
+    deps.db
+      .prepare(
+        `DELETE FROM claim_evidence
+         WHERE claim_id IN (
+           SELECT id FROM claims
+           WHERE event_id = ?1
+             AND input_revision = ?2
+             AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+         )
          AND NOT EXISTS (
            SELECT 1 FROM claims
            WHERE event_id = ?1
              AND input_revision = ?2
              AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
          )`,
-    )
-    .bind(eventId, inputRevision)
-    .run();
+      )
+      .bind(eventId, inputRevision),
+  );
 
-  let totalClaims = 0;
-  let totalCitations = 0;
+  // 2. Delete parent claims from previously aborted attempts on this revision
+  batchStatements.push(
+    deps.db
+      .prepare(
+        `DELETE FROM claims
+         WHERE event_id = ?1
+           AND input_revision = ?2
+           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+           AND NOT EXISTS (
+             SELECT 1 FROM claims
+             WHERE event_id = ?1
+               AND input_revision = ?2
+               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+           )`,
+      )
+      .bind(eventId, inputRevision),
+  );
 
-  // 6. Process and persist verified claims & evidence
+  // 3. Process and assemble verified claims & evidence statements
   for (const rawClaim of parsed.claims) {
     const verifiedCitations: Array<{
       articleId: number;
@@ -489,56 +493,64 @@ export async function generateEventEvidence(
       (c) => c.verified && c.isPrimarySource,
     );
 
-    // Atomic conditional insert: only write if events.revision is still inputRevision and no completion sentinel exists
-    const claimInsert = await deps.db
-      .prepare(
-        `INSERT INTO claims (
-           event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
-         )
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
-         WHERE (SELECT revision FROM events WHERE id = ?1) = ?7
-           AND NOT EXISTS (
-             SELECT 1 FROM claims
-             WHERE event_id = ?1
-               AND input_revision = ?7
-               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+    // Track index of this claim insert statement in the batch
+    claimIndices.push(batchStatements.length);
+    batchStatements.push(
+      deps.db
+        .prepare(
+          `INSERT INTO claims (
+             event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
            )
-         ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING
-         RETURNING id`,
-      )
-      .bind(
-        eventId,
-        rawClaim.claimText,
-        rawClaim.claimType,
-        consensusStatus,
-        primarySourcePreferred ? 1 : 0,
-        initialStatus,
-        inputRevision,
-        CLAIMS_PROMPT_VERSION,
-        modelName,
-        now,
-      )
-      .first<{ id: number }>();
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+           WHERE (SELECT revision FROM events WHERE id = ?1) = ?7
+             AND NOT EXISTS (
+               SELECT 1 FROM claims
+               WHERE event_id = ?1
+                 AND input_revision = ?7
+                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+             )
+           ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
+        )
+        .bind(
+          eventId,
+          rawClaim.claimText,
+          rawClaim.claimType,
+          consensusStatus,
+          primarySourcePreferred ? 1 : 0,
+          initialStatus,
+          inputRevision,
+          CLAIMS_PROMPT_VERSION,
+          modelName,
+          now,
+        ),
+    );
 
-    if (!claimInsert || !claimInsert.id) {
-      // Either revision changed or conflict
-      continue;
-    }
-
-    const claimId = claimInsert.id;
-    totalClaims++;
-
-    // Insert citations for this claim
-    if (verifiedCitations.length > 0) {
-      const citationStmts = verifiedCitations.map((c) =>
+    // Insert citation statements linked via claim_text subquery in the same batch
+    for (const c of verifiedCitations) {
+      citationIndices.push(batchStatements.length);
+      batchStatements.push(
         deps.db
           .prepare(
             `INSERT INTO claim_evidence (
                claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+             )
+             SELECT
+               c.id, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+             FROM claims c
+             WHERE c.event_id = ?11
+               AND c.input_revision = ?12
+               AND c.claim_text = ?13
+               AND c.prompt_version = ?14
+               AND c.model = ?15
+               AND (SELECT revision FROM events WHERE id = ?11) = ?12
+               AND NOT EXISTS (
+                 SELECT 1 FROM claims
+                 WHERE event_id = ?11
+                   AND input_revision = ?12
+                   AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+               )`,
           )
           .bind(
-            claimId,
             c.articleId,
             c.bodySha,
             c.quote,
@@ -549,35 +561,68 @@ export async function generateEventEvidence(
             c.isPrimarySource ? 1 : 0,
             c.verified ? 1 : 0,
             now,
+            eventId,
+            inputRevision,
+            rawClaim.claimText,
+            CLAIMS_PROMPT_VERSION,
+            modelName,
           ),
       );
-
-      await deps.db.batch(citationStmts);
-      totalCitations += verifiedCitations.length;
     }
   }
 
-  // Mark completion of the evidence batch
-  if (totalClaims > 0) {
-    await deps.db
-      .prepare(
-        `INSERT INTO claims (
-           event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
-         )
-         SELECT ?1, ?2, 'fact', 'unverified', 0, 'published', ?3, ?4, ?5, ?6
-         WHERE (SELECT revision FROM events WHERE id = ?1) = ?3
-         ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
-      )
-      .bind(
-        eventId,
-        EVIDENCE_COMPLETE_SENTINEL,
-        inputRevision,
-        CLAIMS_PROMPT_VERSION,
-        modelName,
-        now,
-      )
-      .run();
+  // 4. Mark completion of the evidence batch
+  if (parsed.claims.length > 0) {
+    batchStatements.push(
+      deps.db
+        .prepare(
+          `INSERT INTO claims (
+             event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
+           )
+           SELECT ?1, ?2, 'fact', 'unverified', 0, 'published', ?3, ?4, ?5, ?6
+           WHERE (SELECT revision FROM events WHERE id = ?1) = ?3
+             AND EXISTS (
+               SELECT 1 FROM claims
+               WHERE event_id = ?1
+                 AND input_revision = ?3
+                 AND claim_text NOT LIKE '[%]'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM claims
+               WHERE event_id = ?1
+                 AND input_revision = ?3
+                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+             )
+           ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
+        )
+        .bind(
+          eventId,
+          EVIDENCE_COMPLETE_SENTINEL,
+          inputRevision,
+          CLAIMS_PROMPT_VERSION,
+          modelName,
+          now,
+        ),
+    );
   }
+
+  // 5. Execute all statements in a single atomic D1 batch
+  const batchResults = await deps.db.batch(batchStatements);
+  const totalClaims = claimIndices.reduce(
+    (acc, idx) => acc + (batchResults[idx]?.meta.changes ?? 0),
+    0,
+  );
+  const totalCitations = citationIndices.reduce(
+    (acc, idx) => acc + (batchResults[idx]?.meta.changes ?? 0),
+    0,
+  );
+
+  return {
+    status: "generated",
+    eventId,
+    claimsCount: totalClaims,
+    citationsCount: totalCitations,
+  };
 
   return {
     status: "generated",
