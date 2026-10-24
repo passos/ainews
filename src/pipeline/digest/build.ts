@@ -53,13 +53,17 @@ export async function buildDailyDigest(
 
   // If digest already exists, do not recompute. If not emailed, attempt emailing.
   const existing = await env.DB.prepare(
-    "SELECT id, emailed_at FROM digests WHERE industry_id = ?1 AND kind = 'daily' AND period_start = ?2",
+    "SELECT id, status, emailed_at FROM digests WHERE industry_id = ?1 AND kind = 'daily' AND period_start = ?2",
   )
     .bind(industry.id, msg.periodStart)
-    .first<{ id: number; emailed_at: number | null }>();
+    .first<{ id: number; status: string; emailed_at: number | null }>();
 
   if (existing) {
-    if (existing.emailed_at === null && isEnabled(env, "EMAIL_ENABLED")) {
+    if (
+      existing.status === "ready" &&
+      existing.emailed_at === null &&
+      isEnabled(env, "EMAIL_ENABLED")
+    ) {
       await sendDigestEmail(env, existing.id, now);
     }
     return;

@@ -153,49 +153,52 @@ export async function sendDigestEmail(
     return;
   }
 
-  // Read digest row and industry details
-  const row = await env.DB.prepare(
-    `SELECT d.id, d.industry_id, d.period_start, d.published_at, d.intro, d.items_json,
-            i.slug AS industry_slug, i.name AS industry_name
-     FROM digests d
-     JOIN industries i ON i.id = d.industry_id
-     WHERE d.id = ?1`,
-  )
-    .bind(digestId)
-    .first<{
-      id: number;
-      industry_id: number;
-      period_start: string;
-      published_at: number | null;
-      intro: string;
-      items_json: string;
-      industry_slug: string;
-      industry_name: string;
-    }>();
-
-  if (!row) {
-    return;
-  }
-
-  const items = JSON.parse(row.items_json || "[]") as DigestItemData[];
-  const siteUrl = env.SITE_URL || "https://news.ioenv.com";
-  const { subject, text, html } = formatDigestEmail(
-    {
-      id: row.id,
-      industryId: row.industry_id,
-      industrySlug: row.industry_slug,
-      industryName: row.industry_name,
-      periodStart: row.period_start,
-      publishedAt: row.published_at,
-      intro: row.intro,
-      items,
-    },
-    siteUrl,
-  );
-
-  const from = env.EMAIL_FROM || DEFAULT_EMAIL_FROM;
-
   try {
+    // Read digest row and industry details
+    const row = await env.DB.prepare(
+      `SELECT d.id, d.industry_id, d.period_start, d.published_at, d.intro, d.items_json,
+              i.slug AS industry_slug, i.name AS industry_name
+       FROM digests d
+       JOIN industries i ON i.id = d.industry_id
+       WHERE d.id = ?1`,
+    )
+      .bind(digestId)
+      .first<{
+        id: number;
+        industry_id: number;
+        period_start: string;
+        published_at: number | null;
+        intro: string;
+        items_json: string;
+        industry_slug: string;
+        industry_name: string;
+      }>();
+
+    if (!row) {
+      await env.DB.prepare("UPDATE digests SET emailed_at = NULL WHERE id = ?1")
+        .bind(digestId)
+        .run();
+      return;
+    }
+
+    const items = JSON.parse(row.items_json || "[]") as DigestItemData[];
+    const siteUrl = env.SITE_URL || "https://news.ioenv.com";
+    const { subject, text, html } = formatDigestEmail(
+      {
+        id: row.id,
+        industryId: row.industry_id,
+        industrySlug: row.industry_slug,
+        industryName: row.industry_name,
+        periodStart: row.period_start,
+        publishedAt: row.published_at,
+        intro: row.intro,
+        items,
+      },
+      siteUrl,
+    );
+
+    const from = env.EMAIL_FROM || DEFAULT_EMAIL_FROM;
+
     await env.EMAIL.send({
       to: adminEmail,
       from,

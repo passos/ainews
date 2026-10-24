@@ -822,4 +822,43 @@ describe("handleGenerateBatch consumer", () => {
     expect(rowAfter!.emailed_at).not.toBeNull();
     expect(fakeEmail.sent).toHaveLength(1);
   });
+
+  it("duplicate delivery of an empty digest does not send email", async () => {
+    const fakeEmail = new FakeEmail();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('empty-dup-ind', 'Empty Dup Ind', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL: fakeEmail as unknown as SendEmail,
+      EMAIL_ENABLED: "true",
+      ADMIN_EMAIL: "admin@test.com",
+      MODEL_CALLS_ENABLED: "false",
+    };
+
+    const msg: DigestMessage = {
+      kind: "digest",
+      industryId: indId,
+      digestKind: "daily",
+      periodStart: "2026-10-21",
+    };
+
+    // First run creates empty digest
+    await buildDailyDigest(
+      pipelineEnv,
+      msg,
+      Date.parse("2026-10-22T01:00:00Z"),
+    );
+    expect(fakeEmail.sent).toHaveLength(0);
+
+    // Second run (duplicate)
+    await buildDailyDigest(
+      pipelineEnv,
+      msg,
+      Date.parse("2026-10-22T01:00:00Z"),
+    );
+    expect(fakeEmail.sent).toHaveLength(0);
+  });
 });

@@ -115,6 +115,9 @@ export async function getDigest(
     return null;
   }
 
+  // If any item was retracted, suppress the pre-generated intro so retracted claims are not publicized
+  const intro = survivingItems.length < storedItems.length ? "" : row.intro;
+
   return {
     id: row.id,
     section: {
@@ -124,7 +127,7 @@ export async function getDigest(
     },
     periodStart: row.period_start,
     publishedAt: row.published_at!,
-    intro: row.intro,
+    intro,
     items: survivingItems,
   };
 }
@@ -222,11 +225,13 @@ export async function getDigestFeed(
     const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
     const surviving = await filterSurvivingItems(db, rawItems);
     if (surviving.length > 0) {
+      // Suppress intro if any item in this digest was retracted
+      const intro = surviving.length < rawItems.length ? "" : r.intro;
       digests.push({
         id: r.id,
         periodStart: r.period_start,
         publishedAt: r.published_at!,
-        intro: r.intro,
+        intro,
         items: surviving,
       });
     }

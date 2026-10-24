@@ -209,12 +209,13 @@ describe("tests/routes/digest.test.ts", () => {
       },
     );
 
-    // Only kept event remains on web
+    // Only kept event remains on web; intro is suppressed because 1 item was retracted
     expect(result.data.items).toHaveLength(1);
     expect(result.data.items[0].eventId).toBe(eventId1);
     expect(result.data.items[0].title).toBe("Kept Article");
+    expect(result.data.intro).toBe("");
 
-    // RSS feed also removes the retracted item
+    // RSS feed also removes the retracted item and suppresses retracted intro
     const rssRes = await digestFeedResponse(
       db(),
       "https://news.ioenv.com",
@@ -223,6 +224,7 @@ describe("tests/routes/digest.test.ts", () => {
     const rssXml = await rssRes.text();
     expect(rssXml).toContain("Still valid story.");
     expect(rssXml).not.toContain("Discredited story.");
+    expect(rssXml).not.toContain("Summary");
 
     // If kept article is also rejected (0 surviving items left)
     await seedReview(artId1, "rejected", "sha1");
