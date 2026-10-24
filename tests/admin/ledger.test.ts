@@ -100,4 +100,48 @@ describe("ledger and budget admin operations", () => {
     const caps = JSON.parse(setting?.value ?? "{}");
     expect(caps.workers_ai).toBe(250000);
   });
+
+  it("creates today's budget row when updating cap if it did not exist yet", async () => {
+    const freshDay = "2026-12-31";
+    await updateDailyCap(
+      env.DB,
+      { channel: "gateway", capMicros: 3000000 },
+      freshDay,
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT cap_micros, reserved_micros, spent_micros FROM budgets WHERE day = ?1 AND channel = 'gateway'",
+    )
+      .bind(freshDay)
+      .first<{
+        cap_micros: number;
+        reserved_micros: number;
+        spent_micros: number;
+      }>();
+    expect(row).toEqual({
+      cap_micros: 3000000,
+      reserved_micros: 0,
+      spent_micros: 0,
+    });
+  });
+
+  it("updates settings json keys atomically without overwriting other channels", async () => {
+    await updateDailyCap(
+      env.DB,
+      { channel: "workers_ai", capMicros: 150000 },
+      "2026-10-24",
+    );
+    await updateDailyCap(
+      env.DB,
+      { channel: "gateway", capMicros: 2000000 },
+      "2026-10-24",
+    );
+
+    const setting = await env.DB.prepare(
+      "SELECT value FROM settings WHERE key = 'budget.caps'",
+    ).first<{ value: string }>();
+    const caps = JSON.parse(setting?.value ?? "{}");
+    expect(caps.workers_ai).toBe(150000);
+    expect(caps.gateway).toBe(2000000);
+  });
 });

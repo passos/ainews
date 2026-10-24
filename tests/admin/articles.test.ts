@@ -127,6 +127,13 @@ describe("article admin operations", () => {
       .bind(artId)
       .run();
 
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, failures, created_at, updated_at)
+       VALUES ('write:' || ?1 || ':abc:v1', 'write', 'm', 'gateway', 'failed', 3, 0, 0)`,
+    )
+      .bind(artId)
+      .run();
+
     await reanalyzeArticle(env.DB, env.Q_INGEST, artId);
 
     const artRow = await env.DB.prepare(
@@ -143,6 +150,58 @@ describe("article admin operations", () => {
       .bind(artId)
       .first<{ count: number }>();
     expect(analysesCount!.count).toBe(0);
+
+    const callsCount = await env.DB.prepare(
+      "SELECT count(*) as count FROM llm_calls WHERE logical_key LIKE 'write:' || ?1 || ':%'",
+    )
+      .bind(artId)
+      .first<{ count: number }>();
+    expect(callsCount!.count).toBe(0);
+  });
+
+  it("moving an auto-approved article to Finance revokes the auto approval", async () => {
+    const techInd = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('tech-rev', 'Tech', 'auto', 0) RETURNING id",
+    ).first<{ id: number }>();
+    const finInd = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('finance', 'Finance', 'review', 0) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at) VALUES (?1, 'S4', 'https://s4.example/feed', 'rss', 'active', 0) RETURNING id",
+    )
+      .bind(techInd!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, body_sha, fetched_at)
+       VALUES (?1, ?2, 'https://s4.example/art-4', 'https://s4.example/art-4', 'Art 4', 'analyzed', 0, 'sha-4', 0)
+       RETURNING id`,
+    )
+      .bind(src!.id, techInd!.id)
+      .first<{ id: number }>();
+    const artId = art!.id;
+
+    // Auto approved in Tech
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha-4', 'approved', 'auto', 0)",
+    )
+      .bind(artId)
+      .run();
+
+    // Move to Finance
+    await changeArticleIndustry(env.DB, {
+      articleId: artId,
+      industryId: finInd!.id,
+    });
+
+    // Review with reviewer = 'auto' must be deleted
+    const reviews = await env.DB.prepare(
+      "SELECT count(*) as count FROM reviews WHERE article_id = ?1",
+    )
+      .bind(artId)
+      .first<{ count: number }>();
+    expect(reviews!.count).toBe(0);
   });
 
   it("creates a correction record", async () => {

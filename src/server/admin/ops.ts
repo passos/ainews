@@ -74,11 +74,38 @@ export async function updateIndustryConfig(
   if (!ind) {
     throw new Response("Industry not found", { status: 404 });
   }
+
+  // Validate JSON and analysis config
+  let parsedConfig: unknown;
+  try {
+    parsedConfig = JSON.parse(data.config);
+  } catch {
+    throw new Response("Config must be valid JSON", { status: 400 });
+  }
+  if (typeof parsedConfig !== "object" || parsedConfig === null) {
+    throw new Response("Config must be a JSON object", { status: 400 });
+  }
+  const configObj = parsedConfig as Record<string, unknown>;
   if (
-    ind.slug.trim().toLowerCase() === FINANCE_SLUG &&
-    data.publishMode === "auto"
+    configObj.analysis !== undefined &&
+    (typeof configObj.analysis !== "object" ||
+      configObj.analysis === null ||
+      Object.keys(configObj.analysis).length === 0)
   ) {
+    throw new Response(
+      "Invalid analysis config: analysis must be a non-empty object",
+      { status: 400 },
+    );
+  }
+
+  const isFinance = ind.slug.trim().toLowerCase() === FINANCE_SLUG;
+  if (isFinance && data.publishMode === "auto") {
     throw new Response("Finance section cannot use auto publish_mode", {
+      status: 400,
+    });
+  }
+  if (isFinance && (!data.disclaimer || !data.disclaimer.trim())) {
+    throw new Response("Finance section must retain a non-empty disclaimer", {
       status: 400,
     });
   }
@@ -93,7 +120,7 @@ export async function updateIndustryConfig(
       data.publishMode,
       JSON.stringify(data.primaryDomains),
       data.config,
-      data.disclaimer,
+      data.disclaimer?.trim() ? data.disclaimer.trim() : null,
       data.id,
     )
     .run();
@@ -419,10 +446,25 @@ export async function changeArticleIndustry(
     });
   }
 
-  await database
-    .prepare("UPDATE articles SET industry_id = ?1 WHERE id = ?2")
-    .bind(data.industryId, data.articleId)
-    .run();
+  const target = await getIndustry(database, data.industryId);
+  const statements: D1PreparedStatement[] = [
+    database
+      .prepare("UPDATE articles SET industry_id = ?1 WHERE id = ?2")
+      .bind(data.industryId, data.articleId),
+  ];
+
+  if (target?.slug.trim().toLowerCase() === FINANCE_SLUG) {
+    // Finance requires human review: revoke any auto-approvals
+    statements.push(
+      database
+        .prepare(
+          "DELETE FROM reviews WHERE article_id = ?1 AND reviewer = 'auto'",
+        )
+        .bind(data.articleId),
+    );
+  }
+
+  await database.batch(statements);
 }
 
 export async function reanalyzeArticle(
@@ -440,6 +482,11 @@ export async function reanalyzeArticle(
         "UPDATE articles SET stage = 'body_ready', requeue_count = 0, stage_updated_at = ?1 WHERE id = ?2",
       )
       .bind(now, articleId),
+    database
+      .prepare(
+        "DELETE FROM llm_calls WHERE logical_key LIKE 'analyze:' || ?1 || ':%' OR logical_key LIKE 'write:' || ?1 || ':%'",
+      )
+      .bind(articleId),
   ]);
 
   await qIngest.send({ kind: "analyze", articleId });
@@ -552,7 +599,10 @@ export async function reconcileUnknownCall(
   const statements: D1PreparedStatement[] = [
     database
       .prepare(
-        "UPDATE llm_calls SET status = ?1, cost_micros = ?2, updated_at = ?3 WHERE id = ?4 AND status = 'unknown'",
+        `UPDATE llm_calls
+         SET status = ?1, cost_micros = ?2, updated_at = ?3,
+             response_json = CASE WHEN ?1 = 'completed' AND response_json IS NULL THEN '{}' ELSE response_json END
+         WHERE id = ?4 AND status = 'unknown'`,
       )
       .bind(data.status, actualCost, now, data.callId),
   ];
@@ -563,7 +613,7 @@ export async function reconcileUnknownCall(
         .prepare(
           `UPDATE budgets
            SET spent_micros = spent_micros + ?1, reserved_micros = reserved_micros - ?2
-           WHERE day = ?3 AND channel = ?4`,
+           WHERE day = ?3 AND channel = ?4 AND changes() = 1`,
         )
         .bind(actualCost, reserved, budgetDay, call.channel),
     );
@@ -573,7 +623,7 @@ export async function reconcileUnknownCall(
         .prepare(
           `UPDATE budgets
            SET reserved_micros = reserved_micros - ?1
-           WHERE day = ?2 AND channel = ?3`,
+           WHERE day = ?2 AND channel = ?3 AND changes() = 1`,
         )
         .bind(reserved, budgetDay, call.channel),
     );
@@ -595,25 +645,22 @@ export async function updateDailyCap(
   const day = today ?? utcDay(Date.now());
   const now = Date.now();
 
-  const currentSetting = await database
-    .prepare("SELECT value FROM settings WHERE key = 'budget.caps'")
-    .first<{ value: string }>();
-
-  const caps = JSON.parse(currentSetting?.value ?? "{}");
-  caps[data.channel] = data.capMicros;
-
   await database.batch([
     database
       .prepare(
-        `INSERT INTO settings (key, value, updated_at) VALUES ('budget.caps', ?1, ?2)
-         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        `INSERT INTO settings (key, value, updated_at) VALUES ('budget.caps', json_object(?1, ?2), ?3)
+         ON CONFLICT (key) DO UPDATE SET
+           value = json_set(COALESCE(settings.value, '{}'), '$.' || ?1, ?2),
+           updated_at = ?3`,
       )
-      .bind(JSON.stringify(caps), now),
+      .bind(data.channel, data.capMicros, now),
     database
       .prepare(
-        "UPDATE budgets SET cap_micros = ?1 WHERE day = ?2 AND channel = ?3",
+        `INSERT INTO budgets (day, channel, cap_micros, reserved_micros, spent_micros)
+         VALUES (?1, ?2, ?3, 0, 0)
+         ON CONFLICT (day, channel) DO UPDATE SET cap_micros = excluded.cap_micros`,
       )
-      .bind(data.capMicros, day, data.channel),
+      .bind(day, data.channel, data.capMicros),
   ]);
 }
 

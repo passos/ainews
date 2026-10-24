@@ -114,4 +114,72 @@ describe("review and industry admin operations", () => {
       .first<{ publish_mode: string }>();
     expect(finRow!.publish_mode).toBe("review");
   });
+
+  it("rejects empty disclaimer for Finance section", async () => {
+    let fin = await env.DB.prepare(
+      "SELECT id FROM industries WHERE slug = 'finance'",
+    ).first<{ id: number }>();
+    if (!fin) {
+      fin = await env.DB.prepare(
+        "INSERT INTO industries (slug, name, publish_mode, disclaimer, created_at) VALUES ('finance', 'Finance Disc', 'review', 'Legal disclaimer', 0) RETURNING id",
+      ).first<{ id: number }>();
+    }
+    const finId = fin!.id;
+
+    let error: unknown = null;
+    try {
+      await updateIndustryConfig(env.DB, {
+        id: finId,
+        publishMode: "review",
+        primaryDomains: [],
+        config: "{}",
+        disclaimer: "   ",
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeDefined();
+    expect(
+      error instanceof Response
+        ? error.status
+        : (error as { status?: number })?.status,
+    ).toBe(400);
+  });
+
+  it("rejects invalid JSON or empty analysis config", async () => {
+    const indRes = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('tech-cfg', 'Tech', 'review', 0) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = indRes!.id;
+
+    // Bad JSON
+    let err1: unknown = null;
+    try {
+      await updateIndustryConfig(env.DB, {
+        id: indId,
+        publishMode: "review",
+        primaryDomains: [],
+        config: "not json",
+        disclaimer: null,
+      });
+    } catch (e) {
+      err1 = e;
+    }
+    expect(err1 instanceof Response ? err1.status : 0).toBe(400);
+
+    // Empty analysis object
+    let err2: unknown = null;
+    try {
+      await updateIndustryConfig(env.DB, {
+        id: indId,
+        publishMode: "review",
+        primaryDomains: [],
+        config: JSON.stringify({ analysis: {} }),
+        disclaimer: null,
+      });
+    } catch (e) {
+      err2 = e;
+    }
+    expect(err2 instanceof Response ? err2.status : 0).toBe(400);
+  });
 });

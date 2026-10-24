@@ -10,21 +10,24 @@ import {
 export const Route = createFileRoute("/admin/ledger")({
   ssr: "data-only",
   loader: async () => {
-    const [budgetSummary, calls] = await Promise.all([
+    const [budgetSummary, initialCalls] = await Promise.all([
       getBudgetSummary(),
       listLedgerCalls(),
     ]);
-    return { budgetSummary, calls };
+    return { budgetSummary, initialCalls };
   },
   component: AdminLedgerPage,
 });
 
 function AdminLedgerPage() {
-  const { budgetSummary, calls } = Route.useLoaderData();
+  const { budgetSummary, initialCalls } = Route.useLoaderData();
   const router = useRouter();
 
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [page, setPage] = useState<number>(1);
+  const [displayedCalls, setDisplayedCalls] = useState(initialCalls);
+  const [loadingCalls, setLoadingCalls] = useState(false);
 
   const [editingCapChannel, setEditingCapChannel] = useState<
     "workers_ai" | "gateway" | "jina" | null
@@ -48,6 +51,33 @@ function AdminLedgerPage() {
     "workers_ai",
     "jina",
   ];
+
+  async function fetchCalls(channel: string, status: string, newPage: number) {
+    setLoadingCalls(true);
+    try {
+      const res = await listLedgerCalls({
+        data: {
+          channel: channel === "all" ? undefined : channel,
+          status: status === "all" ? undefined : status,
+          page: newPage,
+        },
+      });
+      setDisplayedCalls(res);
+      setPage(newPage);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load ledger calls",
+      );
+    } finally {
+      setLoadingCalls(false);
+    }
+  }
+
+  async function handleFilterChange(newChannel: string, newStatus: string) {
+    setChannelFilter(newChannel);
+    setStatusFilter(newStatus);
+    await fetchCalls(newChannel, newStatus, 1);
+  }
 
   async function handleUpdateCap(channel: "workers_ai" | "gateway" | "jina") {
     const val = parseFloat(newCapUsd);
@@ -96,6 +126,7 @@ function AdminLedgerPage() {
       setMessage(`Call #${callId} reconciled successfully.`);
       setReconcilingCallId(null);
       await router.invalidate();
+      await fetchCalls(channelFilter, statusFilter, page);
     } catch (err) {
       if (err instanceof Response && err.status === 409) {
         setError(
@@ -110,12 +141,6 @@ function AdminLedgerPage() {
       setWorking(false);
     }
   }
-
-  const filteredCalls = calls.filter((c) => {
-    if (channelFilter !== "all" && c.channel !== channelFilter) return false;
-    if (statusFilter !== "all" && c.status !== statusFilter) return false;
-    return true;
-  });
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -229,7 +254,7 @@ function AdminLedgerPage() {
           <div className="flex items-center gap-3 text-xs">
             <select
               value={channelFilter}
-              onChange={(e) => setChannelFilter(e.target.value)}
+              onChange={(e) => handleFilterChange(e.target.value, statusFilter)}
               className="rounded border bg-background px-2.5 py-1"
             >
               <option value="all">All Channels</option>
@@ -239,7 +264,9 @@ function AdminLedgerPage() {
             </select>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) =>
+                handleFilterChange(channelFilter, e.target.value)
+              }
               className="rounded border bg-background px-2.5 py-1"
             >
               <option value="all">All Statuses</option>
@@ -265,66 +292,111 @@ function AdminLedgerPage() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {filteredCalls.map((c) => {
-                const isReconciling = reconcilingCallId === c.id;
-                return (
-                  <tr key={c.id} className="hover:bg-muted/20">
-                    <td className="px-3 py-2.5 font-mono">#{c.id}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-col">
-                        <span className="font-semibold">{c.slot}</span>
-                        <span className="font-mono text-[0.65rem] text-muted-foreground">
-                          {c.model}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 font-mono">{c.channel}</td>
-                    <td className="px-3 py-2.5">
-                      <span
-                        className={`inline-block rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase ${
-                          c.status === "completed"
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                            : c.status === "unknown"
-                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 font-black animate-pulse"
-                              : "bg-destructive/10 text-destructive"
-                        }`}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 font-mono">
-                      ${((c.costMicros ?? 0) / 1_000_000).toFixed(4)}
-                    </td>
-                    <td className="px-3 py-2.5 font-mono">
-                      {c.sentAt && c.updatedAt > c.sentAt
-                        ? `${c.updatedAt - c.sentAt}ms`
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {new Date(c.createdAt).toLocaleTimeString()}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {c.status === "unknown" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReconcilingCallId(isReconciling ? null : c.id);
-                            setReconcileStatus("completed");
-                            setReconcileCostUsd(
-                              ((c.estimatedMicros ?? 0) / 1_000_000).toFixed(4),
-                            );
-                          }}
-                          className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[0.7rem] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+              {loadingCalls ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="p-4 text-center text-muted-foreground"
+                  >
+                    Loading ledger calls...
+                  </td>
+                </tr>
+              ) : displayedCalls.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="p-4 text-center text-muted-foreground"
+                  >
+                    No ledger transactions match this filter.
+                  </td>
+                </tr>
+              ) : (
+                displayedCalls.map((c) => {
+                  const isReconciling = reconcilingCallId === c.id;
+                  return (
+                    <tr key={c.id} className="hover:bg-muted/20">
+                      <td className="px-3 py-2.5 font-mono">#{c.id}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex flex-col">
+                          <span className="font-semibold">{c.slot}</span>
+                          <span className="font-mono text-[0.65rem] text-muted-foreground">
+                            {c.model}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono">{c.channel}</td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[0.65rem] font-bold uppercase ${
+                            c.status === "completed"
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : c.status === "unknown"
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 font-black animate-pulse"
+                                : "bg-destructive/10 text-destructive"
+                          }`}
                         >
-                          {isReconciling ? "Close" : "Reconcile"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                          {c.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono">
+                        ${((c.costMicros ?? 0) / 1_000_000).toFixed(4)}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono">
+                        {c.sentAt && c.updatedAt > c.sentAt
+                          ? `${c.updatedAt - c.sentAt}ms`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground">
+                        {new Date(c.createdAt).toLocaleTimeString()}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        {c.status === "unknown" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReconcilingCallId(isReconciling ? null : c.id);
+                              setReconcileStatus("completed");
+                              setReconcileCostUsd(
+                                ((c.estimatedMicros ?? 0) / 1_000_000).toFixed(
+                                  4,
+                                ),
+                              );
+                            }}
+                            className="rounded border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[0.7rem] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                          >
+                            {isReconciling ? "Close" : "Reconcile"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination controls */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Page {page}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loadingCalls}
+              onClick={() => fetchCalls(channelFilter, statusFilter, page - 1)}
+              className="rounded border px-2 py-1 disabled:opacity-50"
+            >
+              &larr; Previous
+            </button>
+            <button
+              type="button"
+              disabled={displayedCalls.length < 50 || loadingCalls}
+              onClick={() => fetchCalls(channelFilter, statusFilter, page + 1)}
+              className="rounded border px-2 py-1 disabled:opacity-50"
+            >
+              Next &rarr;
+            </button>
+          </div>
         </div>
 
         {/* Inline Reconcile Form */}
