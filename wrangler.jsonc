@@ -36,6 +36,7 @@
         "max_batch_size": 10,
         "max_retries": 3,
         "dead_letter_queue": "ainews-dlq",
+        "max_concurrency": 2,
       },
       {
         "queue": "ainews-group",

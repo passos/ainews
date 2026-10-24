@@ -34,7 +34,7 @@ cron (every 10 min) ─► Q_INGEST: collect ─► body ─► analyze ─► (
 - Every model call goes through one client with a call ledger (`llm_calls`)
   and a daily budget per channel, in integer micro-USD.
 - Fixed steps are deterministic code. Fast judgements use Jev; writing uses
-  Gemini 3.8 Flash; reasoning uses Claude Sonnet 5.5.
+  Gemini 3.8 Flash; reasoning uses Gemini 3.8 Flash.
 - The public site shows only approved articles. Every section starts in review
   mode; Finance is always reviewed.
 

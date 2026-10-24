@@ -32,7 +32,7 @@ export const DEFAULT_SLOTS: Record<Slot, SlotConfig> = {
   judge: { model: "typesafe/jev", channel: "gateway" },
   embed: { model: "@cf/baai/bge-m3", channel: "workers_ai" },
   write: { model: "google/gemini-3.8-flash", channel: "gateway" },
-  reason: { model: "anthropic/claude-sonnet-5.5", channel: "gateway" },
+  reason: { model: "google/gemini-3.8-flash", channel: "gateway" },
   read: { model: "jina/reader", channel: "jina" },
 };
 
