@@ -77,9 +77,13 @@ export function buildWriteRequest(
   };
 }
 
+// The prompt asks for at most 120 / 600 characters. The schema has room on
+// top (#55): a model that writes one character too many has been billed, and
+// a null here sends a selected article on without a summary. The prompt text
+// stays as it is, so promptVersion does not change.
 const writeOutputSchema = z.strictObject({
-  title: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(600),
+  title: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(1).max(800),
 });
 
 export type WriteOutput = z.infer<typeof writeOutputSchema>;
