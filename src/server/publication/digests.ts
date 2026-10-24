@@ -34,6 +34,46 @@ interface RawDigestRow {
   items_json: string;
 }
 
+async function filterSurvivingItems(
+  db: Db,
+  storedItems: DigestItemView[],
+): Promise<DigestItemView[]> {
+  if (storedItems.length === 0) return [];
+  const eventIds = storedItems.map((it) => it.eventId);
+  const activeEventRows = await db.all<{ event_id: number; title: string }>(sql`
+    SELECT
+      ea.event_id AS event_id,
+      COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title
+    FROM event_articles ea
+    JOIN articles a ON a.id = ea.article_id
+    LEFT JOIN analyses an ON an.id = (
+      SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE ea.event_id IN ${eventIds}
+      AND ${approvedArticleWhere}
+    ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
+  `);
+
+  const activeTitleByEvent = new Map<number, string>();
+  for (const er of activeEventRows) {
+    if (!activeTitleByEvent.has(er.event_id)) {
+      activeTitleByEvent.set(er.event_id, er.title);
+    }
+  }
+
+  const survivingItems: DigestItemView[] = [];
+  for (const it of storedItems) {
+    const publicTitle = activeTitleByEvent.get(it.eventId);
+    if (publicTitle !== undefined) {
+      survivingItems.push({
+        ...it,
+        title: publicTitle || it.title,
+      });
+    }
+  }
+  return survivingItems;
+}
+
 export async function getDigest(
   db: Db,
   slug: string,
@@ -69,54 +109,10 @@ export async function getDigest(
 
   const row = rows[0];
   const storedItems: DigestItemView[] = JSON.parse(row.items_json || "[]");
-  if (storedItems.length === 0) {
-    return {
-      id: row.id,
-      section: {
-        slug: row.section_slug,
-        name: row.section_name,
-        disclaimer: row.section_disclaimer,
-      },
-      periodStart: row.period_start,
-      publishedAt: row.published_at!,
-      intro: row.intro,
-      items: [],
-    };
-  }
+  const survivingItems = await filterSurvivingItems(db, storedItems);
 
-  // Filter out events whose articles were all rejected after the digest was built.
-  // Also fetch the earliest approved article's public title.
-  const eventIds = storedItems.map((it) => it.eventId);
-  const activeEventRows = await db.all<{ event_id: number; title: string }>(sql`
-    SELECT
-      ea.event_id AS event_id,
-      COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title
-    FROM event_articles ea
-    JOIN articles a ON a.id = ea.article_id
-    LEFT JOIN analyses an ON an.id = (
-      SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
-    )
-    WHERE ea.event_id IN ${eventIds}
-      AND ${approvedArticleWhere}
-    ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
-  `);
-
-  const activeTitleByEvent = new Map<number, string>();
-  for (const er of activeEventRows) {
-    if (!activeTitleByEvent.has(er.event_id)) {
-      activeTitleByEvent.set(er.event_id, er.title);
-    }
-  }
-
-  const survivingItems: DigestItemView[] = [];
-  for (const it of storedItems) {
-    const publicTitle = activeTitleByEvent.get(it.eventId);
-    if (publicTitle !== undefined) {
-      survivingItems.push({
-        ...it,
-        title: publicTitle || it.title,
-      });
-    }
+  if (survivingItems.length === 0) {
+    return null;
   }
 
   return {
@@ -138,10 +134,15 @@ export async function getRecentDigests(
   slug: string,
   limit = 7,
 ): Promise<RecentDigestLink[]> {
-  const rows = await db.all<{ date: string; published_at: number }>(sql`
+  const rows = await db.all<{
+    date: string;
+    published_at: number;
+    items_json: string;
+  }>(sql`
     SELECT
       d.period_start AS date,
-      d.published_at AS published_at
+      d.published_at AS published_at,
+      d.items_json AS items_json
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
@@ -149,13 +150,23 @@ export async function getRecentDigests(
       AND d.status = 'ready'
       AND d.published_at IS NOT NULL
     ORDER BY d.period_start DESC
-    LIMIT ${limit}
+    LIMIT ${limit * 2}
   `);
 
-  return rows.map((r) => ({
-    date: r.date,
-    publishedAt: r.published_at,
-  }));
+  const results: RecentDigestLink[] = [];
+  for (const r of rows) {
+    const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
+    const surviving = await filterSurvivingItems(db, rawItems);
+    if (surviving.length > 0) {
+      results.push({
+        date: r.date,
+        publishedAt: r.published_at,
+      });
+      if (results.length >= limit) break;
+    }
+  }
+
+  return results;
 }
 
 export interface DigestFeedItem {
@@ -206,13 +217,20 @@ export async function getDigestFeed(
     LIMIT ${limit}
   `);
 
-  const digests: DigestFeedItem[] = rows.map((r) => ({
-    id: r.id,
-    periodStart: r.period_start,
-    publishedAt: r.published_at!,
-    intro: r.intro,
-    items: JSON.parse(r.items_json || "[]"),
-  }));
+  const digests: DigestFeedItem[] = [];
+  for (const r of rows) {
+    const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
+    const surviving = await filterSurvivingItems(db, rawItems);
+    if (surviving.length > 0) {
+      digests.push({
+        id: r.id,
+        periodStart: r.period_start,
+        publishedAt: r.published_at!,
+        intro: r.intro,
+        items: surviving,
+      });
+    }
+  }
 
   return { section, digests };
 }

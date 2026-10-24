@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { buildDailyDigest } from "../../src/pipeline/digest/build";
 import { enqueueDueDigests } from "../../src/pipeline/digest/schedule";
+import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { DigestMessage, PipelineEnv } from "../../src/pipeline/messages";
+import { CallInProgressError } from "../../src/providers/models";
 import type { ModelTransport } from "../../src/providers/transport";
 
 class FakeQueue {
@@ -600,5 +602,224 @@ describe("buildDailyDigest", () => {
     // Ordered by total_score DESC: event2 (95) comes before event1 (60)
     expect(items[0].eventId).toBe(event2!.id);
     expect(items[1].eventId).toBe(event1!.id);
+  });
+});
+
+describe("handleGenerateBatch consumer", () => {
+  function createFakeGenerateBatch(messages: DigestMessage[]) {
+    const acked: string[] = [];
+    const retried: string[] = [];
+
+    const msgs: Message<DigestMessage>[] = messages.map((body, idx) => ({
+      id: `msg-${idx}`,
+      timestamp: new Date(),
+      body,
+      attempts: 1,
+      ack: () => {
+        acked.push(`${body.industryId}:${body.periodStart}`);
+      },
+      retry: () => {
+        retried.push(`${body.industryId}:${body.periodStart}`);
+      },
+    }));
+
+    const batch: MessageBatch<DigestMessage> = {
+      queue: "ainews-generate",
+      messages: msgs as unknown as Message<DigestMessage>[],
+      metadata: {} as unknown as MessageBatchMetadata,
+      ackAll: () => {
+        for (const m of msgs) m.ack();
+      },
+      retryAll: () => {
+        for (const m of msgs) m.retry();
+      },
+    };
+
+    return { batch, acked, retried };
+  }
+
+  it("retries on CallInProgressError and does NOT commit a degraded fallback", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('cip-ind', 'CIP Ind', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, site_domain, created_at) VALUES (?1, 'rss', 'Src', 'http://s/feed', 's.com', 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, 'http://s.com/cip-1', 'http://s.com/cip-1', 'CIP Story', 'Summary CIP', 'grouped', 'sha-cip', 1000, 1000, 1000) RETURNING id`,
+    )
+      .bind(indId, source!.id)
+      .first<{ id: number }>();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Event CIP', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha-cip', 'approved', 'auto', ?2)",
+    )
+      .bind(art!.id, Date.parse("2026-10-21T05:00:00Z"))
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, created_at, selected)
+       VALUES (?1, 'v1', '{}', 'report', '{}', 80, 1000, 1)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    // Transport simulates CallInProgressError (another worker is currently generating)
+    const inProgressTransport: ModelTransport = {
+      run: async () => {
+        throw new CallInProgressError("key-1");
+      },
+    };
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL_ENABLED: "false",
+      MODEL_CALLS_ENABLED: "true",
+    };
+
+    const { batch, acked, retried } = createFakeGenerateBatch([
+      {
+        kind: "digest",
+        industryId: indId,
+        digestKind: "daily",
+        periodStart: "2026-10-21",
+      },
+    ]);
+
+    await handleGenerateBatch(batch, pipelineEnv, {
+      transport: inProgressTransport,
+    });
+
+    // Message must be retried, NOT acked
+    expect(retried).toHaveLength(1);
+    expect(acked).toHaveLength(0);
+
+    // No degraded digest row should have been inserted
+    const row = await env.DB.prepare(
+      "SELECT id FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    expect(row).toBeNull();
+  });
+
+  it("retries on email failure, and subsequent attempt completes emailing without duplicate row", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('email-retry-ind', 'Email Retry Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, site_domain, created_at) VALUES (?1, 'rss', 'Src', 'http://s/feed', 's.com', 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, 'http://s.com/er-1', 'http://s.com/er-1', 'ER Story', 'Summary ER', 'grouped', 'sha-er', 1000, 1000, 1000) RETURNING id`,
+    )
+      .bind(indId, source!.id)
+      .first<{ id: number }>();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Event ER', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha-er', 'approved', 'auto', ?2)",
+    )
+      .bind(art!.id, Date.parse("2026-10-21T05:00:00Z"))
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, created_at, selected)
+       VALUES (?1, 'v1', '{}', 'report', '{}', 80, 1000, 1)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const fakeEmail = new FakeEmail();
+    fakeEmail.shouldFail = true;
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL: fakeEmail as unknown as SendEmail,
+      EMAIL_ENABLED: "true",
+      ADMIN_EMAIL: "admin@test.com",
+      MODEL_CALLS_ENABLED: "false",
+    };
+
+    const firstRun = createFakeGenerateBatch([
+      {
+        kind: "digest",
+        industryId: indId,
+        digestKind: "daily",
+        periodStart: "2026-10-21",
+      },
+    ]);
+
+    // First attempt: email send fails
+    await handleGenerateBatch(firstRun.batch, pipelineEnv);
+    expect(firstRun.retried).toHaveLength(1);
+    expect(firstRun.acked).toHaveLength(0);
+
+    // Row exists in digests, but emailed_at is NULL
+    const rowBefore = await env.DB.prepare(
+      "SELECT id, emailed_at FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(indId)
+      .first<{ id: number; emailed_at: number | null }>();
+    expect(rowBefore).toBeDefined();
+    expect(rowBefore!.emailed_at).toBeNull();
+
+    // Second attempt: email succeeds
+    fakeEmail.shouldFail = false;
+    const secondRun = createFakeGenerateBatch([
+      {
+        kind: "digest",
+        industryId: indId,
+        digestKind: "daily",
+        periodStart: "2026-10-21",
+      },
+    ]);
+
+    await handleGenerateBatch(secondRun.batch, pipelineEnv);
+    expect(secondRun.acked).toHaveLength(1);
+    expect(secondRun.retried).toHaveLength(0);
+
+    const rowAfter = await env.DB.prepare(
+      "SELECT emailed_at FROM digests WHERE id = ?1",
+    )
+      .bind(rowBefore!.id)
+      .first<{ emailed_at: number | null }>();
+    expect(rowAfter!.emailed_at).not.toBeNull();
+    expect(fakeEmail.sent).toHaveLength(1);
   });
 });

@@ -209,10 +209,40 @@ describe("tests/routes/digest.test.ts", () => {
       },
     );
 
-    // Only kept event remains
+    // Only kept event remains on web
     expect(result.data.items).toHaveLength(1);
     expect(result.data.items[0].eventId).toBe(eventId1);
     expect(result.data.items[0].title).toBe("Kept Article");
+
+    // RSS feed also removes the retracted item
+    const rssRes = await digestFeedResponse(
+      db(),
+      "https://news.ioenv.com",
+      "technology",
+    );
+    const rssXml = await rssRes.text();
+    expect(rssXml).toContain("Still valid story.");
+    expect(rssXml).not.toContain("Discredited story.");
+
+    // If kept article is also rejected (0 surviving items left)
+    await seedReview(artId1, "rejected", "sha1");
+    await expect(
+      loadDigest(
+        { section: "technology", date: "2026-10-21" },
+        {
+          getDigest: (slug, date) => getDigest(db(), slug, date),
+          getRecentDigests: (slug) => getRecentDigests(db(), slug),
+        },
+      ),
+    ).rejects.toSatisfy(isNotFound);
+
+    const rssResEmpty = await digestFeedResponse(
+      db(),
+      "https://news.ioenv.com",
+      "technology",
+    );
+    const rssXmlEmpty = await rssResEmpty.text();
+    expect(rssXmlEmpty).not.toContain("Daily Digest — 2026-10-21");
   });
 
   it("invalid date or nonexistent section throws notFound", async () => {

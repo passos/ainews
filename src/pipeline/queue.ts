@@ -58,11 +58,12 @@ export async function runQueue(
     await handleGroupBatch(batch, env, overrides);
     return;
   }
+  const deps: QueueDeps = { ...defaultDeps(env), ...overrides };
   if (batch.queue === GENERATE_QUEUE) {
     await handleGenerateBatch(
       batch as MessageBatch<GenerateMessage>,
       env,
-      overrides,
+      deps,
     );
     return;
   }
@@ -71,7 +72,6 @@ export async function runQueue(
     batch.ackAll();
     return;
   }
-  const deps: QueueDeps = { ...defaultDeps(env), ...overrides };
   for (const msg of batch.messages as readonly Message<IngestMessage>[]) {
     const body = msg.body;
     // One failing message does not stop the batch. It is acked like a

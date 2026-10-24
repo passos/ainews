@@ -1,6 +1,6 @@
 import { isEnabled } from "../../lib/flags";
 import { dayBoundsUtc } from "../../lib/time";
-import { createModelClient } from "../../providers/models";
+import { CallInProgressError, createModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
 import type { DigestMessage, PipelineEnv } from "../messages";
 import { sendDigestEmail, type DigestItemData } from "./email";
@@ -48,6 +48,20 @@ export async function buildDailyDigest(
 
   if (!industry) {
     console.error(`Industry ${msg.industryId} not found for digest`);
+    return;
+  }
+
+  // If digest already exists, do not recompute. If not emailed, attempt emailing.
+  const existing = await env.DB.prepare(
+    "SELECT id, emailed_at FROM digests WHERE industry_id = ?1 AND kind = 'daily' AND period_start = ?2",
+  )
+    .bind(industry.id, msg.periodStart)
+    .first<{ id: number; emailed_at: number | null }>();
+
+  if (existing) {
+    if (existing.emailed_at === null && isEnabled(env, "EMAIL_ENABLED")) {
+      await sendDigestEmail(env, existing.id, now);
+    }
     return;
   }
 
@@ -237,6 +251,9 @@ export async function buildDailyDigest(
       }
       usedModel = "write";
     } catch (err) {
+      if (err instanceof CallInProgressError) {
+        throw err;
+      }
       console.error(
         "Digest model call failed, falling back to summaries:",
         err,
