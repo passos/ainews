@@ -1,14 +1,70 @@
 # Personal News
 
-A TanStack Start app on one Cloudflare Worker (`ainews-app`), served at
-<https://news.ioenv.com>. The design contract is
-[`docs/architecture.md`](docs/architecture.md).
+A news site that finds hot topics and writes daily reports by itself. One
+admin, several sections (Technology, Education, Industry, Finance). It is a
+TanStack Start app on one Cloudflare Worker (`ainews-app`), served at
+<https://news.ioenv.com>.
+
+**Coding agents: read [`AGENTS.md`](AGENTS.md) first.** It has the current
+state, the remaining work, the rules a PR must not break, and the process.
+
+## Documents
+
+| File                                                      | What it is                                                  |
+| --------------------------------------------------------- | ----------------------------------------------------------- |
+| [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)            | Product requirements. They must be met.                     |
+| [`docs/design/decisions.md`](docs/design/decisions.md)    | Scope and technical decisions the owner confirmed           |
+| [`docs/architecture.md`](docs/architecture.md)            | Architecture contract. Every issue follows it.              |
+| [`AGENTS.md`](AGENTS.md)                                  | Handover guide for coding agents                            |
+| Epic [#26](https://github.com/githonllc/ainews/issues/26) | Milestones M0–M4 and their gates; every task is a sub-issue |
+
+## How it works
+
+```
+cron (every 10 min) ─► Q_INGEST: collect ─► body ─► analyze ─► (review) ─► public site, RSS
+                                   │          │         │
+                                RSS/HTML   fetch      Jev: prefilter, scores, labels
+                                dedupe     ladder     Gemini: title and summary
+```
+
+- One Worker exports `fetch` (site and `/admin`), `scheduled` (cron) and
+  `queue` (pipeline consumers).
+- Data: D1 through Drizzle. Article bodies are in R2 as versions
+  (`bodies/{article_id}/{sha256}.md`) that are never overwritten.
+- Every model call goes through one client with a call ledger (`llm_calls`)
+  and a daily budget per channel, in integer micro-USD.
+- Fixed steps are deterministic code. Fast judgements use Jev; writing uses
+  Gemini 3.8 Flash; reasoning uses Claude Sonnet 5.5.
+- The public site shows only approved articles. Every section starts in review
+  mode; Finance is always reviewed.
+
+## Status
+
+M0 is done. M1 is in progress: collection, body fetch, analysis, the seed
+sections and the public site are live. The admin review queue (#9), event
+grouping (#11) and the daily report (#12) are next. See `AGENTS.md` §2–§3.
+
+## Safety switches
+
+Five vars in `wrangler.jsonc`. Only the string `"true"` turns one on.
+
+| Var                          | Turns on                                                                                                                                           |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COLLECT_ENABLED`            | Collection and body fetch                                                                                                                          |
+| `MODEL_CALLS_ENABLED`        | Every model call (paid)                                                                                                                            |
+| `THIRD_PARTY_READER_ENABLED` | Jina Reader (rung 3). It also needs `jina_enabled = 1` on the source, `JINA_API_KEY`, `MODEL_CALLS_ENABLED`, and a `jina` budget above 0 (now $0). |
+| `EMAIL_ENABLED`              | Admin email                                                                                                                                        |
+| `DISCOVERY_ENABLED`          | AI source discovery                                                                                                                                |
+
+A switch changes only in its own PR, with the owner's consent. In `env.test`
+all five stay `"false"`.
 
 ## Requirements
 
 - Node 24 (`.nvmrc`)
 - For provision and manual deploy: a Cloudflare login (`npx wrangler login`)
-  on the account in `wrangler.jsonc`
+  on the account in `wrangler.jsonc`, or `CLOUDFLARE_API_TOKEN` in the
+  environment (CI uses the token)
 - For repository setup: `gh` with admin rights on `githonllc/ainews`
 
 ## Local development
@@ -63,7 +119,7 @@ run again and never overwrites what the admin changed. It does not turn on any
 switch (`COLLECT_ENABLED` and the others stay as they are). It is not part of
 the deploy: a deleted seed source would come back with every deploy.
 
-After the merge the owner runs `npm run seed:remote` once. The script writes
+Production was seeded once on 2026-10-23. The script writes
 `.seed.sql` (git-ignored) and runs it with `wrangler d1 execute`. It runs
 Node with `scripts/ts-resolve.mjs`, a preload that lets Node load the
 `src/` files that import each other without a file extension.
@@ -72,6 +128,10 @@ Node with `scripts/ts-resolve.mjs`, a preload that lets Node load the
 on the articles in `tests/fixtures/analysis/real/` and prints a table. It
 calls the real model and needs `.env.prod`, so it runs only on the owner's
 machine. `--dry-run` builds and checks the requests without any call.
+
+`scripts/probe-write.ts` sends a few real requests to the `write` slot and
+prints `finishReason` and the thinking token count. Use it before you change
+the thinking setting or the output limit of a writing call.
 
 ## Provision Cloudflare resources
 
