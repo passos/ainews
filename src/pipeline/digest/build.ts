@@ -19,6 +19,7 @@ export const DEFAULT_MAX_ITEMS = 7;
 
 interface EventRow {
   event_id: number;
+  event_revision: number;
   event_created_at: number;
   title: string | null;
   summary: string | null;
@@ -109,6 +110,7 @@ export async function buildDailyDigest(
   const { results: eventRows } = await env.DB.prepare(
     `SELECT
       e.id AS event_id,
+      e.revision AS event_revision,
       e.created_at AS event_created_at,
       (SELECT COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title)
        FROM event_articles ea
@@ -197,10 +199,11 @@ export async function buildDailyDigest(
     .all<EventRow>();
 
   // Filter out any anomaly where title is null
-  const candidates: DigestPromptEvent[] = eventRows
+  const candidates: (DigestPromptEvent & { revision: number })[] = eventRows
     .filter((r) => Boolean(r.title))
     .map((r) => ({
       id: r.event_id,
+      revision: r.event_revision,
       title: r.title!,
       summary: r.summary || "",
       sourceName: r.source_name || "Unknown source",
@@ -268,6 +271,7 @@ export async function buildDailyDigest(
   // Build items array
   const items: DigestItemData[] = candidates.map((c) => ({
     eventId: c.id,
+    eventRevision: c.revision,
     title: c.title,
     oneLiner: oneLiners.get(c.id) || c.summary,
     sourceName: c.sourceName,
@@ -297,9 +301,9 @@ export async function buildDailyDigest(
     )
     .run();
 
-  // Read back row to get id for emailing
+  // Read back row to get id for emailing (only if status is ready)
   const row = await env.DB.prepare(
-    "SELECT id FROM digests WHERE industry_id = ?1 AND kind = 'daily' AND period_start = ?2",
+    "SELECT id FROM digests WHERE industry_id = ?1 AND kind = 'daily' AND period_start = ?2 AND status = 'ready'",
   )
     .bind(industry.id, msg.periodStart)
     .first<{ id: number }>();

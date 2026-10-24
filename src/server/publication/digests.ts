@@ -3,6 +3,7 @@ import { approvedArticleWhere, type Db, type SectionInfo } from "./articles";
 
 export interface DigestItemView {
   eventId: number;
+  eventRevision?: number;
   title: string;
   oneLiner: string;
   sourceName: string;
@@ -34,17 +35,30 @@ interface RawDigestRow {
   items_json: string;
 }
 
+export interface FilteredDigestResult {
+  items: DigestItemView[];
+  suppressIntro: boolean;
+}
+
 async function filterSurvivingItems(
   db: Db,
   storedItems: DigestItemView[],
-): Promise<DigestItemView[]> {
-  if (storedItems.length === 0) return [];
+): Promise<FilteredDigestResult> {
+  if (storedItems.length === 0) return { items: [], suppressIntro: false };
   const eventIds = storedItems.map((it) => it.eventId);
-  const activeEventRows = await db.all<{ event_id: number; title: string }>(sql`
+  const activeEventRows = await db.all<{
+    event_id: number;
+    event_revision: number;
+    title: string;
+    summary: string | null;
+  }>(sql`
     SELECT
       ea.event_id AS event_id,
-      COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title
+      e.revision AS event_revision,
+      COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
+      COALESCE(NULLIF(a.summary_override, ''), NULLIF(an.summary_en, ''), a.summary) AS summary
     FROM event_articles ea
+    JOIN events e ON e.id = ea.event_id
     JOIN articles a ON a.id = ea.article_id
     LEFT JOIN analyses an ON an.id = (
       SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
@@ -54,24 +68,68 @@ async function filterSurvivingItems(
     ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
   `);
 
-  const activeTitleByEvent = new Map<number, string>();
+  interface ActiveEventState {
+    revision: number;
+    firstTitle: string;
+    latestSummary: string;
+    count: number;
+  }
+
+  const activeEventInfo = new Map<number, ActiveEventState>();
   for (const er of activeEventRows) {
-    if (!activeTitleByEvent.has(er.event_id)) {
-      activeTitleByEvent.set(er.event_id, er.title);
+    const existing = activeEventInfo.get(er.event_id);
+    if (!existing) {
+      activeEventInfo.set(er.event_id, {
+        revision: er.event_revision,
+        firstTitle: er.title,
+        latestSummary: er.summary || "",
+        count: 1,
+      });
+    } else {
+      existing.count += 1;
+      if (er.summary) {
+        existing.latestSummary = er.summary;
+      }
     }
   }
 
   const survivingItems: DigestItemView[] = [];
+  let suppressIntro = false;
+
   for (const it of storedItems) {
-    const publicTitle = activeTitleByEvent.get(it.eventId);
-    if (publicTitle !== undefined) {
+    const info = activeEventInfo.get(it.eventId);
+    if (!info) {
+      suppressIntro = true;
+      continue;
+    }
+
+    const revisionChanged =
+      (it.eventRevision !== undefined && it.eventRevision !== info.revision) ||
+      (it.articleCount !== undefined && info.count < it.articleCount);
+
+    if (revisionChanged) {
+      suppressIntro = true;
       survivingItems.push({
         ...it,
-        title: publicTitle || it.title,
+        eventRevision: info.revision,
+        title: info.firstTitle || it.title,
+        oneLiner: info.latestSummary || info.firstTitle || it.oneLiner,
+        articleCount: info.count,
+      });
+    } else {
+      survivingItems.push({
+        ...it,
+        title: info.firstTitle || it.title,
+        articleCount: info.count,
       });
     }
   }
-  return survivingItems;
+
+  if (survivingItems.length < storedItems.length) {
+    suppressIntro = true;
+  }
+
+  return { items: survivingItems, suppressIntro };
 }
 
 export async function getDigest(
@@ -109,14 +167,17 @@ export async function getDigest(
 
   const row = rows[0];
   const storedItems: DigestItemView[] = JSON.parse(row.items_json || "[]");
-  const survivingItems = await filterSurvivingItems(db, storedItems);
+  const { items: survivingItems, suppressIntro } = await filterSurvivingItems(
+    db,
+    storedItems,
+  );
 
   if (survivingItems.length === 0) {
     return null;
   }
 
-  // If any item was retracted, suppress the pre-generated intro so retracted claims are not publicized
-  const intro = survivingItems.length < storedItems.length ? "" : row.intro;
+  // If any item was retracted or modified, suppress pre-generated intro so retracted claims are not publicized
+  const intro = suppressIntro ? "" : row.intro;
 
   return {
     id: row.id,
@@ -159,7 +220,7 @@ export async function getRecentDigests(
   const results: RecentDigestLink[] = [];
   for (const r of rows) {
     const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
-    const surviving = await filterSurvivingItems(db, rawItems);
+    const { items: surviving } = await filterSurvivingItems(db, rawItems);
     if (surviving.length > 0) {
       results.push({
         date: r.date,
@@ -223,10 +284,13 @@ export async function getDigestFeed(
   const digests: DigestFeedItem[] = [];
   for (const r of rows) {
     const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
-    const surviving = await filterSurvivingItems(db, rawItems);
+    const { items: surviving, suppressIntro } = await filterSurvivingItems(
+      db,
+      rawItems,
+    );
     if (surviving.length > 0) {
-      // Suppress intro if any item in this digest was retracted
-      const intro = surviving.length < rawItems.length ? "" : r.intro;
+      // Suppress intro if any item in this digest was retracted or modified
+      const intro = suppressIntro ? "" : r.intro;
       digests.push({
         id: r.id,
         periodStart: r.period_start,

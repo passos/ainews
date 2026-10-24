@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { buildDailyDigest } from "../../src/pipeline/digest/build";
+import { sendDigestEmail } from "../../src/pipeline/digest/email";
 import { enqueueDueDigests } from "../../src/pipeline/digest/schedule";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { DigestMessage, PipelineEnv } from "../../src/pipeline/messages";
@@ -859,6 +860,71 @@ describe("handleGenerateBatch consumer", () => {
       msg,
       Date.parse("2026-10-22T01:00:00Z"),
     );
+    expect(fakeEmail.sent).toHaveLength(0);
+  });
+
+  it("sendDigestEmail does not claim or send email for digest with status 'empty'", async () => {
+    const fakeEmail = new FakeEmail();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('empty-guard-ind', 'Empty Guard Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const dig = await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'daily', '2026-10-23', 'UTC', 'empty', '', '[]', 1000, NULL) RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL: fakeEmail as unknown as SendEmail,
+      EMAIL_ENABLED: "true",
+      ADMIN_EMAIL: "admin@test.com",
+      MODEL_CALLS_ENABLED: "false",
+    };
+
+    await sendDigestEmail(pipelineEnv, dig!.id, 2000);
+
+    expect(fakeEmail.sent).toHaveLength(0);
+    const row = await env.DB.prepare(
+      "SELECT emailed_at FROM digests WHERE id = ?1",
+    )
+      .bind(dig!.id)
+      .first<{ emailed_at: number | null }>();
+    expect(row!.emailed_at).toBeNull();
+  });
+
+  it("buildDailyDigest ignores existing empty row when checking for emailing", async () => {
+    const fakeEmail = new FakeEmail();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('empty-interleaved-ind', 'Empty Interleaved Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    // Pre-existing empty row (e.g. from an earlier empty run)
+    await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'daily', '2026-10-24', 'UTC', 'empty', '', '[]', 1000, NULL)`,
+    )
+      .bind(ind!.id)
+      .run();
+
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      EMAIL: fakeEmail as unknown as SendEmail,
+      EMAIL_ENABLED: "true",
+      ADMIN_EMAIL: "admin@test.com",
+      MODEL_CALLS_ENABLED: "false",
+    };
+
+    const msg: DigestMessage = {
+      kind: "digest",
+      industryId: ind!.id,
+      digestKind: "daily",
+      periodStart: "2026-10-24",
+    };
+
+    await buildDailyDigest(pipelineEnv, msg, 2000);
     expect(fakeEmail.sent).toHaveLength(0);
   });
 });

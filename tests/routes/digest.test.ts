@@ -247,6 +247,89 @@ describe("tests/routes/digest.test.ts", () => {
     expect(rssXmlEmpty).not.toContain("Daily Digest — 2026-10-21");
   });
 
+  it("multi-article event: retracting one article bumps revision, suppresses digest intro, and replaces oneLiner with surviving article summary", async () => {
+    const eventId = await seedEvent(tech.industryId, "Original Event Title", 0);
+
+    const artId1 = await seedArticle({
+      ...tech,
+      title: "Article 1 (Retracted Later)",
+      summary: "Summary 1 that was retracted",
+      bodySha: "sha-1",
+      publishedAt: 1000,
+    });
+    const artId2 = await seedArticle({
+      ...tech,
+      title: "Article 2 (Surviving)",
+      summary: "Surviving article summary",
+      bodySha: "sha-2",
+      publishedAt: 2000,
+    });
+    await seedEventArticle(eventId, artId1, 1000);
+    await seedEventArticle(eventId, artId2, 2000);
+    await seedReview(artId1, "approved", "sha-1");
+    await seedReview(artId2, "approved", "sha-2");
+
+    const itemsJson = JSON.stringify([
+      {
+        eventId,
+        eventRevision: 0,
+        title: "Original Event Title",
+        oneLiner: "Old synthesized one-liner mentioning Article 1 claims.",
+        sourceName: "Tech Wire",
+        articleCount: 2,
+      },
+    ]);
+
+    await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'daily', '2026-10-22', 'UTC', 'ready', 'Synthesized editorial intro mentioning retracted claims.', ?2, 1000, 1000)`,
+    )
+      .bind(tech.industryId, itemsJson)
+      .run();
+
+    // Now retract Article 1, bumping event revision and marking review rejected
+    await seedReview(artId1, "rejected", "sha-1");
+    await env.DB.prepare(
+      "UPDATE events SET revision = revision + 1 WHERE id = ?1",
+    )
+      .bind(eventId)
+      .run();
+
+    const result = await loadDigest(
+      { section: "technology", date: "2026-10-22" },
+      {
+        getDigest: (slug, date) => getDigest(db(), slug, date),
+        getRecentDigests: (slug) => getRecentDigests(db(), slug),
+      },
+    );
+
+    // Event still survives (1 article left)
+    expect(result.data.items).toHaveLength(1);
+    expect(result.data.items[0].eventId).toBe(eventId);
+    // Intro must be suppressed to empty string
+    expect(result.data.intro).toBe("");
+    // One-liner must be replaced with surviving summary, NOT the old one-liner
+    expect(result.data.items[0].oneLiner).toBe("Surviving article summary");
+    expect(result.data.items[0].oneLiner).not.toContain(
+      "Old synthesized one-liner",
+    );
+
+    // RSS feed also suppresses intro and outputs surviving summary
+    const rssRes = await digestFeedResponse(
+      db(),
+      "https://news.ioenv.com",
+      "technology",
+    );
+    const rssXml = await rssRes.text();
+    expect(rssXml).not.toContain(
+      "Synthesized editorial intro mentioning retracted claims.",
+    );
+    expect(rssXml).not.toContain(
+      "Old synthesized one-liner mentioning Article 1 claims.",
+    );
+    expect(rssXml).toContain("Surviving article summary");
+  });
+
   it("invalid date or nonexistent section throws notFound", async () => {
     await expect(
       loadDigest(

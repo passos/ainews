@@ -3,6 +3,7 @@ import type { PipelineEnv } from "../messages";
 
 export interface DigestItemData {
   eventId: number;
+  eventRevision?: number;
   title: string;
   oneLiner: string;
   sourceName: string;
@@ -142,9 +143,9 @@ export async function sendDigestEmail(
     return;
   }
 
-  // Claim the digest for emailing atomically (at most once)
+  // Claim the digest for emailing atomically (at most once; only for ready digests)
   const claimRes = await env.DB.prepare(
-    "UPDATE digests SET emailed_at = ?1 WHERE id = ?2 AND emailed_at IS NULL",
+    "UPDATE digests SET emailed_at = ?1 WHERE id = ?2 AND emailed_at IS NULL AND status = 'ready'",
   )
     .bind(now, digestId)
     .run();
@@ -160,7 +161,7 @@ export async function sendDigestEmail(
               i.slug AS industry_slug, i.name AS industry_name
        FROM digests d
        JOIN industries i ON i.id = d.industry_id
-       WHERE d.id = ?1`,
+       WHERE d.id = ?1 AND d.status = 'ready'`,
     )
       .bind(digestId)
       .first<{
