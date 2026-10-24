@@ -176,6 +176,25 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
   });
 
+  it("verifyQuoteInBody handles large documents (>160KB) with links without call stack overflow", () => {
+    const head =
+      "[Opening Report](https://example.com/rep) The organization verified that **energy output exceeded 500 megawatts** during trial operations.\n\n";
+    const tail =
+      "Repeating context filler paragraph to build realistic large body text.\n\n".repeat(
+        2500,
+      );
+    const body = head + tail;
+    expect(body.length).toBeGreaterThan(160000);
+
+    const quote =
+      "organization verified that energy output exceeded 500 megawatts";
+    const res = verifyQuoteInBody(body, quote);
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "organization verified that **energy output exceeded 500 megawatts",
+    );
+  });
+
   it("evaluateClaimConsensus calculates correct status", () => {
     // Only support
     expect(
