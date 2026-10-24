@@ -115,6 +115,7 @@ describe("R2: routes read only through publication/ or admin/", () => {
       }),
     );
     expect(v).toEqual([
+      "R1 src/routes/index.tsx reaches src/server/db/client.ts via src/routes/index.tsx",
       "R2 src/routes/index.tsx imports src/server/db/client.ts",
     ]);
   });
