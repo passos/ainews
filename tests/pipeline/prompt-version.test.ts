@@ -2,6 +2,8 @@
 // in prompts.ts gives a new version without a manual bump. The prompt is a
 // module constant, so the test swaps the module.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseAnalysisConfig } from "../../src/pipeline/analyze/config";
+import { SEED_INDUSTRIES } from "../../src/server/db/seed/industries";
 import { fakeAnalysisConfig } from "../fixtures/analysis/config";
 
 const PROMPTS = "../../src/pipeline/analyze/prompts";
@@ -58,5 +60,25 @@ describe("promptVersion", () => {
     });
     const after = await (await import(QUESTIONS)).promptVersion(config);
     expect(after).not.toBe(before);
+  });
+
+  // #55 widened the write output limits in code only: the request, and so
+  // the version of every seeded section, must stay as it was on 2026-10-23.
+  it("the four seeded sections keep their production versions", async () => {
+    const { promptVersion } = await import(QUESTIONS);
+    const versions: Record<string, string> = {};
+    for (const industry of SEED_INDUSTRIES) {
+      // The same path as analyzeArticle: industries.config -> parse.
+      const config = parseAnalysisConfig(
+        JSON.stringify({ analysis: industry.analysis }),
+      );
+      versions[industry.slug] = await promptVersion(config);
+    }
+    expect(versions).toEqual({
+      technology: "19a2ecccdef7691b",
+      education: "1756c78f56655a3d",
+      industry: "4d1f4231ee928b63",
+      finance: "a133ab041d5a1f2e",
+    });
   });
 });

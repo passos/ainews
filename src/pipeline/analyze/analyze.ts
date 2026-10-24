@@ -157,17 +157,13 @@ export async function analyzeArticle(
     try {
       written = await write(models, config, row, bodyMd, `write:${keyPart}`);
     } catch (error) {
-      // Over budget: the judge answer stays in the ledger, so the sweep
-      // retries only the write. In progress: another delivery is writing
-      // and commits the full result.
-      if (error instanceof BudgetExceededError) {
-        return touch(env, articleId, now, "over_budget");
-      }
-      if (error instanceof CallInProgressError) {
-        return { status: "deferred", reason: "in_progress" };
-      }
-      // Any other write failure: no title or summary, no auto approval.
-      console.error({ analyze: articleId, write: describe(error) });
+      // The article stays body_ready and the sweep sends it again: the judge
+      // answer is in the ledger, so only the write is asked for again, up to
+      // MAX_ATTEMPTS. Over budget and in-progress are retried the same way;
+      // an error modelError does not resolve reaches runQueue's catch.
+      // (A write that succeeded but is not the expected JSON is not an
+      // error: below, the article goes on without a summary.)
+      return modelError(env, articleId, now, error);
     }
   }
 
@@ -274,7 +270,7 @@ async function write(
   return parseWriteOutput(text);
 }
 
-/** Judge errors that this handler resolves; others reach runQueue's catch. */
+/** Judge and write errors that this handler resolves; others reach runQueue's catch. */
 async function modelError(
   env: PipelineEnv,
   articleId: number,

@@ -184,6 +184,29 @@ async function keyOf(slot: "analyze" | "write", id: number, sha = SHA) {
   return `${slot}:${id}:${sha.slice(0, 16)}:${await promptVersion(config)}`;
 }
 
+/** A write ledger row in a state `acquire` does not hand out again. */
+async function seedWriteRow(
+  id: number,
+  status: "failed" | "unknown",
+  opts: { failures: number },
+) {
+  await env.DB.prepare(
+    `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt,
+       failures, sent_at, error, created_at, updated_at)
+     VALUES (?1, 'write', 'google/gemini-3.8-flash', 'gateway', ?2, ?3, ?3,
+       ?4, ?5, ?6, ?6)`,
+  )
+    .bind(
+      await keyOf("write", id),
+      status,
+      opts.failures,
+      status === "unknown" ? NOW - 1 : null,
+      status === "failed" ? "boom" : null,
+      NOW - 1,
+    )
+    .run();
+}
+
 const run = (
   id: number,
   t: FakeTransport,
@@ -352,7 +375,7 @@ describe("publish mode", () => {
 
   it("write returns JSON outside the schema: no summary, analyzed, no auto approval", async () => {
     const id = await seedReady(await seedIndustryRow("alpha", "auto"));
-    const bad = JSON.stringify({ title: "x", summary: "y".repeat(601) });
+    const bad = JSON.stringify({ title: "x", summary: "y".repeat(801) });
     const result = await run(id, models(fakeAnswers(config), bad));
     expect(result).toMatchObject({
       stage: "analyzed",
@@ -369,16 +392,53 @@ describe("publish mode", () => {
     expect(await reviewRows(id)).toEqual([]);
   });
 
-  it("write fails at the transport: no summary, analyzed, no auto approval", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+  it("write fails at the transport: the error reaches runQueue, the article stays body_ready", async () => {
     const id = await seedReady(await seedIndustryRow("alpha", "auto"));
-    await run(id, models(fakeAnswers(config), new Error("connection lost")));
-    expect(await analysisRow(id)).toMatchObject({
-      selected: 1,
-      summary_en: null,
+    await expect(
+      run(id, models(fakeAnswers(config), new Error("connection lost"))),
+    ).rejects.toThrow("connection lost");
+    expect(await articleRow(id)).toMatchObject({
+      stage: "body_ready",
+      stage_updated_at: NOW - 31 * MIN,
+      requeue_count: 2,
     });
-    expect((await articleRow(id))?.stage).toBe("analyzed");
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
     expect(await reviewRows(id)).toEqual([]);
+  });
+
+  // The write call failed for good (#55): the article must not move on
+  // without a summary; the sweep sends it again and the judge answer is
+  // already in the ledger.
+  describe.each([
+    [
+      "CallFailedError",
+      async (id: number) => seedWriteRow(id, "failed", { failures: 3 }),
+      () => googleText(GOOD_WRITE),
+    ],
+    [
+      "CallUnknownError",
+      async (id: number) => seedWriteRow(id, "unknown", { failures: 0 }),
+      () => googleText(GOOD_WRITE),
+    ],
+    ["ResponseParseError", async () => {}, () => ({ candidates: [] })],
+  ] as const)("write ends with %s", (name, setup, reply) => {
+    it("failed, stays body_ready, no analyses row, no approval", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+      await setup(id);
+      const t = fakeTransport(async (model) =>
+        model === "typesafe/jev" ? jevResponse(fakeAnswers(config)) : reply(),
+      );
+      expect(await run(id, t)).toEqual({ status: "failed", reason: name });
+      expect(jevCalls(t)).toBe(1);
+      expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
+      expect(await reviewRows(id)).toEqual([]);
+      expect(await articleRow(id)).toMatchObject({
+        stage: "body_ready",
+        stage_updated_at: NOW - 31 * MIN,
+        requeue_count: 2,
+      });
+    });
   });
 });
 
@@ -613,19 +673,13 @@ describe("no analysis", () => {
 });
 
 describe("races, body versions and retries", () => {
-  it("two deliveries with the same now: the loser commits nothing, even with a valid write", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+  it("two deliveries with the same now: the loser commits nothing and approves nothing", async () => {
     const id = await seedReady(await seedIndustryRow("alpha", "auto"));
-    let writes = 0;
-    const t = fakeTransport(async (model) => {
-      if (model === "typesafe/jev") return jevResponse(fakeAnswers(config));
-      writes += 1;
-      if (writes === 1) throw new Error("connection lost");
-      return googleText(GOOD_WRITE);
-    });
+    const t = models(fakeAnswers(config));
     const base = pipelineEnv(fakeQueue(), ENABLED);
-    // Delivery B has read body_ready; delivery A runs to its commit (write
-    // failed) before B reads the body. Both use the same `now`.
+    // Delivery B has read body_ready; delivery A runs to its commit before B
+    // reads the body. Both use the same `now`; B gets both answers from the
+    // ledger.
     const late: PipelineEnv = {
       ...base,
       BODIES: {
@@ -633,7 +687,8 @@ describe("races, body versions and retries", () => {
           const first = await analyzeArticle(base, id, NOW, { transport: t });
           expect(first).toMatchObject({
             stage: "analyzed",
-            written: false,
+            written: true,
+            approved: true,
             advanced: true,
           });
           return env.BODIES.get(key);
@@ -648,14 +703,11 @@ describe("races, body versions and retries", () => {
       approved: false,
     });
     expect(jevCalls(t)).toBe(1);
-    expect(writeCalls(t)).toBe(2);
-    expect(await reviewRows(id)).toEqual([]);
+    expect(writeCalls(t)).toBe(1);
+    expect(await reviewRows(id)).toEqual([
+      { body_sha: SHA, decision: "approved", reviewer: "auto" },
+    ]);
     expect(await count("SELECT count(*) AS n FROM analyses")).toBe(1);
-    expect(await analysisRow(id)).toMatchObject({
-      selected: 1,
-      title_en: null,
-      summary_en: null,
-    });
   });
 
   it("a new body version is judged again: the ledger keys name the body", async () => {
