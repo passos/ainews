@@ -1,6 +1,10 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { generateEventEvidence } from "../../src/pipeline/evidence/build";
+import {
+  EVIDENCE_COMPLETE_SENTINEL,
+  generateEventEvidence,
+} from "../../src/pipeline/evidence/build";
+import { MAX_BODY_CHARS_PER_ARTICLE } from "../../src/pipeline/evidence/prompts";
 import { chunkMarkdownBody } from "../../src/pipeline/evidence/chunks";
 import { enqueueDueEvidence } from "../../src/pipeline/evidence/schedule";
 import {
@@ -625,6 +629,54 @@ describe("Evidence Chunks & Quote Verification", () => {
     const elapsedPerf = Date.now() - startPerf;
     expect(perfRes.verified).toBe(false);
     expect(elapsedPerf).toBeLessThan(100);
+  });
+
+  it("verifyQuoteInBody rejects quotes followed by post-negation or dispute predicates", () => {
+    // 1. Post-negation: "is not supported"
+    const trialBody =
+      "The claim that the treatment is effective is not supported by the trial results.";
+    expect(
+      verifyQuoteInBody(trialBody, "the treatment is effective").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        trialBody,
+        "The claim that the treatment is effective is not supported by the trial results.",
+      ).verified,
+    ).toBe(true);
+
+    // 2. Post-negation: "was denied"
+    const auditBody =
+      "The claim that the company is profitable was denied by auditors in the formal filing.";
+    expect(
+      verifyQuoteInBody(auditBody, "the company is profitable").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        auditBody,
+        "The claim that the company is profitable was denied by auditors in the formal filing.",
+      ).verified,
+    ).toBe(true);
+
+    // 3. Post-negation: "remains unproven"
+    const reportBody =
+      "The hypothesis that rates would fall remains unproven according to the latest central bank report.";
+    expect(verifyQuoteInBody(reportBody, "rates would fall").verified).toBe(
+      false,
+    );
+
+    // 4. Contrastive clause: post-negation in subsequent clause should NOT invalidate preceding clause
+    const contrastBody =
+      "The treatment is effective, but it did not cure all patients in the cohort.";
+    expect(
+      verifyQuoteInBody(contrastBody, "The treatment is effective").verified,
+    ).toBe(true);
+
+    const contrastBody2 =
+      "The company asserted that sales would double; however, analysts were skeptical.";
+    expect(
+      verifyQuoteInBody(contrastBody2, "sales would double").verified,
+    ).toBe(true);
   });
 
   it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
@@ -2524,5 +2576,187 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
 
     expect(storedClaim).toBeDefined();
     expect(storedClaim?.status).toBe("pending_review");
+  });
+
+  it("generateEventEvidence marks claims unverified and pending_review and omits completion sentinel when article body is truncated", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('trunc-ind', 'Trunc Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://trunc/feed', 'trunc.com', 'Trunc Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const bodyText =
+      "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, body_truncated, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://trunc.com/a1', 'https://trunc.com/a1', 'Trunc Article', 'Summary', 'shaTrunc', 1, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTrunc', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Trunc Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaTrunc.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    const transport = makeFakeTransport(async () => ({
+      claims: [
+        {
+          claimText:
+            "Total investment reached $300 million this year for semiconductor manufacturing.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote:
+                "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.",
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+
+    expect(res.status).toBe("generated");
+
+    const claim = await env.DB.prepare(
+      "SELECT consensus_status, status FROM claims WHERE event_id = ?1 AND claim_text NOT LIKE '[%]'",
+    )
+      .bind(event!.id)
+      .first<{ consensus_status: string; status: string }>();
+
+    expect(claim).toBeDefined();
+    expect(claim?.consensus_status).toBe("unverified");
+    expect(claim?.status).toBe("pending_review");
+
+    // Sentinel must NOT be inserted when inspection is incomplete
+    const sentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, EVIDENCE_COMPLETE_SENTINEL)
+      .first<{ id: number }>();
+
+    expect(sentinel).toBeNull();
+  });
+
+  it("generateEventEvidence marks claims unverified and pending_review and omits completion sentinel when article body exceeds MAX_BODY_CHARS_PER_ARTICLE", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('long-ind', 'Long Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://long/feed', 'long.com', 'Long Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const quoteText =
+      "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.";
+    // Create a body exceeding MAX_BODY_CHARS_PER_ARTICLE (50,000)
+    const padding = "A".repeat(MAX_BODY_CHARS_PER_ARTICLE + 500);
+    const bodyText = `${quoteText}\n\n${padding}`;
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, body_truncated, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://long.com/a1', 'https://long.com/a1', 'Long Article', 'Summary', 'shaLong', 0, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaLong', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Long Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaLong.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    const transport = makeFakeTransport(async () => ({
+      claims: [
+        {
+          claimText:
+            "Total investment reached $300 million this year for semiconductor manufacturing.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote: quoteText,
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+
+    expect(res.status).toBe("generated");
+
+    const claim = await env.DB.prepare(
+      "SELECT consensus_status, status FROM claims WHERE event_id = ?1 AND claim_text NOT LIKE '[%]'",
+    )
+      .bind(event!.id)
+      .first<{ consensus_status: string; status: string }>();
+
+    expect(claim).toBeDefined();
+    expect(claim?.consensus_status).toBe("unverified");
+    expect(claim?.status).toBe("pending_review");
+
+    const sentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, EVIDENCE_COMPLETE_SENTINEL)
+      .first<{ id: number }>();
+
+    expect(sentinel).toBeNull();
   });
 });

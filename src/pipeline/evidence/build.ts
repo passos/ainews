@@ -11,6 +11,7 @@ import { indexArticleChunks, sha256Hex } from "./chunks";
 import {
   buildClaimsExtractionRequest,
   CLAIMS_PROMPT_VERSION,
+  MAX_BODY_CHARS_PER_ARTICLE,
   parseClaimsOutput,
   type ArticleEvidenceInput,
   type EventEvidenceInput,
@@ -62,6 +63,7 @@ interface ApprovedArticleRow {
   title: string;
   summary: string | null;
   body_sha: string;
+  body_truncated: number;
   source_name: string;
   source_domain: string;
 }
@@ -144,6 +146,7 @@ export async function generateEventEvidence(
              COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
              COALESCE(NULLIF(a.summary_override, ''), NULLIF(an.summary_en, ''), a.summary) AS summary,
              a.body_sha,
+             a.body_truncated,
              COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
              s.site_domain AS source_domain
            FROM event_articles ea
@@ -261,6 +264,7 @@ export async function generateEventEvidence(
       sourceDomain: a.source_domain,
       bodySha: a.body_sha,
       isPrimarySource: isPrimarySourceDomain(a.source_domain, primaryDomains),
+      bodyTruncated: a.body_truncated === 1,
       bodyText,
     });
   }
@@ -288,6 +292,10 @@ export async function generateEventEvidence(
     disclaimer: event.industry_disclaimer,
     articles: articleInputs,
   };
+
+  const hasIncompleteInspection = material.articles.some(
+    (a) => a.bodyTruncated || a.bodyText.length > MAX_BODY_CHARS_PER_ARTICLE,
+  );
 
   const inputPayload = JSON.stringify({
     eventId,
@@ -537,11 +545,13 @@ export async function generateEventEvidence(
 
     const hasUnresolvedDispute =
       hasSnapshotDispute ||
+      hasIncompleteInspection ||
       verifiedCitations.some((c) => !c.verified && c.stance === "dispute");
 
-    const consensusStatus = hasSnapshotDispute
-      ? "unverified"
-      : evaluateClaimConsensus(verifiedCitations);
+    const consensusStatus =
+      hasSnapshotDispute || hasIncompleteInspection
+        ? "unverified"
+        : evaluateClaimConsensus(verifiedCitations);
 
     const primarySourcePreferred = verifiedCitations.some(
       (c) => c.verified && c.isPrimarySource,
@@ -643,8 +653,8 @@ export async function generateEventEvidence(
     }
   }
 
-  // 5. Mark completion of the evidence batch
-  if (mergedClaimsMap.size > 0) {
+  // 5. Mark completion of the evidence batch (only when inspection was complete)
+  if (mergedClaimsMap.size > 0 && !hasIncompleteInspection) {
     batchStatements.push(
       deps.db
         .prepare(

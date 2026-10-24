@@ -4,6 +4,8 @@ import { CLAIM_TYPES, EVIDENCE_STANCES } from "../../lib/evidence/types";
 
 export const CLAIMS_PROMPT_VERSION = "claims:v1";
 
+export const MAX_BODY_CHARS_PER_ARTICLE = 50000;
+
 const WRITE_THINKING = { thinkingLevel: "low" as const };
 
 export interface ArticleEvidenceInput {
@@ -13,6 +15,7 @@ export interface ArticleEvidenceInput {
   sourceDomain: string;
   bodySha: string;
   isPrimarySource: boolean;
+  bodyTruncated?: boolean;
   bodyText: string;
 }
 
@@ -97,7 +100,10 @@ export function buildClaimsExtractionRequest(
       `Source: ${a.sourceName} (${a.sourceDomain})${a.isPrimarySource ? " [PRIMARY SOURCE]" : ""}`,
       `Title: ${a.title}`,
       "Body:",
-      a.bodyText.slice(0, 4000), // Adequate window for claim extraction
+      a.bodyText.length > MAX_BODY_CHARS_PER_ARTICLE
+        ? a.bodyText.slice(0, MAX_BODY_CHARS_PER_ARTICLE) +
+          "\n...[text truncated]..."
+        : a.bodyText,
     ].join("\n");
   });
 

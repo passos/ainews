@@ -465,6 +465,15 @@ function findSentenceStart(text: string, cleanIdx: number): number {
   return 0;
 }
 
+function findSentenceEnd(text: string, fromIndex: number): number {
+  for (let i = fromIndex; i < text.length; i++) {
+    if (isSentenceBoundary(text, i)) {
+      return i;
+    }
+  }
+  return text.length;
+}
+
 /**
  * Verifies that a quoted passage actually appears in the original markdown body.
  * Enforces minimum length of 15 characters and word boundary safety.
@@ -588,6 +597,30 @@ export function verifyQuoteInBody(
     return negationRegex.test(quoteClausePrefix);
   }
 
+  function hasDroppedPostNegation(
+    cleanIdx: number,
+    quoteLength: number,
+  ): boolean {
+    const cleanEnd = cleanIdx + quoteLength;
+    const sentenceEnd = findSentenceEnd(bodyClean, cleanEnd);
+    const sentenceSuffix = bodyClean.slice(cleanEnd, sentenceEnd);
+
+    // If there is a contrasting clause boundary in the suffix (e.g. ", but"),
+    // the post-negation only applies if it occurs before that boundary.
+    const clauseBoundaryRegex =
+      /(?:;|[,;—]\s*(?:but|yet|whereas)\b|\bbut\s+(?:it|they|he|she|we|the|this|that)\b)/gi;
+    const boundaryMatch = clauseBoundaryRegex.exec(sentenceSuffix);
+    const quoteClauseSuffix =
+      boundaryMatch !== null
+        ? sentenceSuffix.slice(0, boundaryMatch.index)
+        : sentenceSuffix;
+
+    const postNegationRegex =
+      /(?:\b(?:is|are|was|were|has\s+been|have\s+been|could\s+be|would\s+be|can\s+be)\s+(?:not|unlikely|unproven|unfounded|baseless|false|untrue|incorrect|refuted|debunked|denied|rejected|dismissed|disputed|unsupported)\b|\b(?:isn['’]t|wasn['’]t|aren['’]t|weren['’]t|hasn['’]t|haven['’]t)\b|\b(?:remains?\s+unproven|remains?\s+unclear|remains?\s+unsupported|remains?\s+disputed)\b|\b(?:was|were|is|are|been)\s+(?:denied|refuted|debunked|rejected|dismissed|disputed)\b|\b(?:fails\s+to|failed\s+to|lacks\s+evidence|lacks\s+support|has\s+no\s+basis|have\s+no\s+basis)\b)/i;
+
+    return postNegationRegex.test(quoteClauseSuffix);
+  }
+
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness
   const {
     cleanText: bodyClean,
@@ -620,7 +653,8 @@ export function verifyQuoteInBody(
       !isWordChar(charBefore) &&
       !isWordChar(charAfter) &&
       isValidNumericBoundary(cleanIndex, charBefore, charAfter) &&
-      !hasDroppedNegation(cleanIndex)
+      !hasDroppedNegation(cleanIndex) &&
+      !hasDroppedPostNegation(cleanIndex, quoteClean.length)
     ) {
       const startOffset = origStarts[cleanIndex];
       const endOffset = origEnds[cleanIndex + quoteClean.length - 1];
