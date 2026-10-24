@@ -341,9 +341,6 @@ export async function generateEventEvidence(
 
   // 5. Parse output and verify quotes
   const parsed = parseClaimsOutput(res.text);
-  const isFinance = event.industry_slug === FINANCE_SLUG;
-  const isAuto = !isFinance && event.industry_publish_mode === "auto";
-  const initialStatus = isAuto ? "published" : "pending_review";
   const now = deps.now();
 
   // If output failed to parse, fail as recoverable skipped (do not write sentinel)
@@ -546,12 +543,29 @@ export async function generateEventEvidence(
           `INSERT INTO claims (
              event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
            )
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
-           WHERE (SELECT revision FROM events WHERE id = ?1) = ?7
+           SELECT
+             e.id,
+             ?2,
+             ?3,
+             ?4,
+             ?5,
+             CASE
+               WHEN i.slug = '${FINANCE_SLUG}' THEN 'pending_review'
+               WHEN i.publish_mode = 'auto' THEN 'published'
+               ELSE 'pending_review'
+             END,
+             ?6,
+             ?7,
+             ?8,
+             ?9
+           FROM events e
+           JOIN industries i ON i.id = e.industry_id
+           WHERE e.id = ?1
+             AND e.revision = ?6
              AND NOT EXISTS (
                SELECT 1 FROM claims
                WHERE event_id = ?1
-                 AND input_revision = ?7
+                 AND input_revision = ?6
                  AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
@@ -562,7 +576,6 @@ export async function generateEventEvidence(
           rawClaim.claimType,
           consensusStatus,
           primarySourcePreferred ? 1 : 0,
-          initialStatus,
           inputRevision,
           CLAIMS_PROMPT_VERSION,
           modelName,
@@ -661,13 +674,6 @@ export async function generateEventEvidence(
     (acc, idx) => acc + (batchResults[idx]?.meta.changes ?? 0),
     0,
   );
-
-  return {
-    status: "generated",
-    eventId,
-    claimsCount: totalClaims,
-    citationsCount: totalCitations,
-  };
 
   return {
     status: "generated",

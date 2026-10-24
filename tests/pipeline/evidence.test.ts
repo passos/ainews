@@ -70,7 +70,7 @@ function makeFakeTransport(
           data: texts.map(() => [0.1, 0.2, 0.3]),
         };
       }
-      const resp = responder(model, input);
+      const resp = await responder(model, input);
       const text = typeof resp === "string" ? resp : JSON.stringify(resp);
       return {
         candidates: [
@@ -361,6 +361,44 @@ describe("Evidence Chunks & Quote Verification", () => {
     expect(namedBody.slice(namedRes.startOffset, namedRes.endOffset)).toBe(
       "Reported operating result &mdash;",
     );
+  });
+
+  it("verifyQuoteInBody enforces numeric boundary and rejects stripped signs, decimals, or suffixes", () => {
+    const decBody = "The company reported 0.15 million dollars in revenue.";
+    expect(
+      verifyQuoteInBody(decBody, "15 million dollars in revenue.").verified,
+    ).toBe(false);
+
+    const negBody = "The division had -15 million dollars in revenue.";
+    expect(
+      verifyQuoteInBody(negBody, "15 million dollars in revenue.").verified,
+    ).toBe(false);
+
+    const unicodeNegBody = "The division had −15 million dollars in revenue.";
+    expect(
+      verifyQuoteInBody(unicodeNegBody, "15 million dollars in revenue.")
+        .verified,
+    ).toBe(false);
+
+    const normalBody = "The company reported 15 million dollars in revenue.";
+    expect(
+      verifyQuoteInBody(normalBody, "15 million dollars in revenue.").verified,
+    ).toBe(true);
+
+    const trailDecBody = "Profit reached 15.75 million dollars this year.";
+    expect(verifyQuoteInBody(trailDecBody, "Profit reached 15").verified).toBe(
+      false,
+    );
+
+    const percentBody =
+      "Customer growth accelerated by 15% across all regions.";
+    expect(
+      verifyQuoteInBody(percentBody, "growth accelerated by 15").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(percentBody, "growth accelerated by 15% across all")
+        .verified,
+    ).toBe(true);
   });
 
   it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
@@ -1973,5 +2011,95 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
       .run();
     const view2 = await getEventEvidence(getDb(env.DB), event!.id);
     expect(view2.claims).toHaveLength(0);
+  });
+
+  it("dynamically evaluates industry publish_mode at commit time and marks claims pending_review if mode changed to review", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('dyn-mode-ind', 'Dynamic Mode', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://dyn/feed', 'dyn.com', 'Dyn Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const bodyText =
+      "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://dyn.com/a1', 'https://dyn.com/a1', 'Dyn Article', 'Summary', 'shaDyn', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaDyn', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Dyn Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaDyn.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    // Transport that simulates an admin switching publish_mode from 'auto' to 'review' during model inference
+    const transport = makeFakeTransport(async () => {
+      await env.DB.prepare(
+        "UPDATE industries SET publish_mode = 'review' WHERE id = ?1",
+      )
+        .bind(ind!.id)
+        .run();
+
+      return {
+        claims: [
+          {
+            claimText:
+              "Total investment reached $300 million this year for semiconductor manufacturing.",
+            claimType: "fact",
+            citations: [
+              {
+                articleId: art!.id,
+                quote:
+                  "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.",
+                stance: "support",
+              },
+            ],
+          },
+        ],
+      };
+    });
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+
+    expect(res.status).toBe("generated");
+
+    // The claim MUST be pending_review because publish_mode was switched to review before commit
+    const storedClaim = await env.DB.prepare(
+      "SELECT status FROM claims WHERE event_id = ?1 AND claim_text NOT LIKE '[%]'",
+    )
+      .bind(event!.id)
+      .first<{ status: string }>();
+
+    expect(storedClaim).toBeDefined();
+    expect(storedClaim?.status).toBe("pending_review");
   });
 });

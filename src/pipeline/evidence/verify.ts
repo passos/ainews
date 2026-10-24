@@ -343,6 +343,49 @@ export function verifyQuoteInBody(
 
   const isWordChar = (c: string) => /[\p{L}\p{N}_]/u.test(c);
 
+  function isValidNumericBoundary(
+    cleanIdx: number,
+    charB: string,
+    charA: string,
+  ): boolean {
+    const quoteStartsDigit = /^[\p{N}]/u.test(quoteClean);
+    const quoteEndsDigit = /[\p{N}]$/u.test(quoteClean);
+
+    if (quoteStartsDigit) {
+      // Cannot be preceded by minus/plus signs (negation or sign clipping: -15, +15, −15, ±15)
+      if (/^[-+−±]$/u.test(charB)) {
+        return false;
+      }
+      // Cannot be preceded by decimal point or thousands separator (.15, 0.15, 1,015)
+      if (charB === "." || charB === ",") {
+        return false;
+      }
+    }
+
+    // If quote starts with an explicit sign and digit (e.g. -15), cannot be preceded by another sign
+    const quoteStartsSign = /^[-+−±][\p{N}]/u.test(quoteClean);
+    if (quoteStartsSign && /^[-+−±]$/u.test(charB)) {
+      return false;
+    }
+
+    if (quoteEndsDigit) {
+      // Cannot be followed by decimal/thousands separator leading to more digits (15.5, 15,000)
+      if (charA === "." || charA === ",") {
+        const nextIdx = cleanIdx + quoteClean.length;
+        const nextChar = bodyClean.slice(nextIdx + 1, nextIdx + 2);
+        if (/^[\p{N}]$/u.test(nextChar)) {
+          return false;
+        }
+      }
+      // Cannot cut off percent/permille signs (15% -> 15)
+      if (charA === "%" || charA === "‰") {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness
   const {
     cleanText: bodyClean,
@@ -364,7 +407,11 @@ export function verifyQuoteInBody(
     const afterSlice = bodyClean.slice(endClean, endClean + 2);
     const charAfter = Array.from(afterSlice)[0] ?? " ";
 
-    if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
+    if (
+      !isWordChar(charBefore) &&
+      !isWordChar(charAfter) &&
+      isValidNumericBoundary(cleanIndex, charBefore, charAfter)
+    ) {
       const startOffset = origStarts[cleanIndex];
       const endOffset = origEnds[cleanIndex + quoteClean.length - 1];
 
