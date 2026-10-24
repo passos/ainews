@@ -5,8 +5,13 @@
 export const AUDIENCES = ["student", "educator", "professional"] as const;
 export type Audience = (typeof AUDIENCES)[number];
 
+export const THEMES = ["light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+
 export interface ReaderPrefs {
   audience?: Audience;
+  /** Missing means light: the site does not follow the system setting. */
+  theme?: Theme;
   /** Section slugs the reader follows. */
   sections?: string[];
   [unknown: string]: unknown;
@@ -16,6 +21,10 @@ export const PREFS_KEY = "pn:prefs:v1";
 
 export function isAudience(value: unknown): value is Audience {
   return AUDIENCES.includes(value as Audience);
+}
+
+export function isTheme(value: unknown): value is Theme {
+  return THEMES.includes(value as Theme);
 }
 
 /** Invalid JSON, a non-object, or an invalid field means "no preference". */
@@ -32,6 +41,7 @@ export function parsePrefs(raw: string | null): ReaderPrefs {
   }
   const prefs: ReaderPrefs = { ...(value as Record<string, unknown>) };
   if (!isAudience(prefs.audience)) delete prefs.audience;
+  if (!isTheme(prefs.theme)) delete prefs.theme;
   if (
     !Array.isArray(prefs.sections) ||
     !prefs.sections.every((s) => typeof s === "string")
@@ -47,6 +57,10 @@ export function serializePrefs(prefs: ReaderPrefs): string {
 
 export function withAudience(prefs: ReaderPrefs, audience: Audience) {
   return { ...prefs, audience };
+}
+
+export function withTheme(prefs: ReaderPrefs, theme: Theme): ReaderPrefs {
+  return { ...prefs, theme };
 }
 
 export function toggleSection(prefs: ReaderPrefs, slug: string): ReaderPrefs {

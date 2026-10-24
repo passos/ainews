@@ -4,6 +4,7 @@ import {
   serializePrefs,
   toggleSection,
   withAudience,
+  withTheme,
 } from "../src/lib/reader-prefs";
 
 describe("parsePrefs", () => {
@@ -33,6 +34,20 @@ describe("parsePrefs", () => {
     }
   });
 
+  it("keeps a known theme", () => {
+    for (const t of ["light", "dark"]) {
+      expect(parsePrefs(JSON.stringify({ theme: t }))).toEqual({ theme: t });
+    }
+  });
+
+  it("drops an invalid theme and keeps the rest", () => {
+    for (const bad of ['"blue"', "1", "null", '"Dark"']) {
+      expect(parsePrefs(`{"theme":${bad},"audience":"student","x":1}`)).toEqual(
+        { audience: "student", x: 1 },
+      );
+    }
+  });
+
   it("drops sections that are not an array of strings", () => {
     expect(parsePrefs('{"sections":"finance"}')).toEqual({});
     expect(parsePrefs('{"sections":["finance",3]}')).toEqual({});
@@ -56,6 +71,16 @@ describe("updates", () => {
       audience: "educator",
       watches: [1],
       sections: ["finance"],
+    });
+  });
+
+  it("withTheme keeps unknown fields", () => {
+    const next = JSON.parse(serializePrefs(withTheme(parsePrefs(raw), "dark")));
+    expect(next).toEqual({
+      audience: "student",
+      watches: [1],
+      sections: ["finance"],
+      theme: "dark",
     });
   });
 
