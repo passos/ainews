@@ -167,7 +167,7 @@ describe("Evidence Chunks & Quote Verification", () => {
     const text =
       "See ![photo](https://example.com/p.png) and [read doc](https://example.com) for *crucial* **updates**.";
     const { cleanText, origIndices } = cleanMarkdownWithMap(text);
-    expect(cleanText).toBe("See photo and read doc for crucial updates .");
+    expect(cleanText).toBe("See photo and read doc for crucial updates.");
     expect(origIndices.length).toBe(cleanText.length);
     // Verify mapped characters
     const docIdx = cleanText.indexOf("read doc");
@@ -203,6 +203,19 @@ describe("Evidence Chunks & Quote Verification", () => {
     expect(res.verified).toBe(false);
   });
 
+  it("verifyQuoteInBody rejects partial quote with bold formatting across word prefix", () => {
+    const body =
+      "This material is un[**safe for human use**](https://example.com) in food preparation.";
+    const badQuote = "safe for human use";
+    expect(verifyQuoteInBody(body, badQuote).verified).toBe(false);
+
+    const astralBody =
+      "The initial funding round was 𝟙**15 million in capital**.";
+    expect(
+      verifyQuoteInBody(astralBody, "15 million in capital").verified,
+    ).toBe(false);
+  });
+
   it("verifyQuoteInBody handles massive unclosed brackets linearly without quadratic re-scan", () => {
     const body =
       "[".repeat(100000) + " The company reported record revenue in Q4.";
@@ -212,6 +225,18 @@ describe("Evidence Chunks & Quote Verification", () => {
     const elapsed = Date.now() - t0;
     expect(res.verified).toBe(true);
     expect(elapsed).toBeLessThan(1000); // Must be linear, well under 1 second
+
+    // Quadratic trap scenario: repeated '[' followed by shared '](' without ')'
+    const quadraticTrap =
+      "[".repeat(100000) +
+      "](" +
+      "x".repeat(100000) +
+      " The company reported record revenue in Q4.";
+    const t2 = Date.now();
+    const res2 = verifyQuoteInBody(quadraticTrap, quote);
+    const elapsed2 = Date.now() - t2;
+    expect(res2.verified).toBe(true);
+    expect(elapsed2).toBeLessThan(1000);
   });
 
   it("verifyQuoteInBody preserves literal symbols like C# and distinguishes from other words", () => {
@@ -226,6 +251,24 @@ describe("Evidence Chunks & Quote Verification", () => {
     expect(body.slice(res.startOffset, res.endOffset)).toBe(
       "The C# language is memory-safe.",
     );
+  });
+
+  it("verifyQuoteInBody preserves isolated underscores and identifier underscores", () => {
+    const body =
+      "The measured value is _ units per second in function foo__bar().";
+    const res = verifyQuoteInBody(
+      body,
+      "The measured value is _ units per second in function foo__bar().",
+    );
+    expect(res.verified).toBe(true);
+
+    // Dropped underscore quote must be rejected
+    expect(
+      verifyQuoteInBody(
+        body,
+        "The measured value is units per second in function foo bar().",
+      ).verified,
+    ).toBe(false);
   });
 
   it("verifyQuoteInBody respects Unicode code point boundaries including astral plane characters", () => {
