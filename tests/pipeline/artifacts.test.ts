@@ -1,0 +1,915 @@
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vitest";
+import { generateEventArtifacts } from "../../src/pipeline/artifacts/build";
+import { enqueueDueArtifacts } from "../../src/pipeline/artifacts/schedule";
+import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
+import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
+import type { ModelTransport } from "../../src/providers/transport";
+
+class FakeQueue {
+  sent: GenerateMessage[] = [];
+  async send(msg: GenerateMessage) {
+    this.sent.push(msg);
+  }
+  async sendBatch(msgs: Iterable<{ body: GenerateMessage }>) {
+    this.sent.push(...Array.from(msgs).map((m) => m.body));
+  }
+}
+
+function makeFakeTransport(
+  responder: (model: string, input: unknown) => unknown,
+): ModelTransport {
+  return {
+    run: async (model, input) => {
+      const resp = responder(model, input);
+      return {
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                {
+                  text: typeof resp === "string" ? resp : JSON.stringify(resp),
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: {
+          promptTokenCount: 50,
+          candidatesTokenCount: 100,
+          totalTokenCount: 150,
+        },
+      };
+    },
+  };
+}
+
+async function ensureBudget(day = "2026-10-24") {
+  await env.DB.prepare(
+    `INSERT INTO budgets (day, channel, cap_micros, reserved_micros, spent_micros)
+     VALUES (?1, 'gateway', 10000000, 0, 0)
+     ON CONFLICT (day, channel) DO UPDATE SET cap_micros = 10000000`,
+  )
+    .bind(day)
+    .run();
+}
+
+const testEnv: PipelineEnv = {
+  ...env,
+  MODEL_CALLS_ENABLED: "true",
+};
+
+describe("generateEventArtifacts", () => {
+  it("skips generation when an event has no approved articles", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('art-skip-ind', 'Skip Ind', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Empty Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    let modelCalled = false;
+    const transport: ModelTransport = {
+      run: async () => {
+        modelCalled = true;
+        return { text: "{}", usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+    };
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("skipped");
+    expect(res.reason).toBe("no_approved_articles");
+    expect(modelCalled).toBe(false);
+  });
+
+  it("generates Story Brief for standard event (score >= select but < deep)", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 60 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 75,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('tech-brief-only', 'Tech Brief', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech/feed', 'tech.io', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech/art-1', 'https://tech/art-1', 'Quantum Breakthrough', 'Summary of breakthrough', 'shaQuantum', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    // Approve the article
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaQuantum', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // Analysis score 65 (>= select 60, but < deepThreshold 75)
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'product_launch', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Quantum Breakthrough Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    let callsMade = 0;
+    const transport = makeFakeTransport((_model, _input) => {
+      callsMade++;
+      return {
+        whatHappened: "A new quantum circuit was verified.",
+        whatIsNew: "Two-qubit gate fidelity reached 99.9%.",
+        whatEvidenceExists: "Published benchmark tests on 50 samples.",
+        whatToWatchNext: "Scaling to 100 qubits next quarter.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    expect(res.generatedCount).toBe(1); // Story Brief only
+    expect(callsMade).toBe(1);
+
+    // Verify row in event_artifacts
+    const rows = await env.DB.prepare(
+      "SELECT type, audience, input_revision, status, content FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{
+        type: string;
+        audience: string;
+        input_revision: number;
+        status: string;
+        content: string;
+      }>();
+
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0].type).toBe("story_brief");
+    expect(rows.results[0].audience).toBe("");
+    expect(rows.results[0].input_revision).toBe(1);
+    expect(rows.results[0].status).toBe("published"); // auto publish mode
+    const brief = JSON.parse(rows.results[0].content);
+    expect(brief.whatHappened).toBe("A new quantum circuit was verified.");
+  });
+
+  it("generates Story Brief and three-tier Explain for deep event (score >= deepThreshold)", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 70,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('edu-deep', 'Education Deep', 'review', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://edu/feed', 'edureview.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://edu/art-1', 'https://edu/art-1', 'AI in K12 Math Study', 'Large study on AI tutoring', 'shaEduMath', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEduMath', 'approved', 'reviewer@ioenv.com', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // High score 85 (>= 70)
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'research_study', '[]', 85, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'AI in K12 Math Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (inputStr.includes("Story Brief")) {
+        return {
+          whatHappened: "A nationwide K-12 math study was released.",
+          whatIsNew: "First double-blind evaluation of generative tutors.",
+          whatEvidenceExists: "Tested on 10,000 students over 12 months.",
+          whatToWatchNext: "District adoption votes in autumn.",
+        };
+      }
+      // Audience Explain
+      if (inputStr.includes("STUDENT")) {
+        return {
+          audience: "student",
+          overview: "Math tutors can now help you practice step by step.",
+          keyPoints: ["Explains formulas simply", "Gives practice hints"],
+          implications: ["Better algebra understanding"],
+          glossary: [
+            {
+              term: "Adaptive tutor",
+              definition:
+                "A program that adjusts difficulty to your learning pace",
+            },
+          ],
+        };
+      }
+      if (inputStr.includes("EDUCATOR")) {
+        return {
+          audience: "educator",
+          overview:
+            "Study shows effective integration with classroom instruction.",
+          keyPoints: [
+            "Frees up teacher time for 1-on-1 coaching",
+            "Identifies misconception clusters",
+          ],
+          implications: ["Curriculum mapping needed"],
+          glossary: [
+            {
+              term: "Formative diagnostic",
+              definition:
+                "Quick checks to see if students understand a concept",
+            },
+          ],
+        };
+      }
+      // Professional
+      return {
+        audience: "professional",
+        overview: "Rigorous longitudinal data on adaptive tutoring efficacy.",
+        keyPoints: [
+          "Effect size d=0.34 over baseline",
+          "Reduced teacher grading load by 22%",
+        ],
+        implications: [
+          "EdTech procurement standards will likely adopt these benchmarks",
+        ],
+        glossary: [
+          {
+            term: "Effect size",
+            definition:
+              "A statistical measurement of the strength of a relationship",
+          },
+        ],
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // 1 Brief + 3 Audience Explains = 4 artifacts
+    expect(res.generatedCount).toBe(4);
+
+    const rows = await env.DB.prepare(
+      "SELECT type, audience, status FROM event_artifacts WHERE event_id = ?1 ORDER BY type, audience",
+    )
+      .bind(event!.id)
+      .all<{ type: string; audience: string; status: string }>();
+
+    expect(rows.results).toHaveLength(4);
+    // Review mode industry -> initial status is pending_review
+    expect(rows.results.every((r) => r.status === "pending_review")).toBe(true);
+
+    const audiences = rows.results
+      .filter((r) => r.type === "audience_explain")
+      .map((r) => r.audience);
+    expect(audiences).toEqual(["educator", "professional", "student"]);
+  });
+
+  it("generates Research Paper Decoder for arXiv research paper events", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          research_paper: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 60,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('tech-arxiv', 'Tech Arxiv', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://arxiv/feed', 'arxiv.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://arxiv.org/abs/2610.12345', 'https://arxiv.org/abs/2610.12345', 'Sparse Attention Bounds', 'Paper abstract', 'shaArxiv', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaArxiv', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'research_paper', '["paper_preprint"]', 88, 0.95, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Sparse Attention Paper Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (inputStr.includes("Story Brief")) {
+        return {
+          whatHappened: "Researchers proved linear attention bounds.",
+          whatIsNew: "First tight mathematical bound for sparse attention.",
+          whatEvidenceExists: "Theorem 1 and empirical validation on Wikitext.",
+          whatToWatchNext: "Hardware acceleration implementations.",
+        };
+      }
+      if (inputStr.includes("Research Paper Decoder")) {
+        return {
+          hypothesis:
+            "Can quadratic attention be replaced with O(N) sparse patterns without quality degradation?",
+          method: "Dynamic block-sparse attention mask with learned routing.",
+          findings:
+            "Matches dense attention perplexity within 0.05 while cutting latency by 4x.",
+          limitations:
+            "Tested only up to 64k context lengths; requires custom CUDA kernels.",
+          applications: "Long-document reasoning and code synthesis agents.",
+        };
+      }
+      // Audience explain
+      return {
+        audience: "student",
+        overview: "A new math technique makes AI remember longer documents.",
+        keyPoints: ["Attention is now faster"],
+        implications: ["Can read books in seconds"],
+        glossary: [
+          {
+            term: "Attention",
+            definition: "How models focus on relevant words",
+          },
+        ],
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // 1 Brief + 3 Explain + 1 Decoder = 5 artifacts
+    expect(res.generatedCount).toBe(5);
+
+    const decoderRow = await env.DB.prepare(
+      "SELECT type, status, content FROM event_artifacts WHERE event_id = ?1 AND type = 'research_paper_decoder'",
+    )
+      .bind(event!.id)
+      .first<{ type: string; status: string; content: string }>();
+
+    expect(decoderRow).toBeDefined();
+    expect(decoderRow?.status).toBe("published"); // auto mode
+    const dec = JSON.parse(decoderRow!.content);
+    expect(dec.hypothesis).toContain("quadratic attention");
+    expect(dec.method).toContain("block-sparse");
+  });
+
+  it("protects against revision race conditions (stale revision does not insert)", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 80,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('race-ind', 'Race Ind', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://race/feed', 'race.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://race/art-1', 'https://race/art-1', 'Race Story', 'Summary', 'shaRace', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaRace', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'ctype', '[]', 60, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Race Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    // Transport simulates a concurrent revision bump during LLM execution:
+    // revision moves from 1 to 2 while model is generating.
+    const transport = makeFakeTransport((_model, _input) => {
+      // Synchronously bump revision in DB to simulate concurrent review / retraction
+      env.DB.prepare("UPDATE events SET revision = 2 WHERE id = ?1")
+        .bind(event!.id)
+        .run();
+      return {
+        whatHappened:
+          "Stale brief that should be rejected by conditional insert.",
+        whatIsNew: "Should not land in DB.",
+        whatEvidenceExists: "None.",
+        whatToWatchNext: "None.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.generatedCount).toBe(0);
+
+    // Verify 0 rows inserted into event_artifacts
+    const rows = await env.DB.prepare(
+      "SELECT id FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all();
+    expect(rows.results).toHaveLength(0);
+  });
+
+  it("enforces Finance section guardrails (status is pending_review)", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 80,
+      },
+    });
+
+    // Finance section slug is 'finance'
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('finance', 'Finance', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://fin/feed', 'sec.gov', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://fin/art-1', 'https://fin/art-1', 'Bank AI Report', 'Summary', 'shaFin', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaFin', 'approved', 'compliance@ioenv.com', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'ctype', '[]', 55, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Finance Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      whatHappened: "Bank reported AI backtesting results.",
+      whatIsNew: "First reported deployment on commodities trading.",
+      whatEvidenceExists: "SEC 8-K filing item 2.02.",
+      whatToWatchNext: "Next quarterly audit.",
+    }));
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const row = await env.DB.prepare(
+      "SELECT status FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ status: string }>();
+
+    // Mandatory Finance review rule: status must be pending_review!
+    expect(row?.status).toBe("pending_review");
+  });
+
+  it("is idempotent: repeated invocation on same event and revision makes zero duplicate calls", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 80,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('idemp-ind', 'Idemp Ind', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://idemp/feed', 'idemp.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://idemp/art-1', 'https://idemp/art-1', 'Idemp Story', 'Summary', 'shaIdemp', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaIdemp', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'ctype', '[]', 55, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Idemp Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    let callCount = 0;
+    const transport = makeFakeTransport((_model, _input) => {
+      callCount++;
+      return {
+        whatHappened: "First brief.",
+        whatIsNew: "Novelty.",
+        whatEvidenceExists: "Evidence.",
+        whatToWatchNext: "Next steps.",
+      };
+    });
+
+    // Run 1: generates
+    const res1 = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res1.status).toBe("generated");
+    expect(callCount).toBe(1);
+
+    // Run 2: skips without model calls
+    const res2 = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res2.status).toBe("already_up_to_date");
+    expect(callCount).toBe(1);
+  });
+});
+
+describe("enqueueDueArtifacts & handleGenerateBatch", () => {
+  it("enqueues events with approved articles missing story_brief", async () => {
+    const queue = new FakeQueue();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('sched-art-ind', 'Sched Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://sched/feed', 'sched.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://sched/art-1', 'https://sched/art-1', 'Sched Story', 'Summary', 'shaSched', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaSched', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Sched Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const pipelineEnv = {
+      DB: env.DB,
+      Q_GENERATE: queue as unknown as Queue,
+    };
+
+    const enqueued = await enqueueDueArtifacts(pipelineEnv, 1000);
+    expect(enqueued).toContain(event!.id);
+    expect(queue.sent).toContainEqual({
+      kind: "artifacts",
+      eventId: event!.id,
+    });
+  });
+
+  it("handles artifacts message in handleGenerateBatch", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('batch-art-ind', 'Batch Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://batch/feed', 'batch.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://batch/art-1', 'https://batch/art-1', 'Batch Story', 'Summary', 'shaBatch', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaBatch', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Batch Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      whatHappened: "Batch brief happened.",
+      whatIsNew: "Batch novelty.",
+      whatEvidenceExists: "Batch evidence.",
+      whatToWatchNext: "Batch next.",
+    }));
+
+    let acked = false;
+    const msg: Message<GenerateMessage> = {
+      id: "msg-1",
+      timestamp: new Date(),
+      body: { kind: "artifacts", eventId: event!.id },
+      attempts: 1,
+      ack: () => {
+        acked = true;
+      },
+      retry: () => {},
+    };
+
+    const batch: MessageBatch<GenerateMessage> = {
+      queue: "ainews-generate",
+      messages: [msg],
+      metadata: {} as unknown as MessageBatchMetadata,
+      ackAll: () => {},
+      retryAll: () => {},
+    };
+
+    await handleGenerateBatch(batch, testEnv, { transport });
+    expect(acked).toBe(true);
+
+    const row = await env.DB.prepare(
+      "SELECT id FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ id: number }>();
+    expect(row).toBeDefined();
+  });
+});

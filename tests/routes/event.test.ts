@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { isNotFound } from "@tanstack/react-router";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadEvent } from "../../src/routes/e/$eventId";
@@ -96,5 +97,77 @@ describe("tests/routes/event.test.ts", () => {
 
     expect(caught).toBeDefined();
     expect(isNotFound(caught)).toBe(true);
+  });
+
+  it("loads published artifacts matching current revision and excludes pending or stale revisions", async () => {
+    const eventId = await seedEvent(
+      tech.industryId,
+      "Artifact Test Event",
+      2, // Current revision is 2
+    );
+
+    const art = await seedArticle({
+      ...tech,
+      title: "Art Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    // 1. Published artifact matching revision 2 (Story Brief)
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'story_brief', '', 2, 'pv1', 'gemini', '{"whatHappened":"Verified event","whatIsNew":"New milestone","whatEvidenceExists":"Bench test","whatToWatchNext":"Next quarter"}', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 2. Published artifact matching revision 2 (Audience Explain)
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'audience_explain', 'student', 2, 'pv1', 'gemini', '{"audience":"student","overview":"Simple explainer","keyPoints":["Point 1"],"implications":["Imp 1"],"glossary":[{"term":"T1","definition":"D1"}]}', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 3. Pending review artifact (should be excluded)
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'audience_explain', 'educator', 2, 'pv1', 'gemini', '{"audience":"educator","overview":"Pending","keyPoints":["Valid point"],"implications":["Valid imp"],"glossary":[]}', 'pending_review', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 4. Stale revision artifact matching revision 1 (should be excluded)
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'story_brief', '', 1, 'pv1', 'gemini', '{"whatHappened":"Old brief"}', 'published', 500)`,
+    )
+      .bind(eventId)
+      .run();
+
+    const result = await loadEvent(
+      { eventId: String(eventId) },
+      {
+        getEvent: (id) => getEvent(db(), id),
+        getEventSources: (id) => getEventSources(db(), id),
+      },
+    );
+
+    expect(result.data.artifacts).toBeDefined();
+    expect(result.data.artifacts.brief).toEqual({
+      whatHappened: "Verified event",
+      whatIsNew: "New milestone",
+      whatEvidenceExists: "Bench test",
+      whatToWatchNext: "Next quarter",
+    });
+    expect(result.data.artifacts.explanations.student).toBeDefined();
+    expect(result.data.artifacts.explanations.student?.overview).toBe(
+      "Simple explainer",
+    );
+    // Educator is pending_review -> must not be present
+    expect(result.data.artifacts.explanations.educator).toBeUndefined();
+    // Decoder was never generated -> null
+    expect(result.data.artifacts.decoder).toBeNull();
   });
 });

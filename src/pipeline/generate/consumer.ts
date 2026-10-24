@@ -3,6 +3,7 @@ import {
   bindingTransport,
   type ModelTransport,
 } from "../../providers/transport";
+import { generateEventArtifacts } from "../artifacts/build";
 import { buildDailyDigest } from "../digest/build";
 import type { GenerateMessage, PipelineEnv } from "../messages";
 
@@ -37,6 +38,9 @@ export async function handleGenerateBatch(
       switch (body.kind) {
         case "digest":
           await buildDailyDigest(env, body, Date.now(), deps);
+          break;
+        case "artifacts":
+          await generateEventArtifacts(env, body.eventId, Date.now(), deps);
           break;
         default:
           console.error({

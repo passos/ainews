@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminArtifactsRouteImport } from './routes/admin/artifacts'
 import { Route as AdminDigestsRouteImport } from './routes/admin/digests'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
@@ -40,6 +41,11 @@ const AdminRouteRoute = AdminRouteRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminArtifactsRoute = AdminArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminDigestsRoute = AdminDigestsRouteImport.update({
@@ -119,6 +125,7 @@ const RssDigestChar123sectionChar125DotxmlRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
@@ -137,6 +144,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
@@ -157,6 +165,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
@@ -178,6 +187,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/admin/artifacts'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
@@ -196,6 +206,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin/artifacts'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
@@ -215,6 +226,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/admin/artifacts'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/ledger'
@@ -263,6 +275,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/artifacts': {
+      id: '/admin/artifacts'
+      path: '/artifacts'
+      fullPath: '/admin/artifacts'
+      preLoaderRoute: typeof AdminArtifactsRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/digests': {
@@ -367,6 +386,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminRouteRouteChildren {
+  AdminArtifactsRoute: typeof AdminArtifactsRoute
   AdminDigestsRoute: typeof AdminDigestsRoute
   AdminDlqRoute: typeof AdminDlqRoute
   AdminLedgerRoute: typeof AdminLedgerRoute
@@ -380,6 +400,7 @@ interface AdminRouteRouteChildren {
 }
 
 const AdminRouteRouteChildren: AdminRouteRouteChildren = {
+  AdminArtifactsRoute: AdminArtifactsRoute,
   AdminDigestsRoute: AdminDigestsRoute,
   AdminDlqRoute: AdminDlqRoute,
   AdminLedgerRoute: AdminLedgerRoute,

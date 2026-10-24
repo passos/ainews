@@ -185,3 +185,23 @@ it("articles.stage accepts dropped and rejects unknown stages", async () => {
       .run(),
   ).rejects.toThrow(/CHECK/);
 });
+
+it("event_artifacts has status column defaulting to pending_review", async () => {
+  const { results: cols } = await env.DB.prepare(
+    "PRAGMA table_info(event_artifacts)",
+  ).all<{ name: string; dflt_value: string | null; notnull: number }>();
+  const statusCol = cols.find((c) => c.name === "status");
+  expect(statusCol).toBeDefined();
+  expect(statusCol?.notnull).toBe(1);
+  expect(statusCol?.dflt_value).toBe("'pending_review'");
+
+  const { results: idxs } = await env.DB.prepare(
+    "PRAGMA index_list(event_artifacts)",
+  ).all<{ name: string; unique: number }>();
+  expect(idxs).toContainEqual(
+    expect.objectContaining({
+      name: "event_artifacts_event_id_status_idx",
+      unique: 0,
+    }),
+  );
+});

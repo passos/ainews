@@ -1,0 +1,2 @@
+ALTER TABLE `event_artifacts` ADD `status` text DEFAULT 'pending_review' NOT NULL;--> statement-breakpoint
+CREATE INDEX `event_artifacts_event_id_status_idx` ON `event_artifacts` (`event_id`,`status`);
