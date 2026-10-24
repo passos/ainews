@@ -5,7 +5,12 @@ import {
   buildTextInput,
   parseTextOutput,
 } from "../../src/providers/adapters";
-import { anthropicResponse, googleResponse, openaiResponse } from "./fixtures";
+import {
+  anthropicResponse,
+  googleResponse,
+  googleWrappedResponse,
+  openaiResponse,
+} from "./fixtures";
 
 const REQUEST = { system: "sys", prompt: "hi", maxOutputTokens: 64 };
 
@@ -65,6 +70,46 @@ describe("text adapters", () => {
         usageMetadata: { thoughtsTokenCount: 94 },
       }),
     ).toThrow(/promptTokenCount/);
+  });
+
+  it("google: reads finishReason of the first candidate", () => {
+    const out = parseTextOutput("google/gemini-3.8-flash", googleResponse);
+    expect(out.finishReason).toBe("STOP");
+  });
+
+  it("google: a {state: Completed, result} envelope is parsed as its result", () => {
+    const out = parseTextOutput(
+      "google/gemini-3.8-flash",
+      googleWrappedResponse,
+    );
+    expect(out.text).toBe('{"title": "MIT researchers design a nuclear');
+    expect(out.usage).toEqual({ inputTokens: 3412, outputTokens: 78 + 1918 });
+    expect(out.finishReason).toBe("MAX_TOKENS");
+    expect(out.raw).toBe(googleWrappedResponse);
+  });
+
+  it("google: an envelope in another state throws and names the state", () => {
+    const running = { state: "Running", result: {} };
+    expect(() => parseTextOutput("google/gemini-3.8-flash", running)).toThrow(
+      ResponseParseError,
+    );
+    expect(() => parseTextOutput("google/gemini-3.8-flash", running)).toThrow(
+      /Running/,
+    );
+  });
+
+  it("google: thinkingConfig goes into generationConfig only when given", () => {
+    const thinkingConfig = { thinkingBudget: 128 };
+    const input = buildTextInput("google/gemini-3.8-flash", {
+      ...REQUEST,
+      thinkingConfig,
+    });
+    expect(input.generationConfig).toStrictEqual({
+      maxOutputTokens: 64,
+      thinkingConfig,
+    });
+    const plain = buildTextInput("google/gemini-3.8-flash", REQUEST);
+    expect(plain.generationConfig).toStrictEqual({ maxOutputTokens: 64 });
   });
 
   it("openai: chat completions", () => {

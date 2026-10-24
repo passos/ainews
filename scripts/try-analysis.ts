@@ -16,11 +16,9 @@
 // --dry-run reads no env file and makes no network call. It builds the Jev
 // input of every fixture, checks it against the official input schema
 // (tests/fixtures/jev/schema-input.json) and prints the size.
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Validator } from "@cfworker/json-schema";
-import { getPlatformProxy } from "wrangler";
-import { isEnabled } from "../src/lib/flags.ts";
 import { buildAnalysisRequest } from "../src/pipeline/analyze/questions.ts";
 import { labelValue } from "../src/pipeline/analyze/labels.ts";
 import { scoreAnalysis } from "../src/pipeline/analyze/score.ts";
@@ -33,50 +31,27 @@ import {
   estimateTokens,
   parseJevOutput,
 } from "../src/providers/jev.ts";
-import {
-  bindingTransport,
-  TransportHttpError,
-} from "../src/providers/transport.ts";
 import type { ModelTransport } from "../src/providers/transport.ts";
-import { SEED_INDUSTRIES } from "../src/server/db/seed/industries.ts";
-import { realFixture } from "../tests/fixtures/analysis/real-shape.ts";
 import type { RealFixture } from "../tests/fixtures/analysis/real-shape.ts";
+import {
+  describe,
+  envFileArg,
+  industryOf,
+  loadFixtures,
+  withBindingTransport,
+} from "./trial.ts";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
-const envFileAt = args.indexOf("--env-file");
-const envFile = envFileAt >= 0 ? args[envFileAt + 1] : ".env.prod";
-if (envFileAt >= 0 && !envFile) {
-  console.error("--env-file needs a path.");
-  process.exit(2);
-}
+const envFile = envFileArg(args);
 
-const CONFIG_PATH = fileURLToPath(
-  new URL("../wrangler.jsonc", import.meta.url),
-);
-const FIXTURES = fileURLToPath(
-  new URL("../tests/fixtures/analysis/real/", import.meta.url),
-);
 const SCHEMA = fileURLToPath(
   new URL("../tests/fixtures/jev/schema-input.json", import.meta.url),
 );
 
-function loadFixtures(): { file: string; fixture: RealFixture }[] {
-  return readdirSync(FIXTURES)
-    .filter((f) => f.endsWith(".json"))
-    .sort()
-    .map((file) => ({
-      file,
-      fixture: realFixture.parse(
-        JSON.parse(readFileSync(FIXTURES + file, "utf8")),
-      ),
-    }));
-}
-
 /** The request as sent: questions of the seeded industry + the fixture. */
 function build(fixture: RealFixture) {
-  const industry = SEED_INDUSTRIES.find((i) => i.slug === fixture.industry);
-  if (!industry) throw new Error(`unknown industry ${fixture.industry}`);
+  const industry = industryOf(fixture);
   const { state, questions } = buildAnalysisRequest(
     {
       title: fixture.title,
@@ -117,47 +92,8 @@ function dryRunAll(): number {
   return bad === 0 ? 0 : 1;
 }
 
-function describe(error: unknown): string {
-  if (error instanceof TransportHttpError) {
-    return `HTTP ${error.status}: ${error.body.slice(0, 500)}`;
-  }
-  return error instanceof Error
-    ? `${error.name}: ${error.message}`
-    : String(error);
-}
-
 const cell = (value: string) => value.replaceAll("|", "/").replace(/\s+/g, " ");
 const f1 = (n: number) => n.toFixed(1);
-
-async function runAll(): Promise<number> {
-  process.loadEnvFile(envFile);
-  if (!isEnabled(process.env, "MODEL_CALLS_ENABLED")) {
-    console.error("MODEL_CALLS_ENABLED must be true in the environment.");
-    return 2;
-  }
-  const need = (name: string): string => {
-    const value = process.env[name];
-    if (!value) {
-      console.error(`Missing environment variable ${name}.`);
-      process.exit(2);
-    }
-    return value;
-  };
-  need("CLOUDFLARE_API_TOKEN");
-  // The REST route returned 400 "No route for that URI" for typesafe/jev and
-  // google/gemini-3.8-flash (cause not investigated, see #39; maybe the route
-  // shape of gateway models). The trial uses the AI binding as production
-  // does (the same wiring as the binding path of scripts/smoke-models.ts).
-  const proxy = await getPlatformProxy<{ AI: Ai }>({
-    configPath: CONFIG_PATH,
-    persist: false,
-  });
-  try {
-    return await runWith(bindingTransport(proxy.env.AI, need("AI_GATEWAY_ID")));
-  } finally {
-    await proxy.dispose();
-  }
-}
 
 async function runWith(transport: ModelTransport): Promise<number> {
   const { model } = DEFAULT_SLOTS.judge;
@@ -241,4 +177,6 @@ async function runWith(transport: ModelTransport): Promise<number> {
   return failed === 0 ? 0 : 1;
 }
 
-process.exit(dryRun ? dryRunAll() : await runAll());
+process.exit(
+  dryRun ? dryRunAll() : await withBindingTransport(envFile, runWith),
+);

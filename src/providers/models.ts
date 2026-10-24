@@ -348,7 +348,7 @@ export function createModelClient(options: ModelClientOptions) {
       slot: "write" | "reason",
       key: string,
       request: TextRequest,
-    ): Promise<{ text: string; usage: Usage }> {
+    ): Promise<{ text: string; usage: Usage; finishReason?: string }> {
       const { maxOutputTokens } = request;
       if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
         throw new RangeError(
@@ -363,8 +363,8 @@ export function createModelClient(options: ModelClientOptions) {
           maxOutputTokens: request.maxOutputTokens,
         }),
         parse: (model, raw) => {
-          const { text, usage } = parseTextOutput(model, raw);
-          return { value: { text, usage }, usage };
+          const { text, usage, finishReason } = parseTextOutput(model, raw);
+          return { value: { text, usage, finishReason }, usage };
         },
       });
     },
