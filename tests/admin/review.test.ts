@@ -182,4 +182,39 @@ describe("review and industry admin operations", () => {
     }
     expect(err2 instanceof Response ? err2.status : 0).toBe(400);
   });
+
+  it("listPendingArticles includes articles with stage 'grouped' as well as 'analyzed'", async () => {
+    const indRes = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('pending-stage-test', 'Pending Test', 'review', 0) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = indRes!.id;
+
+    const srcRes = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at) VALUES (?1, 'Src Stage', 'https://stage.com/feed', 'rss', 'active', 0) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    const srcId = srcRes!.id;
+
+    const artAnalyzed = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, body_sha, fetched_at)
+       VALUES (?1, ?2, 'https://stage.com/art1', 'https://stage.com/art1', 'Art Analyzed', 'analyzed', 0, 'sha-1', 0)
+       RETURNING id`,
+    )
+      .bind(srcId, indId)
+      .first<{ id: number }>();
+
+    const artGrouped = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, body_sha, fetched_at)
+       VALUES (?1, ?2, 'https://stage.com/art2', 'https://stage.com/art2', 'Art Grouped', 'grouped', 0, 'sha-2', 0)
+       RETURNING id`,
+    )
+      .bind(srcId, indId)
+      .first<{ id: number }>();
+
+    const pending = await listPendingArticles(env.DB, { industryId: indId });
+    const ids = pending.map((a) => a.id);
+    expect(ids).toContain(artAnalyzed!.id);
+    expect(ids).toContain(artGrouped!.id);
+  });
 });

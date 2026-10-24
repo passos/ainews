@@ -15,6 +15,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
 import { Route as AdminReviewRouteImport } from './routes/admin/review'
+import { Route as EEventIdRouteImport } from './routes/e/$eventId'
 import { Route as RssChar123sectionChar125DotxmlRouteImport } from './routes/rss/{$section}[.]xml'
 import { Route as SSectionRouteImport } from './routes/s/$section'
 import { Route as AdminArticlesArticleIdRouteImport } from './routes/admin/articles/$articleId'
@@ -52,6 +53,11 @@ const AdminReviewRoute = AdminReviewRouteImport.update({
   id: '/review',
   path: '/review',
   getParentRoute: () => AdminRouteRoute,
+} as any)
+const EEventIdRoute = EEventIdRouteImport.update({
+  id: '/e/$eventId',
+  path: '/e/$eventId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const RssChar123sectionChar125DotxmlRoute =
   RssChar123sectionChar125DotxmlRouteImport.update({
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
+  '/e/$eventId': typeof EEventIdRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
+  '/e/$eventId': typeof EEventIdRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin': typeof AdminIndexRoute
@@ -127,6 +135,7 @@ export interface FileRoutesById {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
+  '/e/$eventId': typeof EEventIdRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
@@ -144,6 +153,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
+    | '/e/$eventId'
     | '/rss/{$section}.xml'
     | '/s/$section'
     | '/admin/'
@@ -158,6 +168,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
+    | '/e/$eventId'
     | '/rss/{$section}.xml'
     | '/s/$section'
     | '/admin'
@@ -173,6 +184,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/ledger'
     | '/admin/review'
+    | '/e/$eventId'
     | '/rss/{$section}.xml'
     | '/s/$section'
     | '/admin/'
@@ -186,6 +198,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRouteRoute: typeof AdminRouteRouteWithChildren
+  EEventIdRoute: typeof EEventIdRoute
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
 }
@@ -233,6 +246,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/review'
       preLoaderRoute: typeof AdminReviewRouteImport
       parentRoute: typeof AdminRouteRoute
+    }
+    '/e/$eventId': {
+      id: '/e/$eventId'
+      path: '/e/$eventId'
+      fullPath: '/e/$eventId'
+      preLoaderRoute: typeof EEventIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/rss/{$section}.xml': {
       id: '/rss/{$section}.xml'
@@ -317,6 +337,7 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRouteRoute: AdminRouteRouteWithChildren,
+  EEventIdRoute: EEventIdRoute,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,
 }

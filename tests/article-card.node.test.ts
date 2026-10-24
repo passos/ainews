@@ -16,6 +16,8 @@ const article: ArticleView = {
   sectionSlug: "technology",
   sectionName: "Technology",
   sectionDisclaimer: null,
+  eventId: null,
+  eventReportCount: 0,
 };
 
 describe("ArticleCard link", () => {
@@ -32,5 +34,24 @@ describe("ArticleCard link", () => {
     expect(html).not.toContain("href=");
     expect(html).not.toContain("<a ");
     expect(html).toContain("A title");
+  });
+
+  it("renders story link when eventReportCount >= 2 and eventId is present", () => {
+    const html = renderToStaticMarkup(
+      ArticleCard({
+        article: { ...article, eventId: 42, eventReportCount: 3 },
+      }),
+    );
+    expect(html).toContain("View story · 3 reports");
+    expect(html).toContain('href="/e/42"');
+  });
+
+  it("does not render story link when eventReportCount < 2", () => {
+    const html = renderToStaticMarkup(
+      ArticleCard({
+        article: { ...article, eventId: 42, eventReportCount: 1 },
+      }),
+    );
+    expect(html).not.toContain("View story");
   });
 });

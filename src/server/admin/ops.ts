@@ -2,6 +2,10 @@ import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { getDb } from "../db/client";
 import {
+  conditionalReviewRevisionBumpStatement,
+  revisionBumpStatement,
+} from "../db/events";
+import {
   analyses,
   articles,
   budgets,
@@ -303,7 +307,7 @@ export async function listPendingArticles(
       ORDER BY created_at DESC, id DESC
       LIMIT 1
     )
-    WHERE a.stage = 'analyzed'
+    WHERE a.stage IN ('analyzed', 'grouped')
       AND NOT EXISTS (
         SELECT 1 FROM reviews r
         WHERE r.article_id = a.id AND r.body_sha = a.body_sha
@@ -333,15 +337,24 @@ export async function decideReview(
   }
 
   const now = Date.now();
-  await database
-    .prepare(
-      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT (article_id, body_sha)
-       DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
-    )
-    .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now)
-    .run();
+  await database.batch([
+    // Atomic conditional bump executed inside transaction BEFORE inserting/updating review
+    conditionalReviewRevisionBumpStatement(
+      database,
+      data.articleId,
+      data.bodySha,
+      data.decision,
+      now,
+    ),
+    database
+      .prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (article_id, body_sha)
+         DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
+      )
+      .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
+  ]);
 }
 
 export async function listStuckArticles(
@@ -455,6 +468,17 @@ export async function changeArticleIndustry(
 
   if (target?.slug.trim().toLowerCase() === FINANCE_SLUG) {
     // Finance requires human review: revoke any auto-approvals
+    const hadAutoApproval = await database
+      .prepare(
+        "SELECT 1 FROM reviews WHERE article_id = ?1 AND reviewer = 'auto' AND decision = 'approved'",
+      )
+      .bind(data.articleId)
+      .first();
+    if (hadAutoApproval) {
+      statements.push(
+        revisionBumpStatement(database, data.articleId, Date.now()),
+      );
+    }
     statements.push(
       database
         .prepare(

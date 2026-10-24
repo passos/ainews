@@ -4,9 +4,15 @@ import { analyzeArticle, type AnalyzeDeps } from "./analyze/analyze";
 import { processBody, type BodyDeps } from "./body/body";
 import { collectSource } from "./collect/collect";
 import { persistDeadLetters } from "./dlq";
-import { INGEST_QUEUE, type IngestMessage, type PipelineEnv } from "./messages";
+import { handleGroupBatch, type GroupConsumerDeps } from "./group/consumer";
+import {
+  GROUP_QUEUE,
+  INGEST_QUEUE,
+  type IngestMessage,
+  type PipelineEnv,
+} from "./messages";
 
-export type QueueDeps = BodyDeps & AnalyzeDeps;
+export type QueueDeps = BodyDeps & AnalyzeDeps & GroupConsumerDeps;
 
 /** fetch, env.AI.toMarkdown() and env.AI.run() via AI Gateway; tests pass fakes. */
 function defaultDeps(env: PipelineEnv): QueueDeps {
@@ -37,6 +43,10 @@ export async function runQueue(
 ): Promise<void> {
   if (batch.queue === "ainews-dlq") {
     await persistDeadLetters(batch, env);
+    return;
+  }
+  if (batch.queue === GROUP_QUEUE) {
+    await handleGroupBatch(batch, env, overrides);
     return;
   }
   if (batch.queue !== INGEST_QUEUE) {

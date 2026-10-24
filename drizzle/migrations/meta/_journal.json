@@ -78,6 +78,13 @@
       "when": 1792833233906,
       "tag": "0010_curved_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792836827964,
+      "tag": "0011_strange_angel",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,10 @@ import {
   getSection as readSection,
   getSectionSources as readSectionSources,
 } from "./articles";
+import {
+  getEvent as readEvent,
+  getEventSources as readEventSources,
+} from "./events";
 
 export const getHome = createServerFn({ method: "GET" }).handler(() =>
   readHome(getDb(env.DB)),
@@ -28,3 +32,13 @@ export const getSection = createServerFn({ method: "GET" })
 export const getSectionSources = createServerFn({ method: "GET" })
   .validator(sectionInput)
   .handler(({ data }) => readSectionSources(getDb(env.DB), data.slug));
+
+const eventInput = z.object({ eventId: z.number().int().positive() });
+
+export const getEvent = createServerFn({ method: "GET" })
+  .validator(eventInput)
+  .handler(({ data }) => readEvent(getDb(env.DB), data.eventId));
+
+export const getEventSources = createServerFn({ method: "GET" })
+  .validator(eventInput)
+  .handler(({ data }) => readEventSources(getDb(env.DB), data.eventId));

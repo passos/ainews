@@ -80,6 +80,16 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           {a.correction}
         </p>
       )}
+      {a.eventId !== null && a.eventReportCount >= 2 && (
+        <p className="mt-2 font-mono text-xs font-bold">
+          <a
+            href={`/e/${a.eventId}`}
+            className="text-sec-ink decoration-sec decoration-2 hover:underline"
+          >
+            View story · {a.eventReportCount} reports →
+          </a>
+        </p>
+      )}
     </article>
   );
 }
