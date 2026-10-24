@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { getDb } from "../db/client";
-import { revisionBumpStatement } from "../db/events";
+import {
+  conditionalReviewRevisionBumpStatement,
+  revisionBumpStatement,
+} from "../db/events";
 import {
   analyses,
   articles,
@@ -304,7 +307,7 @@ export async function listPendingArticles(
       ORDER BY created_at DESC, id DESC
       LIMIT 1
     )
-    WHERE a.stage = 'analyzed'
+    WHERE a.stage IN ('analyzed', 'grouped')
       AND NOT EXISTS (
         SELECT 1 FROM reviews r
         WHERE r.article_id = a.id AND r.body_sha = a.body_sha
@@ -333,19 +336,16 @@ export async function decideReview(
     throw new Response("Conflict: article body has changed", { status: 409 });
   }
 
-  const prevReview = await database
-    .prepare(
-      "SELECT decision FROM reviews WHERE article_id = ?1 AND body_sha = ?2",
-    )
-    .bind(data.articleId, data.bodySha)
-    .first<{ decision: string }>();
-
-  const wasApproved = prevReview?.decision === "approved";
-  const isApproved = data.decision === "approved";
-  const statusChanged = wasApproved !== isApproved;
-
   const now = Date.now();
-  const statements: D1PreparedStatement[] = [
+  await database.batch([
+    // Atomic conditional bump executed inside transaction BEFORE inserting/updating review
+    conditionalReviewRevisionBumpStatement(
+      database,
+      data.articleId,
+      data.bodySha,
+      data.decision,
+      now,
+    ),
     database
       .prepare(
         `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
@@ -354,13 +354,7 @@ export async function decideReview(
          DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
       )
       .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
-  ];
-
-  if (statusChanged) {
-    statements.push(revisionBumpStatement(database, data.articleId, now));
-  }
-
-  await database.batch(statements);
+  ]);
 }
 
 export async function listStuckArticles(

@@ -223,9 +223,13 @@ export async function groupArticle(
     }
     criteria.new = "A different event that is not listed";
 
-    const sortedIds = [...candidateEventIds].sort((a, b) => a - b);
-    const candidatesSha = await sha256Hex(JSON.stringify(sortedIds));
-    const jevKey = `group:${articleId}:${GROUP_PROMPT_VERSION}:${candidatesSha.slice(0, 16)}`;
+    // Hash all inputs (article text + criteria) so changes in text or candidates get fresh decisions
+    const inputPayload = JSON.stringify({
+      text: embedText,
+      criteria,
+    });
+    const inputSha = await sha256Hex(inputPayload);
+    const jevKey = `group:${articleId}:${GROUP_PROMPT_VERSION}:${inputSha.slice(0, 16)}`;
 
     const answers = await deps.models.judge(
       jevKey,
@@ -258,16 +262,24 @@ export async function groupArticle(
     }
   }
 
-  // 9. D1 batch update
+  // 9. D1 batch update with atomic article snapshot validation
   const commitNow = deps.now();
   if (targetEventId !== null) {
     try {
-      await deps.db.batch([
+      const results = await deps.db.batch([
+        // Insert into event_articles ONLY if the article still exists in stage 'analyzed'
+        // and shares the same industry as the target event.
         deps.db
           .prepare(
-            "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, ?3)",
+            `INSERT INTO event_articles (event_id, article_id, created_at)
+             SELECT ?1, ?2, ?3
+             WHERE EXISTS (
+               SELECT 1 FROM articles a
+               JOIN events e ON e.id = ?1
+               WHERE a.id = ?2 AND a.industry_id = e.industry_id AND a.stage = 'analyzed' AND a.industry_id = ?4
+             )`,
           )
-          .bind(targetEventId, articleId, commitNow),
+          .bind(targetEventId, articleId, commitNow, article.industry_id),
         deps.db
           .prepare(
             `UPDATE events SET revision = revision + 1, updated_at = ?1
@@ -280,10 +292,25 @@ export async function groupArticle(
           .bind(commitNow, targetEventId, articleId),
         deps.db
           .prepare(
-            "UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0 WHERE id = ?2 AND stage = 'analyzed'",
+            `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
+             WHERE id = ?2 AND stage = 'analyzed' AND industry_id = ?3
+               AND EXISTS (SELECT 1 FROM event_articles WHERE event_id = ?4 AND article_id = ?2)`,
           )
-          .bind(commitNow, articleId),
+          .bind(commitNow, articleId, article.industry_id, targetEventId),
       ]);
+
+      if (results[0].meta.changes !== 1) {
+        // Did not insert: check if already assigned or article state changed
+        const existing = await deps.db
+          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
+          .bind(articleId)
+          .first<{ event_id: number }>();
+        if (existing) {
+          return { status: "already_grouped", eventId: existing.event_id };
+        }
+        return { status: "skipped", reason: "article_state_changed" };
+      }
+
       return { status: "grouped", eventId: targetEventId, isNew: false };
     } catch (e) {
       const existing = await deps.db
@@ -303,15 +330,21 @@ export async function groupArticle(
     }
   } else {
     try {
-      await deps.db.batch([
+      const results = await deps.db.batch([
+        // Insert event ONLY if article still exists in stage 'analyzed' with original industry
         deps.db
           .prepare(
-            "INSERT INTO events (industry_id, title, created_at, updated_at, revision) VALUES (?1, ?2, ?3, ?3, 0)",
+            `INSERT INTO events (industry_id, title, created_at, updated_at, revision)
+             SELECT a.industry_id, ?2, ?3, ?3, 0
+             FROM articles a
+             WHERE a.id = ?1 AND a.stage = 'analyzed' AND a.industry_id = ?4`,
           )
-          .bind(article.industry_id, article.title, commitNow),
+          .bind(articleId, article.title, commitNow, article.industry_id),
         deps.db
           .prepare(
-            "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (last_insert_rowid(), ?1, ?2)",
+            `INSERT INTO event_articles (event_id, article_id, created_at)
+             SELECT last_insert_rowid(), ?1, ?2
+             WHERE changes() = 1`,
           )
           .bind(articleId, commitNow),
         deps.db
@@ -327,10 +360,23 @@ export async function groupArticle(
           .bind(commitNow, articleId),
         deps.db
           .prepare(
-            "UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0 WHERE id = ?2 AND stage = 'analyzed'",
+            `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
+             WHERE id = ?2 AND stage = 'analyzed' AND industry_id = ?3
+               AND EXISTS (SELECT 1 FROM event_articles WHERE article_id = ?2)`,
           )
-          .bind(commitNow, articleId),
+          .bind(commitNow, articleId, article.industry_id),
       ]);
+
+      if (results[0].meta.changes !== 1) {
+        const existing = await deps.db
+          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
+          .bind(articleId)
+          .first<{ event_id: number }>();
+        if (existing) {
+          return { status: "already_grouped", eventId: existing.event_id };
+        }
+        return { status: "skipped", reason: "article_state_changed" };
+      }
 
       const created = await deps.db
         .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
