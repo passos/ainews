@@ -348,6 +348,7 @@ export function createModelClient(options: ModelClientOptions) {
       slot: "write" | "reason",
       key: string,
       request: TextRequest,
+      validate?: (text: string) => void,
     ): Promise<{ text: string; usage: Usage; finishReason?: string }> {
       const { maxOutputTokens } = request;
       if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
@@ -364,6 +365,9 @@ export function createModelClient(options: ModelClientOptions) {
         }),
         parse: (model, raw) => {
           const { text, usage, finishReason } = parseTextOutput(model, raw);
+          if (validate) {
+            validate(text);
+          }
           return { value: { text, usage, finishReason }, usage };
         },
       });

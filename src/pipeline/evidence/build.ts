@@ -302,7 +302,31 @@ export async function generateEventEvidence(
   const logicalKey = `evidence:${eventId}:${CLAIMS_PROMPT_VERSION}:${inputRevision}:${inputSha}`;
 
   const request = buildClaimsExtractionRequest(material);
-  const res = await deps.models.generateText("reason", logicalKey, request);
+  let res: { text: string; finishReason?: string };
+  try {
+    res = await deps.models.generateText(
+      "reason",
+      logicalKey,
+      request,
+      (text) => {
+        if (!parseClaimsOutput(text)) {
+          throw new Error("failed to parse claims output against schema");
+        }
+      },
+    );
+  } catch (err) {
+    console.warn({
+      warning: "failed to generate parseable claims from model",
+      eventId,
+      logicalKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return {
+      status: "skipped",
+      eventId,
+      reason: "failed_to_parse_model_output",
+    };
+  }
 
   if (res.finishReason && res.finishReason !== "STOP") {
     console.warn({
@@ -363,8 +387,24 @@ export async function generateEventEvidence(
     };
   }
 
-  // Clean up any partial claims from previously aborted attempts on this revision
-  // First delete child citations in claim_evidence to satisfy foreign key constraints
+  // Check if a concurrent worker already completed this event revision while we were running the model
+  const concurrentCheck = await deps.db
+    .prepare(
+      `SELECT id FROM claims
+       WHERE event_id = ?1
+         AND input_revision = ?2
+         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+       LIMIT 1`,
+    )
+    .bind(eventId, inputRevision)
+    .first<{ id: number }>();
+  if (concurrentCheck) {
+    return { status: "skipped", eventId, reason: "already_exists" };
+  }
+
+  // Clean up any partial claims from previously aborted attempts on this revision.
+  // Must NOT delete if completed sentinel exists to prevent concurrent tasks from deleting completed data.
+  // First delete child citations in claim_evidence to satisfy foreign key constraints.
   await deps.db
     .prepare(
       `DELETE FROM claim_evidence
@@ -373,6 +413,12 @@ export async function generateEventEvidence(
          WHERE event_id = ?1
            AND input_revision = ?2
            AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM claims
+         WHERE event_id = ?1
+           AND input_revision = ?2
+           AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
        )`,
     )
     .bind(eventId, inputRevision)
@@ -383,7 +429,13 @@ export async function generateEventEvidence(
       `DELETE FROM claims
        WHERE event_id = ?1
          AND input_revision = ?2
-         AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')`,
+         AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+         AND NOT EXISTS (
+           SELECT 1 FROM claims
+           WHERE event_id = ?1
+             AND input_revision = ?2
+             AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+         )`,
     )
     .bind(eventId, inputRevision)
     .run();
@@ -437,7 +489,7 @@ export async function generateEventEvidence(
       (c) => c.verified && c.isPrimarySource,
     );
 
-    // Atomic conditional insert: only write if events.revision is still inputRevision
+    // Atomic conditional insert: only write if events.revision is still inputRevision and no completion sentinel exists
     const claimInsert = await deps.db
       .prepare(
         `INSERT INTO claims (
@@ -445,6 +497,12 @@ export async function generateEventEvidence(
          )
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
          WHERE (SELECT revision FROM events WHERE id = ?1) = ?7
+           AND NOT EXISTS (
+             SELECT 1 FROM claims
+             WHERE event_id = ?1
+               AND input_revision = ?7
+               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+           )
          ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING
          RETURNING id`,
       )

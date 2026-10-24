@@ -975,4 +975,158 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
       eventId: event!.id,
     });
   });
+
+  it("does not lock into broken cache when model output fails schema validation, allowing retry", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-bad-output-ind', 'Auto Bad Output', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://bad/feed', 'bad.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-bad', 'https://example.com/art-bad', 'Bad Output Article', 'Summary', 'shaBad', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaBad', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const quoteText = "Valid quote for retry test after invalid model output.";
+    const bodyText = `Intro line.\n\n${quoteText}\n\nOutro line.`;
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaBad.md`, bodyText);
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Bad Output Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+
+    let callsCount = 0;
+    // Transport returns invalid non-JSON output on first call, valid claims on second call
+    const dynamicTransport: ModelTransport = {
+      run: async (model: string, _input: unknown) => {
+        if (model === "@cf/baai/bge-m3") {
+          return { shape: [1, 3], data: [[0.1, 0.2, 0.3]] };
+        }
+        callsCount++;
+        if (callsCount === 1) {
+          return {
+            candidates: [
+              {
+                content: {
+                  role: "model",
+                  parts: [{ text: "MALFORMED NON-JSON TEXT" }],
+                },
+                finishReason: "STOP",
+              },
+            ],
+            usageMetadata: {
+              promptTokenCount: 50,
+              candidatesTokenCount: 10,
+              totalTokenCount: 60,
+            },
+          };
+        }
+        return {
+          candidates: [
+            {
+              content: {
+                role: "model",
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      claims: [
+                        {
+                          claimText: quoteText,
+                          claimType: "fact",
+                          citations: [
+                            {
+                              articleId: art!.id,
+                              quote: quoteText,
+                              stance: "support",
+                            },
+                          ],
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: {
+            promptTokenCount: 50,
+            candidatesTokenCount: 50,
+            totalTokenCount: 100,
+          },
+        };
+      },
+    };
+
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+
+    // Attempt 1: model returns malformed text -> returns skipped, does not write sentinel, records failure in llm_calls
+    const res1 = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+      transport: dynamicTransport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res1.status).toBe("skipped");
+    if (res1.status === "skipped") {
+      expect(res1.reason).toBe("failed_to_parse_model_output");
+    }
+
+    // Verify llm_calls has status = 'failed' (NOT 'completed')
+    const llmRow = await env.DB.prepare(
+      "SELECT status, error FROM llm_calls WHERE slot = 'reason' ORDER BY id DESC LIMIT 1",
+    ).first<{ status: string; error: string }>();
+    expect(llmRow?.status).toBe("failed");
+    expect(llmRow?.error).toContain("failed to parse claims output");
+
+    // Attempt 2: retry -> calls transport again (callsCount becomes 2), succeeds, writes claims
+    const res2 = await generateEventEvidence(pipelineEnv, event!.id, 2000, {
+      transport: dynamicTransport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res2.status).toBe("generated");
+    if (res2.status === "generated") {
+      expect(res2.claimsCount).toBe(1);
+    }
+    expect(callsCount).toBe(2);
+
+    // Verify claims now successfully populated
+    const claims = await env.DB.prepare(
+      "SELECT claim_text FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ claim_text: string }>();
+    expect(claims.results.map((c) => c.claim_text)).toContain(quoteText);
+  });
 });
