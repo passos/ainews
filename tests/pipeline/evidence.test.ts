@@ -325,6 +325,66 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
   });
 
+  it("verifyQuoteInBody handles HTML entities and preserves character offsets across paragraphs", () => {
+    const body =
+      "Revenue was &gt; $10 million in Q3.\n\nNext paragraph discusses margins.";
+    const res = verifyQuoteInBody(body, "Next paragraph discusses margins.");
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "Next paragraph discusses margins.",
+    );
+
+    const dashBody =
+      "Growth was high &mdash; higher than expected. Second paragraph here.";
+    const dashRes = verifyQuoteInBody(dashBody, "Second paragraph here.");
+    expect(dashRes.verified).toBe(true);
+    expect(dashBody.slice(dashRes.startOffset, dashRes.endOffset)).toBe(
+      "Second paragraph here.",
+    );
+  });
+
+  it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
+    const autoBody =
+      "Visit <https://example.com> for more information and see [other link](https://test.com) as well.";
+    const autoRes = verifyQuoteInBody(
+      autoBody,
+      "more information and see other link as well.",
+    );
+    expect(autoRes.verified).toBe(true);
+    expect(autoBody.slice(autoRes.startOffset, autoRes.endOffset)).toBe(
+      "more information and see [other link](https://test.com) as well.",
+    );
+
+    const quoteUrlBody =
+      "Check [our query](https://example.com/search?q=don't_stop) for details on the product launch.\n\nNext paragraph has important notes.";
+    const quoteUrlRes = verifyQuoteInBody(
+      quoteUrlBody,
+      "Next paragraph has important notes.",
+    );
+    expect(quoteUrlRes.verified).toBe(true);
+    expect(
+      quoteUrlBody.slice(quoteUrlRes.startOffset, quoteUrlRes.endOffset),
+    ).toBe("Next paragraph has important notes.");
+
+    const googleBody =
+      "[Google](https://example.com/foo'bar) The trial result was negative.";
+    const googleRes = verifyQuoteInBody(
+      googleBody,
+      "The trial result was negative.",
+    );
+    expect(googleRes.verified).toBe(true);
+    expect(googleBody.slice(googleRes.startOffset, googleRes.endOffset)).toBe(
+      "The trial result was negative.",
+    );
+  });
+
+  it("verifyQuoteInBody rejects quotes containing appended hallucinated code blocks", () => {
+    const body = "The company reported revenue of $50M for the quarter.";
+    const badQuote =
+      "The company reported revenue of $50M for the quarter.\n\n```python\nfake_injection_code()\n```";
+    expect(verifyQuoteInBody(body, badQuote).verified).toBe(false);
+  });
+
   it("verifyQuoteInBody respects Unicode code point boundaries including astral plane characters", () => {
     const body = "The initial funding round was 𝟙15 million in capital.";
     const badQuote = "15 million in capital";
@@ -388,6 +448,72 @@ describe("generateEventEvidence Integration", () => {
     const res = await generateEventEvidence(testEnv, event!.id, 1000);
     expect(res.status).toBe("skipped");
     expect((res as { reason: string }).reason).toBe("no_approved_articles");
+  });
+
+  it("skips generation and allows retry when any approved article is missing body in R2", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('miss-b-ind', 'Missing Body Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://test.org/feed', 'test.org', 'Test Org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test.org/1', 'https://test.org/1', 'Article 1', 'sum1', 'sha1', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test.org/2', 'https://test.org/2', 'Article 2', 'sum2', 'sha2', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha1', 'approved', 'auto', 1000), (?2, 'sha2', 'approved', 'auto', 1000)",
+    )
+      .bind(art1!.id, art2!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Partial Body Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000), (?1, ?3, 1000)",
+    )
+      .bind(event!.id, art1!.id, art2!.id)
+      .run();
+
+    // R2 only has body for art1, art2 is missing
+    const partialR2 = new FakeR2();
+    partialR2.put(`bodies/${art1!.id}/sha1.md`, "Full text of article 1.");
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      bodies: partialR2 as unknown as R2Bucket,
+    });
+
+    expect(res.status).toBe("skipped");
+    expect((res as { reason: string }).reason).toBe("missing_article_bodies");
+
+    // Verify NO sentinel or claims were inserted, keeping event eligible for retry
+    const count = await env.DB.prepare(
+      "SELECT count(*) as cnt FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ cnt: number }>();
+    expect(count?.cnt).toBe(0);
   });
 
   it("extracts, verifies, and indexes claims & evidence", async () => {

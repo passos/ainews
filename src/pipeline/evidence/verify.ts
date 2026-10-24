@@ -13,22 +13,31 @@ function findLinkClose(rawStr: string, startPos: number): number {
     p++;
     let depth = 1;
     let inAngle = false;
-    let inQuote: string | null = null;
+    let inTitleQuote: string | null = null;
+    let hasSeenSpace = false;
     while (p < rawStr.length && depth > 0) {
       const ch = rawStr[p];
       if (ch === "\\") {
         p += 2;
         continue;
       }
-      if (inQuote) {
-        if (ch === inQuote) inQuote = null;
+      if (inTitleQuote) {
+        if (ch === inTitleQuote) inTitleQuote = null;
+        else if (ch === "\n") inTitleQuote = null;
       } else if (inAngle) {
         if (ch === ">") inAngle = false;
       } else {
-        if (ch === '"' || ch === "'") inQuote = ch;
-        else if (ch === "<") inAngle = true;
-        else if (ch === "(") depth++;
-        else if (ch === ")") depth--;
+        if (/\s/.test(ch)) {
+          hasSeenSpace = true;
+        } else if (hasSeenSpace && (ch === '"' || ch === "'")) {
+          inTitleQuote = ch;
+        } else if (ch === "<") {
+          inAngle = true;
+        } else if (ch === "(") {
+          depth++;
+        } else if (ch === ")") {
+          depth--;
+        }
       }
       p++;
     }
@@ -84,10 +93,21 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
           for (let c = 0; c < content.length; c++) {
             const ch = content[c];
             while (s < rawStr.length && rawStr[s] !== ch) {
+              if (rawStr[s] === "&") {
+                const semi = rawStr.indexOf(";", s);
+                if (semi !== -1 && semi - s <= 10) break;
+              }
               s++;
             }
-            const origIdx = s < rawStr.length ? s : srcIdx + c;
-            if (s < rawStr.length) s++;
+            const origIdx = s < rawStr.length ? s : -1;
+            if (s < rawStr.length) {
+              if (rawStr[s] === "&" && rawStr[s] !== ch) {
+                const semi = rawStr.indexOf(";", s);
+                s = semi !== -1 ? semi + 1 : s + 1;
+              } else {
+                s++;
+              }
+            }
 
             if (/\s/.test(ch)) {
               if (!inWs) {
@@ -110,10 +130,21 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
             for (let c = 0; c < alt.length; c++) {
               const ch = alt[c];
               while (s < rawStr.length && rawStr[s] !== ch) {
+                if (rawStr[s] === "&") {
+                  const semi = rawStr.indexOf(";", s);
+                  if (semi !== -1 && semi - s <= 10) break;
+                }
                 s++;
               }
-              const origIdx = s < rawStr.length ? s : imgStart + 2 + c;
-              if (s < rawStr.length) s++;
+              const origIdx = s < rawStr.length ? s : -1;
+              if (s < rawStr.length) {
+                if (rawStr[s] === "&" && rawStr[s] !== ch) {
+                  const semi = rawStr.indexOf(";", s);
+                  s = semi !== -1 ? semi + 1 : s + 1;
+                } else {
+                  s++;
+                }
+              }
 
               if (/\s/.test(ch)) {
                 if (!inWs) {
@@ -130,7 +161,12 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
             srcIdx = findLinkClose(rawStr, s);
           }
         } else if (token.type === "link_close") {
-          srcIdx = findLinkClose(rawStr, srcIdx);
+          if (token.markup === "autolink") {
+            const closeAngle = rawStr.indexOf(">", srcIdx);
+            srcIdx = closeAngle !== -1 ? closeAngle + 1 : srcIdx;
+          } else {
+            srcIdx = findLinkClose(rawStr, srcIdx);
+          }
         } else if (token.type === "softbreak" || token.type === "hardbreak") {
           if (!inWs) {
             outChars.push(" ");
@@ -139,6 +175,35 @@ export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
           }
         }
       }
+      if (!inWs) {
+        outChars.push(" ");
+        outIndices.push(Math.min(rawStr.length - 1, srcIdx));
+        inWs = true;
+      }
+    } else if (block.type === "fence" || block.type === "code_block") {
+      const content = block.content;
+      let s = srcIdx;
+      for (let c = 0; c < content.length; c++) {
+        const ch = content[c];
+        while (s < rawStr.length && rawStr[s] !== ch) {
+          s++;
+        }
+        const origIdx = s < rawStr.length ? s : -1;
+        if (s < rawStr.length) s++;
+
+        if (/\s/.test(ch)) {
+          if (!inWs) {
+            outChars.push(" ");
+            outIndices.push(origIdx);
+            inWs = true;
+          }
+        } else {
+          outChars.push(ch);
+          outIndices.push(origIdx);
+          inWs = false;
+        }
+      }
+      srcIdx = s;
       if (!inWs) {
         outChars.push(" ");
         outIndices.push(Math.min(rawStr.length - 1, srcIdx));
@@ -215,12 +280,18 @@ export function verifyQuoteInBody(
       const startOffset = origIndices[cleanIndex];
       const endOffset = origIndices[cleanIndex + quoteClean.length - 1] + 1;
 
-      return {
-        verified: true,
-        startOffset,
-        endOffset,
-        quoteClean,
-      };
+      if (
+        startOffset >= 0 &&
+        endOffset <= bodyMd.length &&
+        startOffset < endOffset
+      ) {
+        return {
+          verified: true,
+          startOffset,
+          endOffset,
+          quoteClean,
+        };
+      }
     }
 
     cleanIndex = bodyClean.indexOf(quoteClean, cleanIndex + 1);

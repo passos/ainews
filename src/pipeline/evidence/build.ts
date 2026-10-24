@@ -273,9 +273,18 @@ export async function generateEventEvidence(
     });
   }
 
-  // If none of the approved articles have readable bodies, skip and allow retry later
-  const readableArticles = articleInputs.filter((a) => a.bodyText.length > 0);
-  if (readableArticles.length === 0) {
+  // If any approved article has a body_sha that could not be read from R2, skip this batch to allow retry
+  // when storage consistency or missing bodies recover, rather than producing permanent partial consensus.
+  const missingBodies = articleInputs.filter(
+    (a) => a.bodySha && a.bodyText.length === 0,
+  );
+  if (missingBodies.length > 0) {
+    console.warn({
+      warning:
+        "some approved articles have unreadable bodies in R2, skipping generation to allow retry",
+      eventId,
+      missingArticleIds: missingBodies.map((a) => a.id),
+    });
     return { status: "skipped", eventId, reason: "missing_article_bodies" };
   }
 
@@ -513,10 +522,16 @@ export async function generateEventEvidence(
         primaryDomains,
       );
 
+      const verifiedQuote =
+        verification.verified &&
+        verification.startOffset < verification.endOffset
+          ? bodyText.slice(verification.startOffset, verification.endOffset)
+          : cit.quote;
+
       verifiedCitations.push({
         articleId: cit.articleId,
         bodySha: articleRow.body_sha,
-        quote: cit.quote,
+        quote: verifiedQuote,
         quoteClean: verification.quoteClean,
         startOffset: verification.startOffset,
         endOffset: verification.endOffset,
