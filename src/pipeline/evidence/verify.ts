@@ -452,16 +452,25 @@ export function verifyQuoteInBody(
       beforeText.lastIndexOf("!"),
       beforeText.lastIndexOf("?"),
       beforeText.lastIndexOf("\n"),
-      beforeText.lastIndexOf(";"),
-      beforeText.lastIndexOf(","),
-      beforeText.lastIndexOf("—"),
     );
-    const clausePrefix = beforeText.slice(
+    const sentencePrefix = beforeText.slice(
       lastBoundary === -1 ? 0 : lastBoundary + 1,
     );
     const negationRegex =
       /(?:\b\w+n['’]t|\bnot|\bcannot|\bnever|\bno|\bneither|\bnor|\bhardly|\bbarely|\bscarcely|\bfailed\s+to|\bfails\s+to|\bdenied|\bdenies|\bwithout)\b/i;
-    return negationRegex.test(clausePrefix);
+
+    const match = negationRegex.exec(sentencePrefix);
+    if (!match) return false;
+
+    // If there is a negation in the sentence prefix, check if an adversative conjunction separates it from the quote
+    const afterNegation = sentencePrefix.slice(match.index + match[0].length);
+    const contrastRegex =
+      /\b(but|however|yet|nevertheless|although|though|whereas|while)\b/i;
+    if (contrastRegex.test(afterNegation)) {
+      return false; // Negation was in a contrasting clause prior to "but", "however", etc.
+    }
+
+    return true;
   }
 
   // Normalized whitespace search on visible text with full Unicode word-boundary awareness

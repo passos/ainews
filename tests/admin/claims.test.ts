@@ -14,6 +14,22 @@ describe("admin claims operations", () => {
       .bind(ind!.id)
       .first<{ id: number }>();
 
+    const src = await env.DB.prepare(
+      `INSERT INTO sources (name, site_domain, feed_url, kind, industry_id, created_at)
+       VALUES ('Admin Test Source', 'example.com', 'https://example.com/rss', 'rss', ?1, 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, fetched_at)
+       VALUES (?1, ?2, 'https://example.com/art1', 'https://example.com/art1', 'Test Article Title', 'grouped', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
     // Insert pending claim for current revision 2
     const pendingClaim = await env.DB.prepare(
       `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, status, primary_source_preferred, created_at)
@@ -22,6 +38,14 @@ describe("admin claims operations", () => {
     )
       .bind(event!.id)
       .first<{ id: number }>();
+
+    // Insert evidence citation for pending claim
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at)
+       VALUES (?1, ?2, 'sha123', 'Key verbatim finding from paper.', 'Key verbatim finding from paper.', 10, 42, 'support', 1, 1, 1000)`,
+    )
+      .bind(pendingClaim!.id, art!.id)
+      .run();
 
     // Insert old revision claim (should not appear in pending list for current revision)
     await env.DB.prepare(
@@ -40,6 +64,18 @@ describe("admin claims operations", () => {
     expect(found?.claimType).toBe("fact");
     expect(found?.consensusStatus).toBe("verified");
     expect(found?.inputRevision).toBe(2);
+    expect(found?.citations).toHaveLength(1);
+    expect(found?.citations[0]).toMatchObject({
+      claimId: pendingClaim!.id,
+      articleId: art!.id,
+      articleTitle: "Test Article Title",
+      articleUrl: "https://example.com/art1",
+      sourceName: "Admin Test Source",
+      quote: "Key verbatim finding from paper.",
+      stance: "support",
+      isPrimarySource: true,
+      verified: true,
+    });
 
     // Stale revision claim should not be in pending list because c.input_revision = e.revision
     const staleFound = pendingList.find(

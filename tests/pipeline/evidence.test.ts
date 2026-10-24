@@ -431,6 +431,28 @@ describe("Evidence Chunks & Quote Verification", () => {
         .verified,
     ).toBe(true);
 
+    const commaParentheticalBody =
+      "The treatment did not, according to the study, reduce mortality in the trial.";
+    expect(
+      verifyQuoteInBody(
+        commaParentheticalBody,
+        "reduce mortality in the trial.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        commaParentheticalBody,
+        "did not, according to the study, reduce mortality in the trial.",
+      ).verified,
+    ).toBe(true);
+
+    const butContrastBody =
+      "The drug did not cure cancer, but it improved quality of life.";
+    expect(
+      verifyQuoteInBody(butContrastBody, "it improved quality of life.")
+        .verified,
+    ).toBe(true);
+
     const failedBody = "The company failed to meet quarterly revenue targets.";
     expect(
       verifyQuoteInBody(failedBody, "meet quarterly revenue targets.").verified,

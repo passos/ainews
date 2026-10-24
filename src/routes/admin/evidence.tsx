@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { formatUtc } from "../../lib/time";
+import { safeHttpUrl } from "../../lib/url";
 import {
   decideClaimReview,
   listPendingClaims,
@@ -140,6 +141,71 @@ function AdminEvidencePage() {
                 <div className="rounded bg-muted/40 p-3 font-sans text-sm leading-relaxed text-foreground">
                   <p>{c.claimText}</p>
                 </div>
+
+                {c.citations && c.citations.length > 0 && (
+                  <div className="flex flex-col gap-2 pt-1">
+                    <div className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Evidence & Citations ({c.citations.length})
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {c.citations.map((cit) => (
+                        <div
+                          key={cit.id}
+                          className="rounded border border-border/60 bg-muted/20 p-2.5 text-xs"
+                        >
+                          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span
+                                className={`rounded px-1.5 py-0.5 font-mono text-[0.68rem] font-bold uppercase tracking-wider ${
+                                  cit.stance === "support"
+                                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                    : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                                }`}
+                              >
+                                {cit.stance}
+                              </span>
+                              {cit.isPrimarySource && (
+                                <span className="rounded bg-blue-500/15 px-1.5 py-0.5 font-mono text-[0.68rem] font-semibold text-blue-700 dark:text-blue-400">
+                                  Primary Source
+                                </span>
+                              )}
+                              {cit.verified ? (
+                                <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-medium text-emerald-600 dark:text-emerald-400">
+                                  Verified in text
+                                </span>
+                              ) : (
+                                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[0.68rem] font-medium text-amber-700 dark:text-amber-400">
+                                  Unverified excerpt
+                                </span>
+                              )}
+                              <span className="font-mono text-[0.68rem] text-muted-foreground">
+                                from {cit.sourceName}
+                              </span>
+                            </div>
+
+                            {cit.articleUrl && safeHttpUrl(cit.articleUrl) ? (
+                              <a
+                                href={safeHttpUrl(cit.articleUrl)!}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-mono text-[0.68rem] font-medium text-primary underline hover:opacity-80"
+                              >
+                                {cit.articleTitle} ↗
+                              </a>
+                            ) : (
+                              <span className="font-mono text-[0.68rem] text-muted-foreground">
+                                {cit.articleTitle}
+                              </span>
+                            )}
+                          </div>
+                          <blockquote className="border-l-2 border-primary/40 pl-2.5 italic text-foreground/90">
+                            “{cit.quote}”
+                          </blockquote>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

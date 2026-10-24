@@ -942,6 +942,19 @@ export async function reviewArtifact(
 // Claims & Evidence (M2 #14)
 // -----------------------------------------------------------------------------
 
+export interface PendingCitationRow {
+  id: number;
+  claimId: number;
+  articleId: number;
+  articleTitle: string;
+  articleUrl: string;
+  sourceName: string;
+  quote: string;
+  stance: "support" | "dispute";
+  isPrimarySource: boolean;
+  verified: boolean;
+}
+
 export interface PendingClaimRow {
   id: number;
   eventId: number;
@@ -955,36 +968,100 @@ export interface PendingClaimRow {
   model: string;
   status: string;
   createdAt: number;
+  citations: PendingCitationRow[];
 }
 
 export async function listPendingClaims(
   database: D1Database,
 ): Promise<PendingClaimRow[]> {
-  const { results } = await database
-    .prepare(
-      `SELECT
-         c.id,
-         c.event_id AS eventId,
-         e.title AS eventTitle,
-         i.name AS industryName,
-         c.claim_text AS claimText,
-         c.claim_type AS claimType,
-         c.consensus_status AS consensusStatus,
-         c.primary_source_preferred AS primarySourcePreferred,
-         c.input_revision AS inputRevision,
-         c.model,
-         c.status,
-         c.created_at AS createdAt
-       FROM claims c
-       JOIN events e ON e.id = c.event_id
-       JOIN industries i ON i.id = e.industry_id
-       WHERE c.status = 'pending_review'
-         AND c.input_revision = e.revision
-         AND c.claim_text NOT LIKE '[%]'
-       ORDER BY c.created_at DESC`,
-    )
-    .all<PendingClaimRow>();
-  return results ?? [];
+  const [claimsRes, citationsRes] = await Promise.all([
+    database
+      .prepare(
+        `SELECT
+           c.id,
+           c.event_id AS eventId,
+           e.title AS eventTitle,
+           i.name AS industryName,
+           c.claim_text AS claimText,
+           c.claim_type AS claimType,
+           c.consensus_status AS consensusStatus,
+           c.primary_source_preferred AS primarySourcePreferred,
+           c.input_revision AS inputRevision,
+           c.model,
+           c.status,
+           c.created_at AS createdAt
+         FROM claims c
+         JOIN events e ON e.id = c.event_id
+         JOIN industries i ON i.id = e.industry_id
+         WHERE c.status = 'pending_review'
+           AND c.input_revision = e.revision
+           AND c.claim_text NOT LIKE '[%]'
+         ORDER BY c.created_at DESC`,
+      )
+      .all<Omit<PendingClaimRow, "citations">>(),
+    database
+      .prepare(
+        `SELECT
+           ce.id,
+           ce.claim_id AS claimId,
+           ce.article_id AS articleId,
+           COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS articleTitle,
+           a.canonical_url AS articleUrl,
+           COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS sourceName,
+           ce.quote,
+           ce.stance,
+           ce.is_primary_source AS isPrimarySource,
+           ce.verified
+         FROM claim_evidence ce
+         JOIN claims c ON c.id = ce.claim_id
+         JOIN articles a ON a.id = ce.article_id
+         JOIN sources s ON s.id = a.source_id
+         LEFT JOIN analyses an ON an.id = (
+           SELECT id FROM analyses
+           WHERE article_id = a.id AND selected = 1
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1
+         )
+         WHERE c.status = 'pending_review'
+           AND c.input_revision = (SELECT revision FROM events WHERE id = c.event_id)
+         ORDER BY ce.is_primary_source DESC, ce.id ASC`,
+      )
+      .all<{
+        id: number;
+        claimId: number;
+        articleId: number;
+        articleTitle: string | null;
+        articleUrl: string;
+        sourceName: string;
+        quote: string;
+        stance: string;
+        isPrimarySource: number;
+        verified: number;
+      }>(),
+  ]);
+
+  const citationsByClaimId = new Map<number, PendingCitationRow[]>();
+  for (const r of citationsRes.results ?? []) {
+    const list = citationsByClaimId.get(r.claimId) ?? [];
+    list.push({
+      id: r.id,
+      claimId: r.claimId,
+      articleId: r.articleId,
+      articleTitle: r.articleTitle ?? "Untitled",
+      articleUrl: r.articleUrl,
+      sourceName: r.sourceName,
+      quote: r.quote,
+      stance: r.stance as "support" | "dispute",
+      isPrimarySource: r.isPrimarySource === 1,
+      verified: r.verified === 1,
+    });
+    citationsByClaimId.set(r.claimId, list);
+  }
+
+  return (claimsRes.results ?? []).map((c) => ({
+    ...c,
+    citations: citationsByClaimId.get(c.id) ?? [],
+  }));
 }
 
 export async function reviewClaim(
