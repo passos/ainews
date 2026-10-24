@@ -68,7 +68,7 @@
     // Web Analytics token; empty = no beacon script.
     "CF_BEACON_TOKEN": "",
     "COLLECT_ENABLED": "true",
-    "MODEL_CALLS_ENABLED": "true",
+    "MODEL_CALLS_ENABLED": "false",
     "EMAIL_ENABLED": "false",
     "THIRD_PARTY_READER_ENABLED": "false",
     "DISCOVERY_ENABLED": "false",
