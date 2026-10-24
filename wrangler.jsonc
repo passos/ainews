@@ -51,6 +51,10 @@
         "max_retries": 3,
         "dead_letter_queue": "ainews-dlq",
       },
+      {
+        "queue": "ainews-dlq",
+        "max_batch_size": 10,
+      },
     ],
   },
   "vectorize": [

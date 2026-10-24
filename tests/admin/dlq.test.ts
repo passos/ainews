@@ -1,7 +1,10 @@
+import { env } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { persistDeadLetters } from "../../src/pipeline/dlq";
-import { db } from "../pipeline/helpers";
+import { getDb } from "../../src/server/db/client";
+
+const db = () => getDb(env.DB);
 
 describe("DLQ message persistence", () => {
   it("persists messages to dlq_messages table and acks them", async () => {
@@ -37,7 +40,7 @@ describe("DLQ message persistence", () => {
       retryAll: () => {},
     } as unknown as MessageBatch;
 
-    await persistDeadLetters(batch, { DB: database } as any);
+    await persistDeadLetters(batch, { DB: env.DB });
 
     expect(acked).toEqual(["msg-1", "msg-2"]);
 
@@ -47,7 +50,9 @@ describe("DLQ message persistence", () => {
       body_json: string;
       attempts: number;
       replayed_at: number | null;
-    }>(sql`SELECT id, kind, body_json, attempts, replayed_at FROM dlq_messages ORDER BY id ASC`);
+    }>(
+      sql`SELECT id, kind, body_json, attempts, replayed_at FROM dlq_messages ORDER BY id ASC`,
+    );
 
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
@@ -56,7 +61,10 @@ describe("DLQ message persistence", () => {
       attempts: 3,
       replayed_at: null,
     });
-    expect(JSON.parse(rows[0].body_json)).toEqual({ kind: "group", articleId: 10 });
+    expect(JSON.parse(rows[0].body_json)).toEqual({
+      kind: "group",
+      articleId: 10,
+    });
     expect(rows[1]).toMatchObject({
       id: "msg-2",
       kind: "collect",
