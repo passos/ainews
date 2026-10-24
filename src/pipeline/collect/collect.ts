@@ -132,6 +132,9 @@ export async function collectSource(
   }
 }
 
+/** The source fields storeItems reads. */
+export type StoreSource = Pick<SourceRow, "id" | "industry_id" | "utc_offset">;
+
 interface Row {
   canonical: string;
   url: string;
@@ -184,11 +187,12 @@ export async function feedKey(canonicalUrl: string): Promise<string> {
  * -> `body` messages. R2 comes first, so a stored row always has its feed
  * content; a crash after the insert leaves rows in 'collected' and the
  * backfill cron sends them later. Returns the new article ids and the
- * number of articles this source saw for the first time.
+ * number of articles this source saw for the first time. Also used by
+ * scripts/backfill.ts, so a backfilled entry is stored exactly as here.
  */
-async function storeItems(
-  env: PipelineEnv,
-  source: SourceRow,
+export async function storeItems(
+  env: Pick<PipelineEnv, "DB" | "BODIES" | "Q_INGEST">,
+  source: StoreSource,
   items: FeedItem[],
   now: number,
 ): Promise<{ inserted: number[]; sightings: number }> {
