@@ -54,3 +54,8 @@ export const resumeSource = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
   .validator((id: number) => id)
   .handler(async ({ data: id }) => ops.resumeSource(env.DB, id));
+
+export const triggerCollect = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .validator((id: number) => id)
+  .handler(async ({ data: id }) => ops.triggerCollect(env.Q_INGEST, id));

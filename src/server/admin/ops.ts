@@ -237,6 +237,13 @@ export async function resumeSource(database: D1Database, id: number) {
     .run();
 }
 
+export async function triggerCollect(
+  qIngest: { send: (msg: unknown) => Promise<unknown> },
+  sourceId: number,
+) {
+  await qIngest.send({ kind: "collect", sourceId });
+}
+
 // -----------------------------------------------------------------------------
 // Review
 // -----------------------------------------------------------------------------
@@ -364,7 +371,7 @@ export async function getArticle(database: D1Database, id: number) {
     .select()
     .from(corrections)
     .where(
-      sql`${corrections.targetType} = 'article' AND ${corrections.targetId} = ${id}`,
+      sql`${corrections.targetType} IN ('article', 'articles') AND ${corrections.targetId} = ${id}`,
     )
     .orderBy(sql`${corrections.createdAt} DESC`);
 
@@ -436,6 +443,26 @@ export async function reanalyzeArticle(
   ]);
 
   await qIngest.send({ kind: "analyze", articleId });
+}
+
+export async function retractArticle(
+  database: D1Database,
+  articleId: number,
+  reviewer: string,
+) {
+  const article = await database
+    .prepare("SELECT body_sha FROM articles WHERE id = ?1")
+    .bind(articleId)
+    .first<{ body_sha: string | null }>();
+  if (!article || !article.body_sha) {
+    throw new Response("Article or body not found", { status: 404 });
+  }
+  await decideReview(database, {
+    articleId,
+    bodySha: article.body_sha,
+    decision: "rejected",
+    reviewer,
+  });
 }
 
 export async function createCorrection(

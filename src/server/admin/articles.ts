@@ -31,6 +31,13 @@ export const reanalyzeArticle = createServerFn({ method: "POST" })
     ops.reanalyzeArticle(env.DB, env.Q_INGEST, data.articleId),
   );
 
+export const retractArticle = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .validator((articleId: number) => articleId)
+  .handler(async ({ data: articleId, context }) =>
+    ops.retractArticle(env.DB, articleId, context.admin.email),
+  );
+
 export const createCorrection = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
   .validator(
