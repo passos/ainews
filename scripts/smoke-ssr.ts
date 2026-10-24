@@ -303,6 +303,11 @@ async function main() {
     }
   }
 
+  const homePage = await page("/");
+  if (!homePage.text.includes("End of approved stories")) {
+    fail("GET / lacks 'End of approved stories' filler for shorter section");
+  }
+
   const tech = await page("/s/technology");
   for (const needle of [
     // Analysis text, the editor's override, a correction, an evidence label.
