@@ -7,8 +7,11 @@ import { buttonVariants } from "./ui/button";
 
 const LABELS: Record<Theme, string> = { light: "Light", dark: "Dark" };
 
-// The selected look comes from CSS (`dark:` and `not-dark:` follow
-// `data-theme` on <html>), so server and client HTML match.
+// Before mount the selected look comes from CSS (`dark:` and `not-dark:`
+// follow `data-theme` on <html>), so server and client HTML match. After
+// mount `aria-pressed` takes over. The button variant's hover rules
+// (`hover:bg-muted`, `dark:hover:bg-input/50`) are as specific as a plain
+// aria rule, so the hovered-and-pressed rules are one attribute more specific.
 // Literal class names: Tailwind finds them by scanning the source.
 const SELECTED_CLASS: Record<Theme, string> = {
   light: "not-dark:bg-primary not-dark:text-primary-foreground",
@@ -56,6 +59,7 @@ export function ThemeSwitcher() {
               buttonVariants({ variant: "outline", size: "xs" }),
               "rounded-sm border-2 font-mono text-[0.68rem] font-bold uppercase tracking-wider",
               SELECTED_CLASS[t],
+              "aria-[pressed=true]:bg-primary aria-[pressed=true]:text-primary-foreground hover:aria-[pressed=true]:bg-primary dark:hover:aria-[pressed=true]:bg-primary",
             )}
           >
             {LABELS[t]}

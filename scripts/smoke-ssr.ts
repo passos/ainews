@@ -213,8 +213,10 @@ async function main() {
   const openAt = head.lastIndexOf("<script", initAt);
   const openTag =
     openAt < 0 ? "" : head.slice(openAt, head.indexOf(">", openAt));
-  if (!openTag || /\bsrc=/.test(openTag)) {
-    fail("GET / theme init script is not an inline script");
+  // type=, defer and async all postpone the script, so a stored dark choice
+  // would flash light.
+  if (!openTag || /\b(src|type|defer|async)\b/i.test(openTag)) {
+    fail(`GET / theme init script tag is "${openTag}"`);
   }
 
   // The test env has empty Access vars, so every admin variant fails closed.
