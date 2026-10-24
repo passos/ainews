@@ -126,6 +126,10 @@ export function checkImportRules(files: Map<string, string>): string[] {
   for (const [file, source] of files) {
     const isRoute = inDir(file, "src/routes/");
     const isPublication = inDir(file, "src/server/publication/");
+    const isPublicEntry =
+      (isRoute && !inDir(file, "src/routes/admin/")) ||
+      inDir(file, "src/components/");
+    const isAdminRoute = inDir(file, "src/routes/admin/");
 
     // R0: every relative code import resolves to a file, so R1/R2 cannot
     // miss one through a spelling the resolver does not understand.
@@ -136,9 +140,10 @@ export function checkImportRules(files: Map<string, string>): string[] {
       }
     }
 
-    // R1: no path from public code to pipeline/ or providers/. Expansion
-    // stops at server/admin/, which is behind Access.
-    if (isRoute || isPublication) {
+    // R1: public code cannot reach server/db/, pipeline/ or providers/.
+    // Publication and admin routes cannot reach pipeline/ or providers/.
+    // Traversal stops at server/admin/ (Access-guarded) and server/publication/.
+    if (isPublicEntry || isPublication || isAdminRoute) {
       const seen = new Set<string>([file]);
       const queue = [file];
       while (queue.length > 0) {
@@ -146,11 +151,16 @@ export function checkImportRules(files: Map<string, string>): string[] {
         for (const next of localImports(current, files)) {
           if (seen.has(next)) continue;
           seen.add(next);
-          if (inDir(next, "src/pipeline/") || inDir(next, "src/providers/")) {
+          const forbidden =
+            inDir(next, "src/pipeline/") ||
+            inDir(next, "src/providers/") ||
+            (isPublicEntry && inDir(next, "src/server/db/"));
+          if (forbidden) {
             violations.push(`R1 ${file} reaches ${next} via ${current}`);
             continue;
           }
           if (inDir(next, "src/server/admin/")) continue;
+          if (isPublicEntry && inDir(next, "src/server/publication/")) continue;
           queue.push(next);
         }
       }

@@ -77,6 +77,33 @@ describe("R1: public code does not reach pipeline/ or providers/", () => {
     );
     expect(v).toEqual([]);
   });
+
+  it("does not report a route that reads from publication/ even if publication reads db/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/index.tsx": `import { getSiteInfo } from "../server/publication/site";`,
+        "src/server/publication/site.ts": `import { getDb } from "../db/client";`,
+        "src/server/db/client.ts": "",
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+
+  it("reports a route that reaches server/db through components/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/index.tsx": `import { Card } from "../components/Card";`,
+        "src/components/Card.tsx": `import { getDb } from "../server/db/client";`,
+        "src/server/db/client.ts": "",
+      }),
+    );
+    expect(v).toContain(
+      "R1 src/routes/index.tsx reaches src/server/db/client.ts via src/components/Card.tsx",
+    );
+    expect(v).toContain(
+      "R1 src/components/Card.tsx reaches src/server/db/client.ts via src/components/Card.tsx",
+    );
+  });
 });
 
 describe("R2: routes read only through publication/ or admin/", () => {
@@ -88,6 +115,7 @@ describe("R2: routes read only through publication/ or admin/", () => {
       }),
     );
     expect(v).toEqual([
+      "R1 src/routes/index.tsx reaches src/server/db/client.ts via src/routes/index.tsx",
       "R2 src/routes/index.tsx imports src/server/db/client.ts",
     ]);
   });
