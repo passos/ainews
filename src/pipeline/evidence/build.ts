@@ -100,6 +100,7 @@ export function defaultEvidenceDeps(
 }
 
 export const NO_CLAIMS_SENTINEL = "[no_verifiable_claims]";
+export const EVIDENCE_COMPLETE_SENTINEL = "[evidence_batch_complete]";
 
 export async function generateEventEvidence(
   env: PipelineEnv,
@@ -178,7 +179,11 @@ export async function generateEventEvidence(
   // 2. Idempotency check: if claims already exist for this event and revision, skip
   const existingClaim = await deps.db
     .prepare(
-      "SELECT id FROM claims WHERE event_id = ?1 AND input_revision = ?2 LIMIT 1",
+      `SELECT id FROM claims
+       WHERE event_id = ?1
+         AND input_revision = ?2
+         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+       LIMIT 1`,
     )
     .bind(eventId, inputRevision)
     .first<{ id: number }>();
@@ -225,27 +230,33 @@ export async function generateEventEvidence(
         bodyText = await r2Obj.text();
       }
     }
+
     if (!bodyText) {
-      bodyText = a.summary ?? a.title;
-    }
+      console.warn({
+        warning: "article body missing in R2 for evidence extraction",
+        articleId: a.id,
+        bodySha: a.body_sha,
+      });
+      // Do NOT fall back to summary or title: citations must only verify against actual markdown body
+    } else {
+      articleBodiesMap.set(a.id, bodyText);
 
-    articleBodiesMap.set(a.id, bodyText);
-
-    // Index chunks into V_CHUNKS if bodies and vectorize available
-    if (deps.vectors && a.body_sha) {
-      try {
-        await indexArticleChunks(
-          { vectors: deps.vectors, models: deps.models },
-          a.id,
-          a.body_sha,
-          bodyText,
-        );
-      } catch (err) {
-        console.warn({
-          warning: "failed to index article chunks into V_CHUNKS",
-          articleId: a.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      // Index chunks into V_CHUNKS if bodies and vectorize available
+      if (deps.vectors && a.body_sha) {
+        try {
+          await indexArticleChunks(
+            { vectors: deps.vectors, models: deps.models },
+            a.id,
+            a.body_sha,
+            bodyText,
+          );
+        } catch (err) {
+          console.warn({
+            warning: "failed to index article chunks into V_CHUNKS",
+            articleId: a.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
 
@@ -254,9 +265,16 @@ export async function generateEventEvidence(
       title: a.title,
       sourceName: a.source_name,
       sourceDomain: a.source_domain,
+      bodySha: a.body_sha,
       isPrimarySource: isPrimarySourceDomain(a.source_domain, primaryDomains),
       bodyText,
     });
+  }
+
+  // If none of the approved articles have readable bodies, skip and allow retry later
+  const readableArticles = articleInputs.filter((a) => a.bodyText.length > 0);
+  if (readableArticles.length === 0) {
+    return { status: "skipped", eventId, reason: "missing_article_bodies" };
   }
 
   // 4. Build prompt material
@@ -271,15 +289,17 @@ export async function generateEventEvidence(
   const inputPayload = JSON.stringify({
     eventId,
     inputRevision,
+    promptVersion: CLAIMS_PROMPT_VERSION,
     articles: articleInputs.map((a) => ({
       id: a.id,
       title: a.title,
+      bodySha: a.bodySha,
       sourceDomain: a.sourceDomain,
       bodyExcerpt: a.bodyText.slice(0, 500),
     })),
   });
   const inputSha = (await sha256Hex(inputPayload)).slice(0, 16);
-  const logicalKey = `evidence:${eventId}:${inputSha}`;
+  const logicalKey = `evidence:${eventId}:${CLAIMS_PROMPT_VERSION}:${inputRevision}:${inputSha}`;
 
   const request = buildClaimsExtractionRequest(material);
   const res = await deps.models.generateText("reason", logicalKey, request);
@@ -299,8 +319,23 @@ export async function generateEventEvidence(
   const initialStatus = isAuto ? "published" : "pending_review";
   const now = deps.now();
 
-  // If output failed or had 0 claims, record a sentinel empty row to prevent scheduler loop
-  if (!parsed || parsed.claims.length === 0) {
+  // If output failed to parse, fail as recoverable skipped (do not write sentinel)
+  if (!parsed) {
+    console.warn({
+      warning: "failed to parse claims output against schema",
+      eventId,
+      finishReason: res.finishReason,
+      rawText: res.text.slice(0, 200),
+    });
+    return {
+      status: "skipped",
+      eventId,
+      reason: "failed_to_parse_model_output",
+    };
+  }
+
+  // If output legitimately had 0 verifiable claims, record a sentinel empty row to prevent scheduler loop
+  if (parsed.claims.length === 0) {
     await deps.db
       .prepare(
         `INSERT INTO claims (
@@ -327,6 +362,31 @@ export async function generateEventEvidence(
       citationsCount: 0,
     };
   }
+
+  // Clean up any partial claims from previously aborted attempts on this revision
+  // First delete child citations in claim_evidence to satisfy foreign key constraints
+  await deps.db
+    .prepare(
+      `DELETE FROM claim_evidence
+       WHERE claim_id IN (
+         SELECT id FROM claims
+         WHERE event_id = ?1
+           AND input_revision = ?2
+           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+       )`,
+    )
+    .bind(eventId, inputRevision)
+    .run();
+
+  await deps.db
+    .prepare(
+      `DELETE FROM claims
+       WHERE event_id = ?1
+         AND input_revision = ?2
+         AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')`,
+    )
+    .bind(eventId, inputRevision)
+    .run();
 
   let totalClaims = 0;
   let totalCitations = 0;
@@ -437,6 +497,28 @@ export async function generateEventEvidence(
       await deps.db.batch(citationStmts);
       totalCitations += verifiedCitations.length;
     }
+  }
+
+  // Mark completion of the evidence batch
+  if (totalClaims > 0) {
+    await deps.db
+      .prepare(
+        `INSERT INTO claims (
+           event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
+         )
+         SELECT ?1, ?2, 'fact', 'unverified', 0, 'published', ?3, ?4, ?5, ?6
+         WHERE (SELECT revision FROM events WHERE id = ?1) = ?3
+         ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
+      )
+      .bind(
+        eventId,
+        EVIDENCE_COMPLETE_SENTINEL,
+        inputRevision,
+        CLAIMS_PROMPT_VERSION,
+        modelName,
+        now,
+      )
+      .run();
   }
 
   return {

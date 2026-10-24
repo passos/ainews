@@ -14,13 +14,10 @@ import {
   toViews,
   type ArticleView,
   type CardRow,
+  type Db,
   type SectionInfo,
 } from "./articles";
 import { getEventEvidence } from "./evidence";
-
-type Db = {
-  all<T>(query: unknown): Promise<T[]>;
-};
 
 export interface EventView {
   id: number;

@@ -11,6 +11,7 @@ export interface ArticleEvidenceInput {
   title: string;
   sourceName: string;
   sourceDomain: string;
+  bodySha: string;
   isPrimarySource: boolean;
   bodyText: string;
 }

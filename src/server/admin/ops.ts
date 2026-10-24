@@ -980,7 +980,7 @@ export async function listPendingClaims(
        JOIN industries i ON i.id = e.industry_id
        WHERE c.status = 'pending_review'
          AND c.input_revision = e.revision
-         AND c.claim_text != '[no_verifiable_claims]'
+         AND c.claim_text NOT LIKE '[%]'
        ORDER BY c.created_at DESC`,
     )
     .all<PendingClaimRow>();

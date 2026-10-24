@@ -9,7 +9,7 @@ export async function enqueueDueEvidence(
     return [];
   }
 
-  // Find events with approved articles where current revision does not have any claims yet
+  // Find events with approved articles where current revision does not have completed claims
   const { results } = await env.DB.prepare(
     `SELECT e.id
      FROM events e
@@ -24,6 +24,7 @@ export async function enqueueDueEvidence(
          SELECT 1 FROM claims c
          WHERE c.event_id = e.id
            AND c.input_revision = e.revision
+           AND c.claim_text IN ('[no_verifiable_claims]', '[evidence_batch_complete]')
        )
      ORDER BY e.updated_at DESC
      LIMIT ?1`,

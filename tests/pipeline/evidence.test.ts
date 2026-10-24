@@ -11,6 +11,8 @@ import {
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
 import type { ModelTransport } from "../../src/providers/transport";
+import { getDb } from "../../src/server/db/client";
+import { getEventEvidence } from "../../src/server/publication/evidence";
 
 class FakeQueue {
   sent: GenerateMessage[] = [];
@@ -746,5 +748,231 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
       .bind(event!.id)
       .first<{ id: number }>();
     expect(claimRow).toBeDefined();
+  });
+
+  it("handles empty claims array by storing NO_CLAIMS_SENTINEL and filters out of publication and schedule", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-empty-claims-ind', 'Auto Empty', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://empty/feed', 'empty.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-empty', 'https://example.com/art-empty', 'Empty Claims Article', 'Summary', 'shaEmpty', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEmpty', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Empty Claims Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art!.id}/shaEmpty.md`,
+      "Paragraph with no verifiable statistical or factual claims.",
+    );
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [],
+    }));
+
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+
+    const res = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res.status).toBe("generated");
+    if (res.status === "generated") {
+      expect(res.claimsCount).toBe(0);
+    }
+
+    // Verify database has sentinel claim
+    const rows = await env.DB.prepare(
+      "SELECT claim_text, status FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ claim_text: string; status: string }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0].claim_text).toBe("[no_verifiable_claims]");
+
+    // Verify publication layer ignores sentinel claim
+    const pubEvidence = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(pubEvidence.claims).toHaveLength(0);
+
+    // Verify enqueueDueEvidence skips the event because sentinel completes it
+    const enqueued = await enqueueDueEvidence(
+      { DB: env.DB, Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"] },
+      1000,
+    );
+    expect(enqueued).not.toContain(event!.id);
+    expect(queue.sent).not.toContainEqual({
+      kind: "evidence",
+      eventId: event!.id,
+    });
+  });
+
+  it("recovers from interrupted/dirty batch by cleaning up uncompleted claims on retry", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-dirty-claims-ind', 'Auto Dirty', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://dirty/feed', 'dirty.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://example.com/art-dirty', 'https://example.com/art-dirty', 'Dirty Recovery Article', 'Summary', 'shaDirty', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaDirty', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Dirty Claims Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const quoteText =
+      "Recovery test quotation showing self healing dirty cleanup.";
+    const bodyText = `Intro line.\n\n${quoteText}\n\nOutro line.`;
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaDirty.md`, bodyText);
+
+    // Simulate an interrupted run: a dirty claim exists without the completion sentinel
+    const dirtyClaim = await env.DB.prepare(
+      `INSERT INTO claims (event_id, input_revision, prompt_version, model, claim_text, claim_type, consensus_status, status, primary_source_preferred, created_at)
+       VALUES (?1, 1, 'pv-old', 'model-dirty', 'Unfinished partial claim from prior run', 'fact', 'unverified', 'pending_review', 0, 1000)
+       RETURNING id`,
+    )
+      .bind(event!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO claim_evidence (claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at)
+       VALUES (?1, ?2, 'shaDirty', 'Partial quote', 'Partial quote', 0, 10, 'support', 0, 0, 1000)`,
+    )
+      .bind(dirtyClaim!.id, art!.id)
+      .run();
+
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+
+    // 1. enqueueDueEvidence considers it due because [evidence_batch_complete] is missing
+    const enqueued = await enqueueDueEvidence(
+      { DB: env.DB, Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"] },
+      1000,
+    );
+    expect(enqueued).toContain(event!.id);
+    expect(queue.sent).toContainEqual({ kind: "evidence", eventId: event!.id });
+
+    // 2. generateEventEvidence runs: it must clean up the dirty claim and citations
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [
+        {
+          claimText: quoteText,
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote: quoteText,
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+
+    const res = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res.status).toBe("generated");
+    if (res.status === "generated") {
+      expect(res.claimsCount).toBe(1);
+    }
+
+    // Old dirty claim should be gone
+    const oldDirty = await env.DB.prepare("SELECT id FROM claims WHERE id = ?1")
+      .bind(dirtyClaim!.id)
+      .first();
+    expect(oldDirty).toBeNull();
+
+    // Now we have the new claim + [evidence_batch_complete] sentinel
+    const allClaims = await env.DB.prepare(
+      "SELECT claim_text, status FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ claim_text: string; status: string }>();
+    expect(allClaims.results).toHaveLength(2);
+    const texts = allClaims.results.map((r) => r.claim_text);
+    expect(texts).toContain(quoteText);
+    expect(texts).toContain("[evidence_batch_complete]");
+
+    // 3. Next enqueueDueEvidence skips the event because sentinel is present
+    queue.sent = [];
+    const enqueuedAfter = await enqueueDueEvidence(
+      { DB: env.DB, Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"] },
+      1000,
+    );
+    expect(enqueuedAfter).not.toContain(event!.id);
+    expect(queue.sent).not.toContainEqual({
+      kind: "evidence",
+      eventId: event!.id,
+    });
   });
 });

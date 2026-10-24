@@ -81,7 +81,7 @@ describe("InspectEvidencePanel", () => {
 
     // Section header
     expect(html).toContain("Inspect Evidence");
-    expect(html).toContain("2 claims verified");
+    expect(html).toContain("2 claims inspected");
 
     // Claim 1 assertions
     expect(html).toContain("fact");

@@ -49,7 +49,7 @@ export function verifyQuoteInBody(
     };
   }
 
-  const isWordChar = (c: string) => /[a-zA-Z0-9]/.test(c);
+  const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
 
   // 1. Direct exact substring match in original markdown body with word boundary safety
   let directIndex = bodyMd.indexOf(quoteTrimmed);

@@ -8,12 +8,10 @@ import type {
   EvidencePublicationStatus,
   EvidenceStance,
 } from "../../lib/evidence/types";
-import { approvedArticleWhere } from "./articles";
+import { approvedArticleWhere, type Db } from "./articles";
 
 export async function getEventEvidence(
-  db: {
-    all: <T = unknown>(query: unknown) => Promise<T[]>;
-  },
+  db: Db,
   eventId: number,
 ): Promise<EventEvidenceView> {
   // 1. Fetch published claims for current event revision
@@ -37,7 +35,7 @@ export async function getEventEvidence(
     WHERE c.event_id = ${eventId}
       AND c.status = 'published'
       AND c.input_revision = e.revision
-      AND c.claim_text != '[no_verifiable_claims]'
+      AND c.claim_text NOT LIKE '[%]'
     ORDER BY c.id ASC
   `);
 
@@ -80,6 +78,7 @@ export async function getEventEvidence(
       ce.is_primary_source,
       ce.verified
     FROM claim_evidence ce
+    JOIN claims c ON c.id = ce.claim_id
     JOIN articles a ON a.id = ce.article_id
     JOIN sources s ON s.id = a.source_id
     JOIN event_articles ea ON ea.article_id = a.id AND ea.event_id = ${eventId}
@@ -90,14 +89,18 @@ export async function getEventEvidence(
       LIMIT 1
     )
     WHERE ${approvedArticleWhere}
+      AND c.event_id = ${eventId}
+      AND c.status = 'published'
+      AND c.input_revision = (SELECT revision FROM events WHERE id = ${eventId})
       AND ce.body_sha = a.body_sha
       AND ce.verified = 1
     ORDER BY ce.is_primary_source DESC, ce.id ASC
   `);
 
+  const claimIdSet = new Set(claimIds);
   const evidenceByClaimId = new Map<number, ClaimEvidenceView[]>();
   for (const row of evidenceRows) {
-    if (!claimIds.includes(row.claim_id)) continue;
+    if (!claimIdSet.has(row.claim_id)) continue;
     const list = evidenceByClaimId.get(row.claim_id) ?? [];
     list.push({
       id: row.id,

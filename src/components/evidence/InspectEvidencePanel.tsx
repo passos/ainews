@@ -33,8 +33,8 @@ export function InspectEvidencePanel({
           <span className="font-mono text-[0.68rem] text-muted-foreground">
             {evidence.claims.length}{" "}
             {evidence.claims.length === 1
-              ? "claim verified"
-              : "claims verified"}
+              ? "claim inspected"
+              : "claims inspected"}
           </span>
         </div>
         <p className="font-mono text-[0.65rem] text-muted-foreground">
