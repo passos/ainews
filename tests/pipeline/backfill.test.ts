@@ -47,14 +47,14 @@ describe("parseArxivCatchup", () => {
   it("reads the date, the three sections and drops entries without id or title", () => {
     expect(page.date).toBe("Thu, 22 Oct 2026");
     expect(page.incomplete).toBe(false);
-    // 3 New + 3 Cross + 4 Replacement; the 2 synthetic entries are dropped.
-    expect(page.items).toHaveLength(10);
+    // 3 New + 3 Cross + 5 Replacement; the 2 synthetic entries are dropped.
+    expect(page.items).toHaveLength(11);
     expect(page.dropped).toBe(2);
     const types = page.items.map((i) => i.fields["arxiv:announce_type"]);
     expect(types).toEqual([
       ...Array(3).fill(["new"]),
       ...Array(3).fill(["cross"]),
-      ...Array(4).fill(["replace"]),
+      ...Array(5).fill(["replace"]),
     ]);
     expect(page.items.map((i) => i.url)).not.toContain(
       "https://arxiv.org/abs/2610.99999",
@@ -82,6 +82,8 @@ describe("parseArxivCatchup", () => {
     expect(second.fields.category).toEqual(["cs.AI", "cs.CV", "cs.LG"]);
     const cross = page.items[3];
     expect(cross.url).toBe("https://arxiv.org/abs/2610.22714");
+    // The version of a /abs/ link is dropped, as the RSS <link> has none.
+    expect(page.items.at(-1)?.url).toBe("https://arxiv.org/abs/2610.99998");
   });
 
   it("decodes HTML entities in titles and abstracts", () => {
@@ -193,6 +195,22 @@ describe("parseBackfillArgs", () => {
     expect(() => parseBackfillArgs(["--dry"])).toThrow();
     expect(() => parseBackfillArgs(["--apply", "--dry-run"])).toThrow();
   });
+
+  it("turns apply and remote on only when they are given", () => {
+    expect(parseBackfillArgs(["--dry-run", "--days", "2"])).toEqual({
+      apply: false,
+      days: 2,
+      remote: false,
+    });
+    expect(parseBackfillArgs(["--apply"])).toMatchObject({
+      apply: true,
+      remote: false,
+    });
+    expect(parseBackfillArgs(["--remote"])).toMatchObject({
+      apply: false,
+      remote: true,
+    });
+  });
 });
 
 const ROBOTS = "User-agent: *\nCrawl-delay: 15\nAllow: /\n";
@@ -214,18 +232,45 @@ function arxivFetch(robots = ROBOTS) {
   });
 }
 
-function deps(f: ReturnType<typeof fakeFetch>): BackfillDeps & {
-  sleeps: number[];
-} {
+/** Fake clock that sleep() moves forward. */
+function deps(
+  f: ReturnType<typeof fakeFetch>,
+  start = FRI,
+): BackfillDeps & { sleeps: number[] } {
   const sleeps: number[] = [];
+  let clock = start;
   return {
     fetch: f.fetch,
+    now: () => clock,
     sleep: async (ms) => {
       sleeps.push(ms);
+      clock += ms;
     },
     sleeps,
   };
 }
+
+/** env.BODIES that counts put() calls. */
+function countingBodies() {
+  const counter = { puts: 0 };
+  const bucket = new Proxy(env.BODIES, {
+    get(target, prop) {
+      if (prop === "put") {
+        return (...args: Parameters<R2Bucket["put"]>) => {
+          counter.puts += 1;
+          return target.put(...args);
+        };
+      }
+      const value = Reflect.get(target, prop) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { bucket, counter };
+}
+
+const NO_DELAY = "User-agent: *\nAllow: /\n";
+const pagePaths = (f: ReturnType<typeof fakeFetch>) =>
+  f.requests.filter((r) => !r.url.endsWith("/robots.txt"));
 
 async function tableCounts() {
   const tables = ["articles", "article_sightings", "fetch_hosts", "sources"];
@@ -294,9 +339,9 @@ describe("backfill", () => {
     );
     expect(report).toMatchObject({
       sourceId: arxivId,
-      fetched: 10,
+      fetched: 11,
       dropped: 2,
-      excluded: 4,
+      excluded: 5,
       stale: 0,
       kept: 6,
       existing: 0,
@@ -308,7 +353,7 @@ describe("backfill", () => {
     expect(report.samples).toHaveLength(3);
     expect(report.pages).toEqual([
       "2026-10-23: no announcement (page is for Mon, 19 Oct 2026)",
-      "2026-10-22: 10 entries",
+      "2026-10-22: 11 entries",
       "2026-10-21: no announcement (page is for Mon, 19 Oct 2026)",
     ]);
     expect(await tableCounts()).toEqual(before);
@@ -366,7 +411,7 @@ describe("backfill", () => {
       pipelineEnv(q),
       source,
       { ...opts, now: FRI + HOUR },
-      deps(arxivFetch()),
+      deps(arxivFetch(), FRI + HOUR),
     );
     expect(second).toMatchObject({ existing: 6, fresh: 0, inserted: 0 });
     expect(await count("SELECT count(*) AS n FROM articles")).toBe(6);
@@ -410,13 +455,165 @@ describe("backfill", () => {
     );
     expect(report.pages).toEqual([
       "2026-10-23: HTTP 404, no announcement",
-      "2026-10-22: 10 entries",
+      "2026-10-22: 11 entries",
       "2026-10-21: HTTP 404, no announcement",
     ]);
     expect(report.kept).toBe(6);
     await expect(
       backfillArxiv(pipelineEnv(fakeQueue()), source, opts, deps(respond(503))),
     ).rejects.toThrow("HTTP 503");
+  });
+
+  it("spaces arXiv pages 15 s when robots.txt gives no Crawl-delay", async () => {
+    const d = deps(arxivFetch(NO_DELAY));
+    const source = (await loadSource(env.DB, ARXIV))!;
+    await backfillArxiv(
+      pipelineEnv(fakeQueue()),
+      source,
+      { apply: false, days: 3, now: FRI },
+      d,
+    );
+    expect(d.sleeps).toEqual([15_000, 15_000]);
+  });
+
+  it("dry run: no R2 put and no queue send, even for feed content", async () => {
+    const q = fakeQueue();
+    const { bucket, counter } = countingBodies();
+    const f = fakeFetch((req) =>
+      new URL(req.url).pathname === "/robots.txt"
+        ? new Response(NO_DELAY)
+        : xml(mitXml),
+    );
+    const source = (await loadSource(env.DB, MIT))!;
+    const now = Date.UTC(2026, 9, 24, 10, 0, 0);
+    const report = await backfillFeedPages(
+      { ...pipelineEnv(q), BODIES: bucket },
+      source,
+      { apply: false, days: 3, now },
+      deps(f, now),
+    );
+    expect(report).toMatchObject({ kept: 3, fresh: 3, inserted: null });
+    expect(counter.puts).toBe(0);
+    expect(q.batches).toBe(0);
+    expect(q.sent).toEqual([]);
+  });
+
+  it("requests pages with redirect: manual and stops on a 3xx", async () => {
+    const f = arxivFetch();
+    const source = (await loadSource(env.DB, ARXIV))!;
+    await backfillArxiv(
+      pipelineEnv(fakeQueue()),
+      source,
+      { apply: false, days: 3, now: FRI },
+      deps(f),
+    );
+    expect(pagePaths(f).map((r) => r.redirect)).toEqual([
+      "manual",
+      "manual",
+      "manual",
+    ]);
+    const moved = fakeFetch((req) =>
+      new URL(req.url).pathname === "/robots.txt"
+        ? new Response(NO_DELAY)
+        : new Response("", {
+            status: 301,
+            headers: { Location: "https://elsewhere.example/feed/" },
+          }),
+    );
+    await expect(
+      backfillFeedPages(
+        pipelineEnv(fakeQueue()),
+        (await loadSource(env.DB, MIT))!,
+        { apply: true, days: 3, now: FRI },
+        deps(moved),
+      ),
+    ).rejects.toThrow(/redirect/);
+    expect(pagePaths(moved).map((r) => r.url)).toEqual([MIT]);
+    expect(await count("SELECT count(*) AS n FROM articles")).toBe(0);
+  });
+
+  it("waits for the host's crawl slot, and stops after 3 retries", async () => {
+    const hold = (until: number) =>
+      env.DB.prepare(
+        `INSERT INTO fetch_hosts (host, robots_status, robots_body,
+           robots_fetched_at, crawl_delay_s, next_allowed_at)
+         VALUES ('arxiv.org', 200, ?1, ?2, 15, ?3)
+         ON CONFLICT (host) DO UPDATE SET next_allowed_at = excluded.next_allowed_at`,
+      )
+        .bind(ROBOTS, FRI, until)
+        .run();
+    const source = (await loadSource(env.DB, ARXIV))!;
+    const opts = { apply: true, days: 1, now: FRI };
+    // Another consumer holds the slot for 40 s more.
+    await hold(FRI + 40_000);
+    const f = arxivFetch();
+    const d = deps(f);
+    await backfillArxiv(pipelineEnv(fakeQueue()), source, opts, d);
+    expect(d.sleeps).toEqual([40_000]);
+    expect(pagePaths(f)).toHaveLength(1);
+    // The other consumer takes the slot again during each wait: 4 claims
+    // fail, 3 waits, no page request.
+    await hold(FRI + 24 * HOUR);
+    const busy = arxivFetch();
+    const b = deps(busy);
+    const wait = b.sleep;
+    b.sleep = async (ms) => {
+      await wait(ms);
+      await hold(b.now() + 60_000);
+    };
+    await expect(
+      backfillArxiv(pipelineEnv(fakeQueue()), source, opts, b),
+    ).rejects.toThrow(/crawl slot/);
+    expect(b.sleeps).toHaveLength(3);
+    expect(pagePaths(busy)).toHaveLength(0);
+  });
+
+  it("stops on a catchup page without a date (not a day without announcement)", async () => {
+    const f = fakeFetch((req) =>
+      new URL(req.url).pathname === "/robots.txt"
+        ? new Response(ROBOTS)
+        : html(
+            "<html><body><h1>Please verify you are human</h1></body></html>",
+          ),
+    );
+    const source = (await loadSource(env.DB, ARXIV))!;
+    await expect(
+      backfillArxiv(
+        pipelineEnv(fakeQueue()),
+        source,
+        { apply: false, days: 3, now: FRI },
+        deps(f),
+      ),
+    ).rejects.toThrow(/no date/);
+  });
+
+  it("feed pages: entries without a date do not end paging", async () => {
+    const now = Date.UTC(2026, 9, 23, 0, 0, 0);
+    // One item without pubDate; the dated ones are all in the window.
+    const oneUndated = mitXml.replace(/<pubDate>[^<]*<\/pubDate>/, "");
+    const noDates = mitXml.replace(/<pubDate>[^<]*<\/pubDate>/g, "");
+    const run = async (page1: string) => {
+      const f = fakeFetch((req) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/robots.txt") return new Response(NO_DELAY);
+        return url.searchParams.has("paged")
+          ? new Response("not found", { status: 404 })
+          : xml(page1);
+      });
+      const report = await backfillFeedPages(
+        pipelineEnv(fakeQueue()),
+        (await loadSource(env.DB, MIT))!,
+        { apply: false, days: 3, now },
+        deps(f, now),
+      );
+      return report.pages;
+    };
+    expect(await run(oneUndated)).toEqual([
+      `${MIT}: 10 items`,
+      `${MIT}?paged=2: HTTP 404, stop`,
+    ]);
+    // No dated entry at all: an empty page, paging ends.
+    expect(await run(noDates)).toEqual([`${MIT}: 10 items`]);
   });
 
   it("refuses a catchup page that does not show all its entries", async () => {
@@ -499,7 +696,8 @@ describe("backfill", () => {
       `${MIT}?paged=4`,
       `${MIT}?paged=5`,
     ]);
-    expect(d.sleeps).toHaveLength(4);
+    // robots.txt gives no Crawl-delay: FEED_PAGE_DELAY_S.
+    expect(d.sleeps).toEqual([5000, 5000, 5000, 5000]);
     // The same 6 kept items on every page count once.
     expect(report).toMatchObject({ fetched: 50, kept: 30, fresh: 6 });
   });

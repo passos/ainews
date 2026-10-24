@@ -1,12 +1,12 @@
 // One-off backfill of the last N days of two sources (#46), run by
 // scripts/backfill.ts. Entries go through the source config and storeItems
 // exactly as in collectSource; the only extra rule is the time window.
-// A dry run (the default) only reads the database: robots.txt checks get a
-// database that drops every write (readOnlyDb).
+// A dry run (the default) gets dryRunEnv: SELECTs reach the database, other
+// statements are dropped, and any R2 or queue call throws.
 import { fetchLimited, USER_AGENT } from "../../lib/http";
 import { parseFeedDate } from "../../lib/time";
 import { normalizeUrl } from "../../lib/url";
-import { checkRobots } from "../body/robots";
+import { checkRobots, claimHostSlot } from "../body/robots";
 import type { PipelineEnv } from "../messages";
 import { newYorkDate, newYorkOffset, parseArxivCatchup } from "./catchup";
 import {
@@ -25,6 +25,8 @@ export const ARXIV_DELAY_S = 15;
 /** Least spacing between feed pages when robots.txt gives no delay. */
 export const FEED_PAGE_DELAY_S = 5;
 export const MAX_FEED_PAGES = 5;
+/** Retries when another consumer holds the host's crawl slot. */
+export const SLOT_RETRIES = 3;
 
 export interface BackfillArgs {
   apply: boolean;
@@ -62,6 +64,8 @@ export function parseBackfillArgs(argv: string[]): BackfillArgs {
 export interface BackfillDeps {
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
+  /** Time of a request (crawl slot, robots.txt cache); Date.now in the script. */
+  now: () => number;
 }
 
 export interface BackfillOptions {
@@ -119,13 +123,15 @@ export async function loadSource(
 }
 
 /**
- * The D1 of a dry run: SELECTs run, every other statement does nothing,
- * batch() throws (storeItems must not run).
+ * The D1 of a dry run: SELECTs run; any other statement is dropped and
+ * reports one change, so claimHostSlot sees its slot as taken (its write,
+ * like the robots.txt cache write of checkRobots, is lost: accepted for a
+ * dry run). batch() throws: storeItems fails before it writes anything.
  */
 export function readOnlyDb(db: D1Database): D1Database {
   const nothing = {
     bind: () => nothing,
-    run: async () => ({ success: true, meta: { changes: 0 }, results: [] }),
+    run: async () => ({ success: true, meta: { changes: 1 }, results: [] }),
     all: async () => ({ success: true, meta: { changes: 0 }, results: [] }),
     first: async () => null,
   };
@@ -161,47 +167,90 @@ export function arxivDays(now: number, days: number): string[] {
   return out;
 }
 
-function dbFor(env: Pick<PipelineEnv, "DB">, apply: boolean) {
-  return { DB: apply ? env.DB : readOnlyDb(env.DB) };
+type BackfillEnv = Pick<PipelineEnv, "DB" | "BODIES" | "Q_INGEST">;
+
+/** An object whose every method throws. */
+function refuse<T>(name: string): T {
+  return new Proxy(
+    {},
+    {
+      get: () => () => {
+        throw new Error(`dry run: no ${name} call`);
+      },
+    },
+  ) as T;
 }
 
-/** robots.txt check, then one GET with USER_AGENT. */
+/**
+ * The env of the whole run. A dry run gets readOnlyDb and R2 and queue
+ * stand-ins that throw, so a dry run that reached storeItems would fail,
+ * not write.
+ */
+function envFor(env: BackfillEnv, apply: boolean): BackfillEnv {
+  if (apply) return env;
+  return {
+    DB: readOnlyDb(env.DB),
+    BODIES: refuse<R2Bucket>("R2"),
+    Q_INGEST: refuse<Queue>("queue"),
+  };
+}
+
+/**
+ * robots.txt check, the host's crawl slot (as the body fetches take it, so
+ * the backfill and the Worker do not hit a host within its delay), then one
+ * GET with USER_AGENT. Redirects are not followed: only `url` was checked.
+ * `minDelaySec` is the least slot length; the result's delaySec is the one
+ * used.
+ */
 async function getPage(
   env: Pick<PipelineEnv, "DB">,
   source: BackfillSource,
   url: string,
-  now: number,
+  minDelaySec: number,
   deps: BackfillDeps,
-): Promise<{ res: Response; body: string; crawlDelaySec: number | null }> {
-  const domains = [new URL(url).hostname];
+): Promise<{ res: Response; body: string; delaySec: number }> {
+  const target = new URL(url);
+  const domains = [target.hostname];
   if (source.site_domain?.trim()) domains.push(source.site_domain);
-  const robots = await checkRobots(env, url, now, deps.fetch, domains);
+  const robots = await checkRobots(env, url, deps.now(), deps.fetch, domains);
   if (!robots.allowed) throw new Error(`${ROBOTS_DISALLOWED}: ${url}`);
+  const delaySec = Math.max(minDelaySec, robots.crawlDelaySec ?? 0);
+  for (let attempt = 0; ; attempt++) {
+    const slot = await claimHostSlot(env, target.host, delaySec, deps.now());
+    if (slot.claimed) break;
+    if (attempt === SLOT_RETRIES) {
+      throw new Error(
+        `${target.host}: crawl slot busy after ${SLOT_RETRIES} retries`,
+      );
+    }
+    await deps.sleep(slot.waitSec * 1000);
+  }
   const { res, bytes, truncated } = await fetchLimited(
     url,
     {
       headers: { "User-Agent": USER_AGENT },
+      redirect: "manual",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     },
     MAX_FEED_BYTES,
     deps.fetch,
   );
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get("Location");
+    throw new Error(`${url}: HTTP ${res.status} redirect to ${location}`);
+  }
   if (truncated) throw new Error(`${url}: over ${MAX_FEED_BYTES} bytes`);
-  return {
-    res,
-    body: new TextDecoder().decode(bytes),
-    crawlDelaySec: robots.crawlDelaySec,
-  };
+  return { res, body: new TextDecoder().decode(bytes), delaySec };
 }
 
 /** One catchup page per announcement day, ARXIV_DELAY_S or more apart. */
 export async function backfillArxiv(
-  env: Pick<PipelineEnv, "DB" | "BODIES" | "Q_INGEST">,
+  realEnv: BackfillEnv,
   source: BackfillSource,
   opts: BackfillOptions,
   deps: BackfillDeps,
 ): Promise<BackfillReport> {
-  const db = dbFor(env, opts.apply);
+  const env = envFor(realEnv, opts.apply);
   const pages: string[] = [];
   const items: FeedItem[] = [];
   let dropped = 0;
@@ -210,8 +259,8 @@ export async function backfillArxiv(
   for (const [i, day] of days.entries()) {
     if (i > 0) await deps.sleep(delaySec * 1000);
     const url = `${ARXIV_CATCHUP}${day}?abs=True`;
-    const page = await getPage(db, source, url, opts.now, deps);
-    delaySec = Math.max(ARXIV_DELAY_S, page.crawlDelaySec ?? 0);
+    const page = await getPage(env, source, url, ARXIV_DELAY_S, deps);
+    delaySec = page.delaySec;
     if (page.res.status === 404) {
       pages.push(`${day}: HTTP 404, no announcement`);
       continue;
@@ -221,7 +270,10 @@ export async function backfillArxiv(
     if (parsed.incomplete) {
       throw new Error(`${url} does not show all entries`);
     }
-    const pageDay = parsed.date ? parseFeedDate(parsed.date, "+00:00") : null;
+    // A 200 page without the date is not arXiv's day page (an error or a
+    // check page): stop, do not count it as a day without announcement.
+    if (!parsed.date) throw new Error(`${url}: no date in the page`);
+    const pageDay = parseFeedDate(parsed.date, "+00:00");
     if (pageDay?.toISOString().slice(0, 10) !== day) {
       pages.push(`${day}: no announcement (page is for ${parsed.date})`);
       continue;
@@ -238,12 +290,12 @@ export async function backfillArxiv(
  * not found, or MAX_FEED_PAGES pages are read.
  */
 export async function backfillFeedPages(
-  env: Pick<PipelineEnv, "DB" | "BODIES" | "Q_INGEST">,
+  realEnv: BackfillEnv,
   source: BackfillSource,
   opts: BackfillOptions,
   deps: BackfillDeps,
 ): Promise<BackfillReport> {
-  const db = dbFor(env, opts.apply);
+  const env = envFor(realEnv, opts.apply);
   const cutoff = opts.now - opts.days * DAY_MS;
   const pages: string[] = [];
   const items: FeedItem[] = [];
@@ -252,8 +304,8 @@ export async function backfillFeedPages(
     if (n > 1) await deps.sleep(delaySec * 1000);
     const url = new URL(source.feed_url);
     if (n > 1) url.searchParams.set("paged", String(n));
-    const page = await getPage(db, source, url.href, opts.now, deps);
-    delaySec = Math.max(FEED_PAGE_DELAY_S, page.crawlDelaySec ?? 0);
+    const page = await getPage(env, source, url.href, FEED_PAGE_DELAY_S, deps);
+    delaySec = page.delaySec;
     if (n > 1 && page.res.status === 404) {
       pages.push(`${url.href}: HTTP 404, stop`);
       break;
@@ -262,16 +314,18 @@ export async function backfillFeedPages(
     const found = parseFeed(page.body, url.href);
     pages.push(`${url.href}: ${found.length} items`);
     items.push(...found);
-    const dates = found.map(
-      (i) => parseFeedDate(i.publishedRaw, source.utc_offset)?.getTime() ?? 0,
-    );
-    if (found.length === 0 || Math.min(...dates) < cutoff) break;
+    // Entries without a date do not decide; a page with none is empty.
+    const dates = found.flatMap((i) => {
+      const at = parseFeedDate(i.publishedRaw, source.utc_offset)?.getTime();
+      return at === undefined ? [] : [at];
+    });
+    if (dates.length === 0 || Math.min(...dates) < cutoff) break;
   }
   return backfillItems(env, source, items, opts, pages, 0);
 }
 
 async function backfillItems(
-  env: Pick<PipelineEnv, "DB" | "BODIES" | "Q_INGEST">,
+  env: BackfillEnv,
   source: BackfillSource,
   items: FeedItem[],
   opts: BackfillOptions,

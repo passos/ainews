@@ -128,6 +128,7 @@ try {
         { apply: args.apply, days: args.days, now },
         {
           fetch,
+          now: Date.now,
           sleep: (ms) => {
             console.log(`  waiting ${ms / 1000} s`);
             return new Promise((resolve) => setTimeout(resolve, ms));
