@@ -106,21 +106,33 @@ export function parseTextOutput(model: string, raw: unknown): TextResult {
         array(body.candidates, "candidates")[0],
         "candidates[0]",
       );
-      const content = record(candidate.content, "candidates[0].content");
-      const text = array(content.parts, "candidates[0].content.parts")
-        .map((part, i) => record(part, `parts[${i}]`))
-        .filter((part) => part.text !== undefined)
-        .map((part, i) => string(part.text, `parts[${i}].text`))
-        .join("");
+      // Read finishReason first: a thinking-only cut-off has no content, and
+      // the reason must reach the error message.
+      const finishReason =
+        candidate.finishReason === undefined
+          ? undefined
+          : string(candidate.finishReason, "candidates[0].finishReason");
+      let text: string;
+      try {
+        const content = record(candidate.content, "candidates[0].content");
+        text = array(content.parts, "candidates[0].content.parts")
+          .map((part, i) => record(part, `parts[${i}]`))
+          .filter((part) => part.text !== undefined)
+          .map((part, i) => string(part.text, `parts[${i}].text`))
+          .join("");
+      } catch (error) {
+        if (error instanceof ResponseParseError && finishReason !== undefined) {
+          throw new ResponseParseError(
+            `${error.message} (finishReason ${finishReason})`,
+          );
+        }
+        throw error;
+      }
       const usage = record(body.usageMetadata, "usageMetadata");
       // Thinking tokens are billed as output. A thinking-only reply has no
       // candidatesTokenCount.
       const count = (field: string): number =>
         usage[field] === undefined ? 0 : number(usage[field], field);
-      const finishReason =
-        candidate.finishReason === undefined
-          ? undefined
-          : string(candidate.finishReason, "candidates[0].finishReason");
       return {
         text,
         usage: {
