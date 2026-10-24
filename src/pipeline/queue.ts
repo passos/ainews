@@ -4,15 +4,24 @@ import { analyzeArticle, type AnalyzeDeps } from "./analyze/analyze";
 import { processBody, type BodyDeps } from "./body/body";
 import { collectSource } from "./collect/collect";
 import { persistDeadLetters } from "./dlq";
+import {
+  handleGenerateBatch,
+  type GenerateConsumerDeps,
+} from "./generate/consumer";
 import { handleGroupBatch, type GroupConsumerDeps } from "./group/consumer";
 import {
+  GENERATE_QUEUE,
   GROUP_QUEUE,
   INGEST_QUEUE,
+  type GenerateMessage,
   type IngestMessage,
   type PipelineEnv,
 } from "./messages";
 
-export type QueueDeps = BodyDeps & AnalyzeDeps & GroupConsumerDeps;
+export type QueueDeps = BodyDeps &
+  AnalyzeDeps &
+  GroupConsumerDeps &
+  GenerateConsumerDeps;
 
 /** fetch, env.AI.toMarkdown() and env.AI.run() via AI Gateway; tests pass fakes. */
 function defaultDeps(env: PipelineEnv): QueueDeps {
@@ -49,12 +58,20 @@ export async function runQueue(
     await handleGroupBatch(batch, env, overrides);
     return;
   }
+  const deps: QueueDeps = { ...defaultDeps(env), ...overrides };
+  if (batch.queue === GENERATE_QUEUE) {
+    await handleGenerateBatch(
+      batch as MessageBatch<GenerateMessage>,
+      env,
+      deps,
+    );
+    return;
+  }
   if (batch.queue !== INGEST_QUEUE) {
     console.log({ queue: batch.queue, messages: batch.messages.length });
     batch.ackAll();
     return;
   }
-  const deps: QueueDeps = { ...defaultDeps(env), ...overrides };
   for (const msg of batch.messages as readonly Message<IngestMessage>[]) {
     const body = msg.body;
     // One failing message does not stop the batch. It is acked like a

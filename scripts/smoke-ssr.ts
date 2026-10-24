@@ -415,6 +415,40 @@ async function main() {
   if (noFeed.status !== 404)
     fail(`GET /rss/nope.xml returned ${noFeed.status}`);
 
+  // Digest pages & RSS
+  const digestPage = await page("/digest/technology/2026-10-21");
+  if (digestPage.res.status !== 200) {
+    fail(`GET /digest/technology/2026-10-21 returned ${digestPage.res.status}`);
+  }
+  if (!digestPage.text.includes("Preview tech digest synthesis.")) {
+    fail("GET /digest/technology/2026-10-21 lacks synthesis intro");
+  }
+
+  const badDateDigest = await page("/digest/technology/not-a-date");
+  if (badDateDigest.res.status !== 404) {
+    fail(
+      `GET /digest/technology/not-a-date returned ${badDateDigest.res.status}`,
+    );
+  }
+
+  const missingDigest = await page("/digest/technology/2099-01-01");
+  if (missingDigest.res.status !== 404) {
+    fail(
+      `GET /digest/technology/2099-01-01 returned ${missingDigest.res.status}`,
+    );
+  }
+
+  const digestRss = await rss("/rss/digest/technology.xml");
+  if (digestRss.status !== 200) {
+    fail(`GET /rss/digest/technology.xml returned ${digestRss.status}`);
+  }
+  if (!digestRss.type.startsWith("application/rss+xml")) {
+    fail(`GET /rss/digest/technology.xml content-type is "${digestRss.type}"`);
+  }
+  if (!digestRss.text.includes("Daily Digest — 2026-10-21")) {
+    fail("GET /rss/digest/technology.xml lacks digest item");
+  }
+
   console.log("PASS: SSR smoke test");
   clearTimeout(deadlineTimer);
   stop();

@@ -36,6 +36,13 @@ function AdminLayout() {
               Review Queue
             </Link>
             <Link
+              to="/admin/digests"
+              activeProps={{ className: "text-foreground font-semibold" }}
+              className="hover:text-foreground"
+            >
+              Digests
+            </Link>
+            <Link
               to="/admin/industries"
               activeProps={{ className: "text-foreground font-semibold" }}
               className="hover:text-foreground"

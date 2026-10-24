@@ -69,7 +69,19 @@ function SectionPage() {
         <h1 className="font-serif text-3xl font-black uppercase tracking-tight text-sec-ink sm:text-4xl">
           {section.name}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {section.latestDigestDate && (
+            <Link
+              to="/digest/$section/$date"
+              params={{
+                section: section.slug,
+                date: section.latestDigestDate,
+              }}
+              className="font-mono text-xs font-bold uppercase tracking-wider underline hover:text-sec-ink"
+            >
+              Daily Digest
+            </Link>
+          )}
           <a
             href={`/rss/${section.slug}.xml`}
             className="font-mono text-xs font-bold uppercase tracking-wider underline"

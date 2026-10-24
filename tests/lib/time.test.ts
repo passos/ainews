@@ -2,7 +2,12 @@
 // test:tz). The expected values are fixed UTC instants, so a result that
 // depends on the machine's time zone fails in one of the two runs.
 import { describe, expect, it } from "vitest";
-import { formatUtc, parseFeedDate } from "../../src/lib/time";
+import {
+  dayBoundsUtc,
+  formatUtc,
+  localDate,
+  parseFeedDate,
+} from "../../src/lib/time";
 
 const iso = (raw: string, offset = "+00:00") =>
   parseFeedDate(raw, offset)?.toISOString() ?? null;
@@ -166,5 +171,43 @@ describe("formatUtc", () => {
     expect(formatUtc(Date.UTC(2026, 11, 31, 23, 59))).toBe(
       "Dec 31, 2026, 11:59 PM UTC",
     );
+  });
+});
+
+describe("localDate", () => {
+  it("formats date in requested time zone", () => {
+    // 2026-10-21 16:30:00 UTC is 2026-10-22 00:30 in Asia/Shanghai
+    const ms = Date.parse("2026-10-21T16:30:00.000Z");
+    expect(localDate(ms, "UTC")).toBe("2026-10-21");
+    expect(localDate(ms, "Asia/Shanghai")).toBe("2026-10-22");
+    expect(localDate(ms, "America/New_York")).toBe("2026-10-21");
+  });
+
+  it("falls back to UTC on invalid time zone", () => {
+    const ms = Date.parse("2026-10-21T16:30:00.000Z");
+    expect(localDate(ms, "invalid/timezone")).toBe("2026-10-21");
+  });
+});
+
+describe("dayBoundsUtc", () => {
+  it("computes exact day bounds for Asia/Shanghai", () => {
+    const [start, end] = dayBoundsUtc("2026-10-21", "Asia/Shanghai");
+    expect(new Date(start).toISOString()).toBe("2026-10-20T16:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-10-21T16:00:00.000Z");
+    expect(end - start).toBe(24 * 3600 * 1000);
+  });
+
+  it("handles DST transition in America/New_York (2026-03-08 is 23 hours)", () => {
+    const [start, end] = dayBoundsUtc("2026-03-08", "America/New_York");
+    expect(new Date(start).toISOString()).toBe("2026-03-08T05:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-03-09T04:00:00.000Z");
+    expect((end - start) / 3_600_000).toBe(23);
+  });
+
+  it("falls back to UTC on invalid time zone", () => {
+    const [start, end] = dayBoundsUtc("2026-10-21", "Invalid/Timezone");
+    expect(new Date(start).toISOString()).toBe("2026-10-21T00:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-10-22T00:00:00.000Z");
+    expect(end - start).toBe(24 * 3600 * 1000);
   });
 });

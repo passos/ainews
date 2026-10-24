@@ -209,3 +209,88 @@ const UTC_FORMAT = new Intl.DateTimeFormat("en-US", {
 export function formatUtc(ms: number): string {
   return `${UTC_FORMAT.format(ms).replace(/\p{Zs}/gu, " ")} UTC`;
 }
+
+/**
+ * Returns "YYYY-MM-DD" for epoch milliseconds in the given time zone.
+ * Falls back to "UTC" if the time zone name is not recognized.
+ */
+export function localDate(ms: number, tz: string): string {
+  let safeTz = tz;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    safeTz = "UTC";
+  }
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: safeTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(ms);
+}
+
+function getZonedMidnightUtc(
+  year: number,
+  month: number,
+  day: number,
+  tz: string,
+): number {
+  let safeTz = tz;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    safeTz = "UTC";
+  }
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTz,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  });
+
+  function getOffset(utcMs: number): number {
+    const parts = formatter.formatToParts(utcMs);
+    const map: Record<string, number> = {};
+    for (const p of parts) {
+      if (p.type !== "literal") map[p.type] = Number(p.value);
+    }
+    const h = map.hour === 24 ? 0 : (map.hour ?? 0);
+    const localMs = Date.UTC(
+      map.year ?? year,
+      (map.month ?? month) - 1,
+      map.day ?? day,
+      h,
+      map.minute ?? 0,
+      map.second ?? 0,
+    );
+    return localMs - utcMs;
+  }
+
+  const targetLocalMs = Date.UTC(year, month - 1, day, 0, 0, 0);
+  let guess = targetLocalMs;
+  guess = targetLocalMs - getOffset(guess);
+  guess = targetLocalMs - getOffset(guess);
+  return guess;
+}
+
+/**
+ * Returns [startMs, endMs) UTC bounds for `dateStr` ("YYYY-MM-DD") in `tz`.
+ * Handles DST shifts (e.g. 23-hour or 25-hour days) deterministically.
+ */
+export function dayBoundsUtc(dateStr: string, tz: string): [number, number] {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const start = getZonedMidnightUtc(y, m, d, tz);
+  const nextDate = new Date(Date.UTC(y, m - 1, d + 1));
+  const end = getZonedMidnightUtc(
+    nextDate.getUTCFullYear(),
+    nextDate.getUTCMonth() + 1,
+    nextDate.getUTCDate(),
+    tz,
+  );
+  return [start, end];
+}

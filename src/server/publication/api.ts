@@ -11,6 +11,10 @@ import {
   getSectionSources as readSectionSources,
 } from "./articles";
 import {
+  getDigest as readDigest,
+  getRecentDigests as readRecentDigests,
+} from "./digests";
+import {
   getEvent as readEvent,
   getEventSources as readEventSources,
 } from "./events";
@@ -42,3 +46,16 @@ export const getEvent = createServerFn({ method: "GET" })
 export const getEventSources = createServerFn({ method: "GET" })
   .validator(eventInput)
   .handler(({ data }) => readEventSources(getDb(env.DB), data.eventId));
+
+const digestInput = z.object({
+  slug: z.string().min(1).max(64),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+export const getDigest = createServerFn({ method: "GET" })
+  .validator(digestInput)
+  .handler(({ data }) => readDigest(getDb(env.DB), data.slug, data.date));
+
+export const getRecentDigests = createServerFn({ method: "GET" })
+  .validator(sectionInput)
+  .handler(({ data }) => readRecentDigests(getDb(env.DB), data.slug));

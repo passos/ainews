@@ -1,4 +1,5 @@
 import { scheduleDueSources } from "./collect/schedule";
+import { enqueueDueDigests } from "./digest/schedule";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
 
@@ -11,9 +12,11 @@ export async function runScheduled(
   const now = controller.scheduledTime;
   const claimed = await scheduleDueSources(env, now);
   const requeued = await requeueStuck(env, now);
+  const digests = await enqueueDueDigests(env, now);
   console.log({
     cron: controller.cron,
     claimed: claimed.length,
     requeued: requeued.length,
+    digests: digests.length,
   });
 }

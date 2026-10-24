@@ -85,6 +85,13 @@
       "when": 1792836827964,
       "tag": "0011_strange_angel",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792841512147,
+      "tag": "0012_short_silver_centurion",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ export async function resetPublication(): Promise<void> {
   await env.DB.batch(
     [
       "corrections",
+      "digests",
       "event_articles",
       "events",
       "reviews",
@@ -100,7 +101,9 @@ export async function seedReview(
   bodySha = "sha-current",
 ): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, ?3, 'test', 0)",
+    `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+     VALUES (?1, ?2, ?3, 'test', 0)
+     ON CONFLICT (article_id, body_sha) DO UPDATE SET decision = excluded.decision, created_at = excluded.created_at`,
   )
     .bind(articleId, bodySha, decision)
     .run();
