@@ -7,6 +7,16 @@ export interface VerifiedQuoteResult {
   quoteClean: string;
 }
 
+export interface CleanMarkdownMapResult {
+  cleanText: string;
+  origIndices: number[];
+}
+
+interface CharEntry {
+  char: string;
+  origIndex: number;
+}
+
 /**
  * Normalizes text by collapsing all whitespace to single spaces and trimming.
  */
@@ -15,16 +25,97 @@ export function normalizeWhitespace(str: string): string {
 }
 
 /**
+ * Strips basic Markdown formatting while tracking exact character indices back to the original text.
+ */
+export function cleanMarkdownWithMap(str: string): CleanMarkdownMapResult {
+  let entries: CharEntry[] = [];
+  for (let i = 0; i < str.length; i++) {
+    entries.push({ char: str[i], origIndex: i });
+  }
+
+  // Step 1: Images !\[([^\]]*)\]\([^)]*\)
+  let currentStr = entries.map((e) => e.char).join("");
+  const imgMatches = Array.from(currentStr.matchAll(/!\[([^\]]*)\]\([^)]*\)/g));
+  if (imgMatches.length > 0) {
+    const newEntries: CharEntry[] = [];
+    let lastIndex = 0;
+    for (const m of imgMatches) {
+      if (m.index === undefined) continue;
+      newEntries.push(...entries.slice(lastIndex, m.index));
+      const altText = m[1];
+      newEntries.push(
+        ...entries.slice(m.index + 2, m.index + 2 + altText.length),
+      );
+      lastIndex = m.index + m[0].length;
+    }
+    newEntries.push(...entries.slice(lastIndex));
+    entries = newEntries;
+  }
+
+  // Step 2: Links \[([^\]]+)\]\([^)]*\)
+  currentStr = entries.map((e) => e.char).join("");
+  const linkMatches = Array.from(currentStr.matchAll(/\[([^\]]+)\]\([^)]*\)/g));
+  if (linkMatches.length > 0) {
+    const newEntries: CharEntry[] = [];
+    let lastIndex = 0;
+    for (const m of linkMatches) {
+      if (m.index === undefined) continue;
+      newEntries.push(...entries.slice(lastIndex, m.index));
+      const linkText = m[1];
+      newEntries.push(
+        ...entries.slice(m.index + 1, m.index + 1 + linkText.length),
+      );
+      lastIndex = m.index + m[0].length;
+    }
+    newEntries.push(...entries.slice(lastIndex));
+    entries = newEntries;
+  }
+
+  // Step 3: Markdown styling symbols [*_~`#]
+  for (const entry of entries) {
+    if (/[*_~`#]/.test(entry.char)) {
+      entry.char = " ";
+    }
+  }
+
+  // Step 4: Whitespace collapse \s+
+  const collapsed: CharEntry[] = [];
+  let inWs = false;
+  for (const entry of entries) {
+    if (/\s/.test(entry.char)) {
+      if (!inWs) {
+        collapsed.push({ char: " ", origIndex: entry.origIndex });
+        inWs = true;
+      }
+    } else {
+      collapsed.push(entry);
+      inWs = false;
+    }
+  }
+
+  // Step 5: Trim leading and trailing whitespace
+  let start = 0;
+  while (start < collapsed.length && collapsed[start].char === " ") {
+    start++;
+  }
+  let end = collapsed.length;
+  while (end > start && collapsed[end - 1].char === " ") {
+    end--;
+  }
+
+  const trimmed = collapsed.slice(start, end);
+  return {
+    cleanText: trimmed.map((e) => e.char).join(""),
+    origIndices: trimmed.map((e) => e.origIndex),
+  };
+}
+
+/**
  * Normalizes Markdown text for text comparison by stripping basic Markdown formatting
  * and collapsing whitespace.
  */
 export function cleanMarkdown(str: string): string {
-  return str
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // Images
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // Links
-    .replace(/[*_~`#]/g, " ") // Markdown styling symbols
-    .replace(/\s+/g, " ")
-    .trim();
+  return cleanMarkdownWithMap(str).cleanText;
 }
 
 /**
@@ -70,8 +161,8 @@ export function verifyQuoteInBody(
     directIndex = bodyMd.indexOf(quoteTrimmed, directIndex + 1);
   }
 
-  // 2. Normalized whitespace search with word-boundary awareness
-  const bodyClean = cleanMarkdown(bodyMd);
+  // 2. Normalized whitespace search with word-boundary awareness and exact character mapping
+  const { cleanText: bodyClean, origIndices } = cleanMarkdownWithMap(bodyMd);
   let cleanIndex = bodyClean.indexOf(quoteClean);
 
   while (cleanIndex !== -1) {
@@ -82,21 +173,8 @@ export function verifyQuoteInBody(
         : " ";
 
     if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
-      // Map clean match back to approximate offsets in bodyMd
-      // Find key anchor phrases (first 25 chars of clean quote) in bodyMd
-      const anchor = quoteClean.slice(0, Math.min(25, quoteClean.length));
-      let anchorIndex = bodyMd.indexOf(anchor);
-      if (anchorIndex === -1) {
-        // If exact anchor not found, fallback to ratio estimation
-        const ratio = cleanIndex / Math.max(1, bodyClean.length);
-        anchorIndex = Math.floor(ratio * bodyMd.length);
-      }
-
-      const startOffset = Math.max(0, anchorIndex);
-      const endOffset = Math.min(
-        bodyMd.length,
-        startOffset + quoteTrimmed.length,
-      );
+      const startOffset = origIndices[cleanIndex];
+      const endOffset = origIndices[cleanIndex + quoteClean.length - 1] + 1;
 
       return {
         verified: true,

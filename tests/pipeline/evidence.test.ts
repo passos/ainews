@@ -4,6 +4,7 @@ import { generateEventEvidence } from "../../src/pipeline/evidence/build";
 import { chunkMarkdownBody } from "../../src/pipeline/evidence/chunks";
 import { enqueueDueEvidence } from "../../src/pipeline/evidence/schedule";
 import {
+  cleanMarkdownWithMap,
   evaluateClaimConsensus,
   isPrimarySourceDomain,
   verifyQuoteInBody,
@@ -146,6 +147,33 @@ describe("Evidence Chunks & Quote Verification", () => {
     const badQuote = "15 million in capital"; // missing the '1' in '115'
     const res = verifyQuoteInBody(body, badQuote);
     expect(res.verified).toBe(false);
+  });
+
+  it("verifyQuoteInBody correctly locates target quote with markdown formatting when preceded by similar sentence prefix", () => {
+    const body =
+      "The company reported record losses in Q1. Later, the company reported record **revenue of $100 million** in Q4.";
+    const quote = "company reported record revenue of $100 million";
+
+    const res = verifyQuoteInBody(body, quote);
+    expect(res.verified).toBe(true);
+    // Crucial check: startOffset must point to the second sentence (index 53), NOT the first sentence (index 4)
+    expect(res.startOffset).toBe(53);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "company reported record **revenue of $100 million",
+    );
+  });
+
+  it("cleanMarkdownWithMap accurately preserves character mappings through formatting and link stripping", () => {
+    const text =
+      "See ![photo](https://example.com/p.png) and [read doc](https://example.com) for *crucial* **updates**.";
+    const { cleanText, origIndices } = cleanMarkdownWithMap(text);
+    expect(cleanText).toBe("See photo and read doc for crucial updates .");
+    expect(origIndices.length).toBe(cleanText.length);
+    // Verify mapped characters
+    const docIdx = cleanText.indexOf("read doc");
+    expect(text.slice(origIndices[docIdx], origIndices[docIdx + 7] + 1)).toBe(
+      "read doc",
+    );
   });
 
   it("evaluateClaimConsensus calculates correct status", () => {
