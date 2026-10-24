@@ -24,7 +24,7 @@ import {
 } from "../../providers/models";
 import type { ModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
-import type { PipelineEnv } from "../messages";
+import { sendGroup, type PipelineEnv } from "../messages";
 import { parseAnalysisConfig } from "./config";
 import type { AnalysisConfig } from "./config";
 import { labelValue } from "./labels";
@@ -223,6 +223,10 @@ export async function analyzeArticle(
   const results = await env.DB.batch(statements);
   const advanced = results[0].meta.changes === 1;
   const approved = approve && results[2]?.meta.changes === 1;
+
+  if (advanced && scored.selected && env.Q_GROUP) {
+    await sendGroup(env, [{ kind: "group", articleId }]);
+  }
 
   console.log({
     analyze: articleId,

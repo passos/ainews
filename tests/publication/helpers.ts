@@ -12,6 +12,8 @@ export async function resetPublication(): Promise<void> {
   await env.DB.batch(
     [
       "corrections",
+      "event_articles",
+      "events",
       "reviews",
       "analyses",
       "articles",
@@ -140,5 +142,30 @@ export async function seedCorrection(
     "INSERT INTO corrections (target_type, target_id, body, created_at) VALUES (?1, ?2, ?3, ?4)",
   )
     .bind(targetType, targetId, body, createdAt)
+    .run();
+}
+
+export async function seedEvent(
+  industryId: number,
+  title: string,
+  revision = 0,
+): Promise<number> {
+  const row = await env.DB.prepare(
+    "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, ?2, ?3, 0, 0) RETURNING id",
+  )
+    .bind(industryId, title, revision)
+    .first<{ id: number }>();
+  return row!.id;
+}
+
+export async function seedEventArticle(
+  eventId: number,
+  articleId: number,
+  createdAt = 0,
+): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, ?3)",
+  )
+    .bind(eventId, articleId, createdAt)
     .run();
 }

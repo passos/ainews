@@ -329,6 +329,10 @@ async function main() {
   const none = await page("/s/nope");
   if (none.res.status !== 404) fail(`GET /s/nope returned ${none.res.status}`);
 
+  const noEvent = await page("/e/999999");
+  if (noEvent.res.status !== 404)
+    fail(`GET /e/999999 returned ${noEvent.res.status}`);
+
   // Invalid search params: TanStack redirects (307) to the canonical URL
   // without them. The redirect target serves page 1.
   const oddPath = "/s/technology?audience=bogus&page=-3";

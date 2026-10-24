@@ -5,7 +5,12 @@
 // stage_updated_at = now and requeue_count = 0, so the requeues of one stage
 // do not use up those of the next.
 import { isEnabled, type SafetyFlag } from "../lib/flags";
-import { sendIngest, type IngestMessage, type PipelineEnv } from "./messages";
+import {
+  sendGroup,
+  sendIngest,
+  type IngestMessage,
+  type PipelineEnv,
+} from "./messages";
 
 export const STUCK_AFTER_MS = 30 * 60_000;
 export const MAX_REQUEUES = 3;
@@ -44,6 +49,22 @@ export async function requeueStuck(
     await sendIngest(
       env,
       ids.map((articleId) => ({ kind, articleId })),
+    );
+    sent.push(...ids);
+  }
+  if (isEnabled(env, "MODEL_CALLS_ENABLED") && env.Q_GROUP) {
+    const { results } = await env.DB.prepare(
+      `UPDATE articles SET stage_updated_at = ?1,
+         requeue_count = requeue_count + 1
+       WHERE stage = 'analyzed' AND stage_updated_at < ?2 AND requeue_count < ?3
+       RETURNING id`,
+    )
+      .bind(now, now - STUCK_AFTER_MS, MAX_REQUEUES)
+      .all<{ id: number }>();
+    const ids = results.map((r) => r.id);
+    await sendGroup(
+      env,
+      ids.map((articleId) => ({ kind: "group", articleId })),
     );
     sent.push(...ids);
   }

@@ -3,14 +3,21 @@
 
 /** Queue name of Q_INGEST in wrangler.jsonc; MessageBatch.queue carries it. */
 export const INGEST_QUEUE = "ainews-ingest";
+/** Queue name of Q_GROUP in wrangler.jsonc; MessageBatch.queue carries it. */
+export const GROUP_QUEUE = "ainews-group";
 
 export type IngestMessage =
   | { kind: "collect"; sourceId: number }
   | { kind: "body"; articleId: number }
   | { kind: "analyze"; articleId: number };
 
+export type GroupMessage = { kind: "group"; articleId: number };
+
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
-export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST" | "AI"> & {
+export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {
+  Q_GROUP?: Queue;
+  V_EVENTS?: VectorizeIndex;
+  AI?: Env["AI"];
   /** Model calls go through this AI Gateway (wrangler var). */
   AI_GATEWAY_ID?: string;
   COLLECT_ENABLED?: string;
@@ -29,6 +36,18 @@ export async function sendIngest(
 ): Promise<void> {
   for (let i = 0; i < messages.length; i += SEND_BATCH_MAX) {
     await env.Q_INGEST.sendBatch(
+      messages.slice(i, i + SEND_BATCH_MAX).map((body) => ({ body })),
+    );
+  }
+}
+
+export async function sendGroup(
+  env: Pick<PipelineEnv, "Q_GROUP">,
+  messages: GroupMessage[],
+): Promise<void> {
+  if (!env.Q_GROUP) return;
+  for (let i = 0; i < messages.length; i += SEND_BATCH_MAX) {
+    await env.Q_GROUP.sendBatch(
       messages.slice(i, i + SEND_BATCH_MAX).map((body) => ({ body })),
     );
   }

@@ -30,7 +30,7 @@ export const approvedArticleWhere: SQL = sql`EXISTS (
 export const NEWEST_FIRST = sql`COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC`;
 
 // Card text: admin override, then the newest analysis, then the feed's own.
-const CARD_COLUMNS = sql`
+export const CARD_COLUMNS = sql`
   a.id AS id,
   COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
   COALESCE(NULLIF(a.summary_override, ''), NULLIF(an.summary_en, ''), a.summary) AS summary,
@@ -43,12 +43,21 @@ const CARD_COLUMNS = sql`
   i.name AS section_name,
   i.disclaimer AS section_disclaimer,
   (SELECT body FROM corrections c WHERE c.target_type = 'articles' AND c.target_id = a.id
-    ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS correction`;
+    ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS correction,
+  ea.event_id AS event_id,
+  (SELECT count(*) FROM event_articles ea2
+   JOIN articles a2 ON a2.id = ea2.article_id
+   WHERE ea2.event_id = ea.event_id
+     AND EXISTS (
+       SELECT 1 FROM reviews r2
+       WHERE r2.article_id = a2.id AND r2.body_sha = a2.body_sha AND r2.decision = 'approved'
+     )) AS event_report_count`;
 
-const CARD_FROM = sql`
+export const CARD_FROM = sql`
   FROM articles a
   JOIN sources s ON s.id = a.source_id
   JOIN industries i ON i.id = a.industry_id
+  LEFT JOIN event_articles ea ON ea.article_id = a.id
   LEFT JOIN analyses an ON an.id = (
     SELECT id FROM analyses WHERE article_id = a.id
     ORDER BY created_at DESC, id DESC LIMIT 1
@@ -79,9 +88,11 @@ export interface ArticleView {
   sectionSlug: string;
   sectionName: string;
   sectionDisclaimer: string | null;
+  eventId: number | null;
+  eventReportCount: number;
 }
 
-interface CardRow {
+export interface CardRow {
   id: number;
   title: string;
   summary: string | null;
@@ -94,6 +105,8 @@ interface CardRow {
   section_name: string;
   section_disclaimer: string | null;
   correction: string | null;
+  event_id: number | null;
+  event_report_count: number | null;
 }
 
 // Label options that say nothing: skipped on the card.
@@ -114,7 +127,7 @@ function evidenceOf(json: string | null): string[] {
 
 // Source URLs are untrusted: only http(s) ones leave the read layer. Pages
 // and RSS both read through here.
-function toViews(rows: CardRow[]): ArticleView[] {
+export function toViews(rows: CardRow[]): ArticleView[] {
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -128,6 +141,8 @@ function toViews(rows: CardRow[]): ArticleView[] {
     sectionSlug: r.section_slug,
     sectionName: r.section_name,
     sectionDisclaimer: r.section_disclaimer,
+    eventId: r.event_id ?? null,
+    eventReportCount: Number(r.event_report_count ?? 0),
   }));
 }
 

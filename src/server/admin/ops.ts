@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { getDb } from "../db/client";
+import { revisionBumpStatement } from "../db/events";
 import {
   analyses,
   articles,
@@ -332,16 +333,34 @@ export async function decideReview(
     throw new Response("Conflict: article body has changed", { status: 409 });
   }
 
-  const now = Date.now();
-  await database
+  const prevReview = await database
     .prepare(
-      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT (article_id, body_sha)
-       DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
+      "SELECT decision FROM reviews WHERE article_id = ?1 AND body_sha = ?2",
     )
-    .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now)
-    .run();
+    .bind(data.articleId, data.bodySha)
+    .first<{ decision: string }>();
+
+  const wasApproved = prevReview?.decision === "approved";
+  const isApproved = data.decision === "approved";
+  const statusChanged = wasApproved !== isApproved;
+
+  const now = Date.now();
+  const statements: D1PreparedStatement[] = [
+    database
+      .prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (article_id, body_sha)
+         DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
+      )
+      .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
+  ];
+
+  if (statusChanged) {
+    statements.push(revisionBumpStatement(database, data.articleId, now));
+  }
+
+  await database.batch(statements);
 }
 
 export async function listStuckArticles(
@@ -455,6 +474,17 @@ export async function changeArticleIndustry(
 
   if (target?.slug.trim().toLowerCase() === FINANCE_SLUG) {
     // Finance requires human review: revoke any auto-approvals
+    const hadAutoApproval = await database
+      .prepare(
+        "SELECT 1 FROM reviews WHERE article_id = ?1 AND reviewer = 'auto' AND decision = 'approved'",
+      )
+      .bind(data.articleId)
+      .first();
+    if (hadAutoApproval) {
+      statements.push(
+        revisionBumpStatement(database, data.articleId, Date.now()),
+      );
+    }
     statements.push(
       database
         .prepare(
