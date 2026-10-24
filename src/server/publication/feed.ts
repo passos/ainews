@@ -14,7 +14,8 @@ function item(a: ArticleView, disclaimer: string | null): string {
   return [
     "<item>",
     `<title>${x(a.title)}</title>`,
-    `<link>${x(a.url)}</link>`,
+    // No <link> for a non-http(s) URL: the read layer returns null.
+    ...(a.url ? [`<link>${x(a.url)}</link>`] : []),
     `<guid isPermaLink="false">${a.id}</guid>`,
     `<pubDate>${new Date(date).toUTCString()}</pubDate>`,
     `<description>${x(parts)}</description>`,

@@ -1,7 +1,14 @@
 // SSR smoke test against the production build, served by `vite preview`.
 // Usage: npm run build && npm run test:ssr
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { resolve } from "node:path";
 import { createServer } from "node:net";
 
 const TIMEOUT_MS = 30_000;
@@ -58,17 +65,25 @@ const PUBLIC_FN_ID = serverFnId(
   "getSiteInfo",
   "src/server/publication/site.ts",
 );
-const ADMIN_EMAIL: string = JSON.parse(
-  readFileSync("dist/server/wrangler.json", "utf8"),
-).vars.ADMIN_EMAIL;
+const BUILT_CONFIG = "dist/server/wrangler.json";
+const builtConfig = JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
+const ADMIN_EMAIL: string = builtConfig.vars.ADMIN_EMAIL;
 if (!ADMIN_EMAIL) {
-  console.error("FAIL: no ADMIN_EMAIL in dist/server/wrangler.json");
+  console.error(`FAIL: no ADMIN_EMAIL in ${BUILT_CONFIG}`);
   process.exit(1);
 }
+// The test env has an empty CF_BEACON_TOKEN. Give the built worker a token, as
+// a deploy would, so the check below sees the real <Beacon> in the HTML.
+const BEACON_TOKEN = "t1";
+builtConfig.vars.CF_BEACON_TOKEN = BEACON_TOKEN;
+writeFileSync(BUILT_CONFIG, JSON.stringify(builtConfig, null, 2));
 
-// `vite preview` reads the local D1 under .wrangler/state. Start from an empty
+// `vite preview` reads the local D1 from a state directory that only this
+// script uses (vite.config.ts reads AINEWS_SMOKE_STATE), so a developer's
+// own local D1 under .wrangler/state is never touched. Start from an empty
 // database, apply the migrations, then load the fixture rows that the page
 // checks below depend on (tests/fixtures/publication/preview.sql).
+const SMOKE_STATE = resolve(".wrangler/smoke-state");
 function wrangler(args: string[]): void {
   const result = spawnSync("npx", ["wrangler", ...args], {
     stdio: ["ignore", "inherit", "inherit"],
@@ -79,8 +94,18 @@ function wrangler(args: string[]): void {
     process.exit(1);
   }
 }
-rmSync(".wrangler/state/v3/d1", { recursive: true, force: true });
-wrangler(["d1", "migrations", "apply", "DB", "--local", "--env", "test"]);
+rmSync(SMOKE_STATE, { recursive: true, force: true });
+wrangler([
+  "d1",
+  "migrations",
+  "apply",
+  "DB",
+  "--local",
+  "--env",
+  "test",
+  "--persist-to",
+  SMOKE_STATE,
+]);
 wrangler([
   "d1",
   "execute",
@@ -88,6 +113,8 @@ wrangler([
   "--local",
   "--env",
   "test",
+  "--persist-to",
+  SMOKE_STATE,
   "--file",
   "tests/fixtures/publication/preview.sql",
 ]);
@@ -106,7 +133,11 @@ const server = spawn(
     String(PORT),
     "--strictPort",
   ],
-  { stdio: ["ignore", "inherit", "inherit"], detached: true },
+  {
+    stdio: ["ignore", "inherit", "inherit"],
+    detached: true,
+    env: { ...process.env, AINEWS_SMOKE_STATE: SMOKE_STATE },
+  },
 );
 
 function stop() {
@@ -224,16 +255,31 @@ async function main() {
   };
   const DISCLAIMER = "Not investment advice";
 
-  for (const path of ["/", "/s/finance"]) {
+  // The disclaimer text is also in the serialized loader data (<script>), so
+  // count the rendered <Disclaimer> asides (role="note") outside of scripts.
+  const notes = (html: string): string[] =>
+    [
+      ...html
+        .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+        .matchAll(/<aside\b[^>]*role="note"[^>]*>[\s\S]*?<\/aside>/g),
+    ].map((m) => m[0]);
+  const EXPECTED_NOTES: Record<string, number> = {
+    "/": 1,
+    "/s/finance": 1,
+    "/s/technology": 0,
+    "/s/education": 0,
+    "/s/industry": 0,
+  };
+  for (const [path, count] of Object.entries(EXPECTED_NOTES)) {
     const { res, text } = await page(path);
     if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
-    if (!text.includes(DISCLAIMER)) fail(`GET ${path} has no disclaimer`);
-  }
-  for (const path of ["/s/technology", "/s/education", "/s/industry"]) {
-    const { res, text } = await page(path);
-    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
-    if (text.includes(DISCLAIMER))
-      fail(`GET ${path} has the Finance disclaimer`);
+    const found = notes(text);
+    if (found.length !== count) {
+      fail(`GET ${path} has ${found.length} disclaimer notes, want ${count}`);
+    }
+    if (found.some((n) => !n.includes(DISCLAIMER))) {
+      fail(`GET ${path} has a note without the Finance disclaimer`);
+    }
   }
 
   const tech = await page("/s/technology");
@@ -262,14 +308,43 @@ async function main() {
   const none = await page("/s/nope");
   if (none.res.status !== 404) fail(`GET /s/nope returned ${none.res.status}`);
 
-  const odd = await page("/s/technology?audience=bogus&page=-3");
+  // Invalid search params: TanStack redirects (307) to the canonical URL
+  // without them. The redirect target serves page 1.
+  const oddPath = "/s/technology?audience=bogus&page=-3";
+  const oddRes = await fetch(`${BASE}${oddPath}`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  await oddRes.text();
+  if (oddRes.status !== 307) fail(`GET ${oddPath} returned ${oddRes.status}`);
+  const target = new URL(oddRes.headers.get("location") ?? "", BASE);
+  if (target.pathname !== "/s/technology" || target.search !== "") {
+    fail(`GET ${oddPath} redirects to ${target.pathname}${target.search}`);
+  }
+  const odd = await page(`${target.pathname}${target.search}`);
   if (odd.res.status !== 200) {
-    fail(`GET /s/technology?audience=bogus&page=-3 returned ${odd.res.status}`);
+    fail(
+      `GET ${target.pathname} after the redirect returned ${odd.res.status}`,
+    );
+  }
+  if (
+    !odd.text.includes("Agent handshakes cost more than the work they start")
+  ) {
+    fail("GET /s/technology after the redirect is not page 1");
   }
 
-  // CF_BEACON_TOKEN is empty in the test env: no analytics script.
-  const home2 = await page("/");
-  if (home2.text.includes("beacon.min.js")) fail("GET / has the beacon script");
+  // The built worker has CF_BEACON_TOKEN (set above): the beacon script is in
+  // the HTML, outside of the serialized loader data.
+  for (const path of ["/", "/s/technology"]) {
+    const { text } = await page(path);
+    const tag = text.match(/<script\b[^>]*beacon\.min\.js[^>]*>/)?.[0] ?? "";
+    if (!tag.includes("static.cloudflareinsights.com/beacon.min.js")) {
+      fail(`GET ${path} has no beacon script`);
+    }
+    if (!tag.includes(`&quot;token&quot;:&quot;${BEACON_TOKEN}&quot;`)) {
+      fail(`GET ${path} beacon script lacks the token`);
+    }
+  }
 
   // RSS.
   const rss = async (path: string) => {

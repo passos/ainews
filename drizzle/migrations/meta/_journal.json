@@ -57,6 +57,13 @@
       "when": 1792799722982,
       "tag": "0007_article_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792801889506,
+      "tag": "0008_articles_industry_newest_idx",
+      "breakpoints": true
     }
   ]
 }

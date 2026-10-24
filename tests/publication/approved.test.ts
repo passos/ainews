@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import {
+  NEWEST_FIRST,
   getHome,
   getRecentCorrections,
   getSection,
@@ -80,6 +82,33 @@ describe("only approved articles are public", () => {
   });
 });
 
+describe("article links", () => {
+  it("returns url = null for a non-http(s) url on every read path", async () => {
+    const bad = await seedArticle({
+      ...tech,
+      title: "Bad link",
+      url: "javascript:alert(1)",
+    });
+    const good = await seedArticle({
+      ...tech,
+      title: "Good link",
+      url: "https://news.example/good",
+    });
+    await seedReview(bad, "approved");
+    await seedReview(good, "approved");
+    const urlOf = (list: { id: number; url: string | null }[], id: number) =>
+      list.find((a) => a.id === id)?.url;
+    const page = await getSection(db(), { slug: "technology", page: 1 });
+    const feed = await getSectionFeed(db(), "technology");
+    const home = await getHome(db());
+    const homeAll = home.sections.flatMap((s) => s.articles);
+    for (const list of [page!.articles, feed!.articles, homeAll]) {
+      expect(urlOf(list, bad)).toBeNull();
+      expect(urlOf(list, good)).toBe("https://news.example/good");
+    }
+  });
+});
+
 describe("corrections", () => {
   it("only corrections of approved articles are public", async () => {
     await seedCorrection("articles", ids[0], "Fixed the figure.", 10);
@@ -92,6 +121,22 @@ describe("corrections", () => {
 
     const page = await getSection(db(), { slug: "technology", page: 1 });
     expect(page?.articles[0].correction).toBe("Fixed the figure.");
+  });
+});
+
+describe("card correction", () => {
+  it("shows the newest correction of the article; the highest id breaks a tie", async () => {
+    const b = await seedArticle({ ...tech, title: "B" });
+    await seedReview(b, "approved");
+    await seedCorrection("articles", ids[0], "Older.", 10);
+    await seedCorrection("articles", ids[0], "Newest first of a tie.", 20);
+    await seedCorrection("articles", ids[0], "Newest, later id.", 20);
+    await seedCorrection("articles", b, "Only one.", 5);
+    const page = await getSection(db(), { slug: "technology", page: 1 });
+    const body = (id: number) =>
+      page?.articles.find((x) => x.id === id)?.correction;
+    expect(body(ids[0])).toBe("Newest, later id.");
+    expect(body(b)).toBe("Only one.");
   });
 });
 
@@ -225,5 +270,17 @@ describe("sources", () => {
       { name: "No domain", homepage: null },
       { name: "Technology Wire", homepage: "https://technology.example/" },
     ]);
+  });
+});
+
+describe("query plan", () => {
+  it("reads the newest rows of a section from articles_industry_newest_idx, without a sort", async () => {
+    const plan = await db().all<{ detail: string }>(sql`
+      EXPLAIN QUERY PLAN
+      SELECT a.title FROM articles a WHERE a.industry_id = ${tech.industryId}
+      ORDER BY ${NEWEST_FIRST} LIMIT 5`);
+    const details = plan.map((r) => r.detail).join("\n");
+    expect(details).toContain("USING INDEX articles_industry_newest_idx");
+    expect(details).not.toContain("TEMP B-TREE");
   });
 });

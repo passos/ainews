@@ -60,6 +60,30 @@ describe("feedResponse", () => {
     expect(xml).toContain("<link>https://news.example/a?x=1&amp;y=2</link>");
   });
 
+  it("omits <link> for an item whose url is not http(s)", async () => {
+    const { technology: t } = await seedSections();
+    const bad = await seedArticle({
+      ...t,
+      title: "Bad link",
+      url: "javascript:alert(1)",
+    });
+    const good = await seedArticle({
+      ...t,
+      title: "Good link",
+      url: "https://news.example/good",
+    });
+    await seedReview(bad, "approved");
+    await seedReview(good, "approved");
+    const { xml } = await fetchFeed("technology");
+    expect(xml).not.toContain("javascript:");
+    const items = xml.split("<item>").slice(1);
+    expect(items).toHaveLength(2);
+    const badItem = items.find((i) => i.includes("Bad link"))!;
+    const goodItem = items.find((i) => i.includes("Good link"))!;
+    expect(badItem).not.toContain("<link>");
+    expect(goodItem).toContain("<link>https://news.example/good</link>");
+  });
+
   it("item: guid is the article id, not a permalink; pubDate is UTC; source named", async () => {
     const { technology: t } = await seedSections();
     const id = await seedArticle({

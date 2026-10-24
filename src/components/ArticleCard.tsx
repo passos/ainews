@@ -1,5 +1,4 @@
 import { formatUtc } from "../lib/time";
-import { safeHttpUrl } from "../lib/url";
 import type { ArticleView } from "../server/publication/articles";
 import { Badge } from "./ui/badge";
 
@@ -15,8 +14,8 @@ function Time({ ms, label }: { ms: number; label: string }) {
 }
 
 export function ArticleCard({ article: a }: { article: ArticleView }) {
-  // Only http(s) links are rendered: the URL comes from a source.
-  const href = safeHttpUrl(a.url);
+  // The read layer returns null for anything but an http(s) URL.
+  const href = a.url;
   return (
     <article
       data-section={a.sectionSlug}

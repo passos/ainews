@@ -20,6 +20,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # worker-configuration.d.ts must match wrangler.jsonc.
+      - run: npx wrangler types --check
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test

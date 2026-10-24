@@ -3,6 +3,7 @@
 // (api.ts) and tests both call them.
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { safeHttpUrl } from "../../lib/url";
 import type { getDb } from "../db/client";
 
 export type Db = ReturnType<typeof getDb>;
@@ -24,8 +25,9 @@ export const approvedArticleWhere: SQL = sql`EXISTS (
 )`;
 
 // Newest first; id makes the order total, so paging neither repeats nor
-// skips rows.
-const NEWEST_FIRST = sql`COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC`;
+// skips rows. Must stay identical to articles_industry_newest_idx (schema),
+// or SQLite sorts instead of reading the index.
+export const NEWEST_FIRST = sql`COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC`;
 
 // Card text: admin override, then the newest analysis, then the feed's own.
 const CARD_COLUMNS = sql`
@@ -39,7 +41,9 @@ const CARD_COLUMNS = sql`
   an.evidence_tags AS evidence_tags,
   i.slug AS section_slug,
   i.name AS section_name,
-  i.disclaimer AS section_disclaimer`;
+  i.disclaimer AS section_disclaimer,
+  (SELECT body FROM corrections c WHERE c.target_type = 'articles' AND c.target_id = a.id
+    ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS correction`;
 
 const CARD_FROM = sql`
   FROM articles a
@@ -61,8 +65,8 @@ export interface ArticleView {
   title: string;
   /** Plain text. Null when there is no summary at all. */
   summary: string | null;
-  /** Original article URL; only http(s) links are rendered. */
-  url: string;
+  /** Original article URL; null unless it is an http(s) URL. */
+  url: string | null;
   sourceName: string;
   /** Epoch milliseconds, from the source. */
   publishedAt: number | null;
@@ -89,6 +93,7 @@ interface CardRow {
   section_slug: string;
   section_name: string;
   section_disclaimer: string | null;
+  correction: string | null;
 }
 
 // Label options that say nothing: skipped on the card.
@@ -107,39 +112,19 @@ function evidenceOf(json: string | null): string[] {
   }
 }
 
-async function correctionsFor(
-  db: Db,
-  ids: number[],
-): Promise<Map<number, string>> {
-  const map = new Map<number, string>();
-  if (ids.length === 0) return map;
-  const rows = await db.all<{ target_id: number; body: string }>(sql`
-    SELECT target_id, body FROM corrections
-    WHERE target_type = 'articles' AND target_id IN (${sql.join(
-      ids.map((id) => sql`${id}`),
-      sql`, `,
-    )})
-    ORDER BY created_at ASC, id ASC`);
-  // Ascending, so the newest correction of an article wins.
-  for (const row of rows) map.set(row.target_id, row.body);
-  return map;
-}
-
-async function toViews(db: Db, rows: CardRow[]): Promise<ArticleView[]> {
-  const corrections = await correctionsFor(
-    db,
-    rows.map((r) => r.id),
-  );
+// Source URLs are untrusted: only http(s) ones leave the read layer. Pages
+// and RSS both read through here.
+function toViews(rows: CardRow[]): ArticleView[] {
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
     summary: r.summary,
-    url: r.url,
+    url: safeHttpUrl(r.url),
     sourceName: r.source_name,
     publishedAt: r.published_at,
     fetchedAt: r.fetched_at,
     evidence: evidenceOf(r.evidence_tags),
-    correction: corrections.get(r.id) ?? null,
+    correction: r.correction,
     sectionSlug: r.section_slug,
     sectionName: r.section_name,
     sectionDisclaimer: r.section_disclaimer,
@@ -182,7 +167,7 @@ export async function getSection(
     LIMIT ${SECTION_PAGE_SIZE + 1} OFFSET ${offset}`);
   return {
     section,
-    articles: await toViews(db, rows.slice(0, SECTION_PAGE_SIZE)),
+    articles: toViews(rows.slice(0, SECTION_PAGE_SIZE)),
     hasMore: rows.length > SECTION_PAGE_SIZE,
   };
 }
@@ -204,7 +189,7 @@ export async function getSectionFeed(
     WHERE i.slug = ${slug} AND ${approvedArticleWhere}
     ORDER BY ${NEWEST_FIRST}
     LIMIT ${FEED_SIZE}`);
-  return { section, articles: await toViews(db, rows) };
+  return { section, articles: toViews(rows) };
 }
 
 export interface HomeSection extends SectionInfo {
@@ -213,27 +198,17 @@ export interface HomeSection extends SectionInfo {
 
 /** The newest approved articles of every section, for the home page. */
 export async function getHome(db: Db): Promise<{ sections: HomeSection[] }> {
-  const sections = await listSections(db);
-  const rows = await db.all<CardRow>(sql`
-    SELECT * FROM (
-      SELECT ${CARD_COLUMNS},
-        ROW_NUMBER() OVER (PARTITION BY a.industry_id ORDER BY ${NEWEST_FIRST}) AS rn
-      ${CARD_FROM}
-      WHERE ${approvedArticleWhere}
-    ) WHERE rn <= ${HOME_PER_SECTION}
-    ORDER BY rn`);
-  const bySection = new Map<string, ArticleView[]>();
-  for (const v of await toViews(db, rows)) {
-    const list = bySection.get(v.sectionSlug) ?? [];
-    list.push(v);
-    bySection.set(v.sectionSlug, list);
+  const sections: HomeSection[] = [];
+  // One query per section: each reads only its newest rows from the index.
+  for (const s of await listSections(db)) {
+    const rows = await db.all<CardRow>(sql`
+      SELECT ${CARD_COLUMNS} ${CARD_FROM}
+      WHERE i.slug = ${s.slug} AND ${approvedArticleWhere}
+      ORDER BY ${NEWEST_FIRST}
+      LIMIT ${HOME_PER_SECTION}`);
+    sections.push({ ...s, articles: toViews(rows) });
   }
-  return {
-    sections: sections.map((s) => ({
-      ...s,
-      articles: bySection.get(s.slug) ?? [],
-    })),
-  };
+  return { sections };
 }
 
 export interface PublicCorrection {

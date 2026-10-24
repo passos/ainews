@@ -6,7 +6,13 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    cloudflare({
+      viteEnvironment: { name: "ssr" },
+      // test:ssr (scripts/smoke-ssr.ts) uses its own local D1 directory.
+      persistState: process.env.AINEWS_SMOKE_STATE
+        ? { path: process.env.AINEWS_SMOKE_STATE }
+        : undefined,
+    }),
     tanstackStart(),
     viteReact(),
     tailwindcss(),
