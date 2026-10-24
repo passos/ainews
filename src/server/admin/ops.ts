@@ -436,12 +436,15 @@ export async function updateArticleOverride(
     ? data.summaryOverride.trim()
     : null;
 
-  await database
-    .prepare(
-      "UPDATE articles SET title_override = ?1, summary_override = ?2 WHERE id = ?3",
-    )
-    .bind(title, summary, data.articleId)
-    .run();
+  const now = Date.now();
+  await database.batch([
+    database
+      .prepare(
+        "UPDATE articles SET title_override = ?1, summary_override = ?2 WHERE id = ?3",
+      )
+      .bind(title, summary, data.articleId),
+    revisionBumpStatement(database, data.articleId, now),
+  ]);
 }
 
 export async function changeArticleIndustry(
@@ -511,6 +514,7 @@ export async function reanalyzeArticle(
         "DELETE FROM llm_calls WHERE logical_key LIKE 'analyze:' || ?1 || ':%' OR logical_key LIKE 'write:' || ?1 || ':%'",
       )
       .bind(articleId),
+    revisionBumpStatement(database, articleId, now),
   ]);
 
   await qIngest.send({ kind: "analyze", articleId });
@@ -854,5 +858,82 @@ export async function publishDigest(
     )
     .bind(now, digestId)
     .run();
+  return res.meta.changes === 1;
+}
+
+// -----------------------------------------------------------------------------
+// Artifacts (M2 #13)
+// -----------------------------------------------------------------------------
+
+export interface AdminArtifactView {
+  id: number;
+  eventId: number;
+  eventTitle: string;
+  eventRevision: number;
+  industryName: string;
+  industrySlug: string;
+  type: string;
+  audience: string;
+  inputRevision: number;
+  model: string;
+  content: string;
+  status: string;
+  createdAt: number;
+}
+
+export async function listPendingArtifacts(
+  database: D1Database,
+): Promise<AdminArtifactView[]> {
+  const d = getDb(database);
+  const rows = await d.all<AdminArtifactView>(sql`
+    SELECT
+      ea.id,
+      ea.event_id AS eventId,
+      e.title AS eventTitle,
+      e.revision AS eventRevision,
+      i.name AS industryName,
+      i.slug AS industrySlug,
+      ea.type,
+      ea.audience,
+      ea.input_revision AS inputRevision,
+      ea.model,
+      ea.content,
+      ea.status,
+      ea.created_at AS createdAt
+    FROM event_artifacts ea
+    JOIN events e ON e.id = ea.event_id
+    JOIN industries i ON i.id = e.industry_id
+    WHERE ea.status = 'pending_review'
+      AND ea.input_revision = e.revision
+    ORDER BY ea.created_at DESC
+  `);
+  return rows;
+}
+
+export async function reviewArtifact(
+  database: D1Database,
+  data: {
+    artifactId: number;
+    decision: "approved" | "rejected";
+    expectedRevision: number;
+  },
+): Promise<boolean> {
+  const targetStatus = data.decision === "approved" ? "published" : "rejected";
+  const res = await database
+    .prepare(
+      `UPDATE event_artifacts
+       SET status = ?1
+       WHERE id = ?2
+         AND status = 'pending_review'
+         AND input_revision = ?3
+         AND EXISTS (
+           SELECT 1 FROM events e
+           WHERE e.id = event_artifacts.event_id
+             AND e.revision = ?3
+         )`,
+    )
+    .bind(targetStatus, data.artifactId, data.expectedRevision)
+    .run();
+
   return res.meta.changes === 1;
 }

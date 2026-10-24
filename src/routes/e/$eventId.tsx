@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { ArticleCard } from "../../components/ArticleCard";
+import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainCard";
+import { PaperDecoderCard } from "../../components/artifacts/PaperDecoderCard";
+import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { getEvent, getEventSources } from "../../server/publication/api";
 
@@ -44,7 +47,11 @@ export const Route = createFileRoute("/e/$eventId")({
 
 function EventPage() {
   const { data, sources } = Route.useLoaderData();
-  const { section, articles, corrections, title } = data;
+  const { audience } = Route.useSearch();
+  const { section, articles, corrections, title, artifacts } = data;
+
+  const hasExplanations =
+    artifacts?.explanations && Object.keys(artifacts.explanations).length > 0;
 
   return (
     <div data-section={section.slug} className="flex flex-col gap-4 pt-4">
@@ -69,6 +76,17 @@ function EventPage() {
       </header>
 
       {section.disclaimer && <Disclaimer text={section.disclaimer} />}
+
+      {artifacts?.brief && <StoryBriefCard brief={artifacts.brief} />}
+
+      {hasExplanations && (
+        <AudienceExplainCard
+          explanations={artifacts.explanations}
+          initialAudience={audience}
+        />
+      )}
+
+      {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}
 
       {corrections.length > 0 && (
         <div className="border-2 border-destructive p-3">

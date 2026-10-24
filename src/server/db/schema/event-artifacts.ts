@@ -1,4 +1,10 @@
-import { integer, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+} from "drizzle-orm/sqlite-core";
 import { events } from "./events";
 
 export const eventArtifacts = sqliteTable(
@@ -16,6 +22,12 @@ export const eventArtifacts = sqliteTable(
     promptVersion: text("prompt_version").notNull(),
     model: text("model").notNull(),
     content: text("content").notNull(),
+    /** Review/publication status: 'published' | 'pending_review' | 'rejected' */
+    status: text("status", {
+      enum: ["published", "pending_review", "rejected"],
+    })
+      .notNull()
+      .default("pending_review"),
     /** Epoch milliseconds. */
     createdAt: integer("created_at").notNull(),
   },
@@ -28,5 +40,6 @@ export const eventArtifacts = sqliteTable(
       t.promptVersion,
       t.model,
     ),
+    index("event_artifacts_event_id_status_idx").on(t.eventId, t.status),
   ],
 );

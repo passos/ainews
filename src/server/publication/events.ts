@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
 import {
+  type ArtifactAudience,
+  type EventArtifactsView,
+  audienceExplainSchema,
+  researchPaperDecoderSchema,
+  storyBriefSchema,
+} from "../../lib/artifacts/types";
+import {
   approvedArticleWhere,
   CARD_COLUMNS,
   CARD_FROM,
@@ -19,6 +26,7 @@ export interface EventView {
   section: SectionInfo;
   articles: ArticleView[];
   corrections: string[];
+  artifacts: EventArtifactsView;
 }
 
 export interface EventSourceView {
@@ -55,6 +63,47 @@ export async function getEvent(
     ORDER BY created_at DESC, id DESC
   `);
 
+  const artifactRows = await db.all<{
+    type: string;
+    audience: string;
+    content: string;
+  }>(sql`
+    SELECT ea.type, ea.audience, ea.content
+    FROM event_artifacts ea
+    JOIN events e ON e.id = ea.event_id
+    WHERE ea.event_id = ${eventId}
+      AND ea.status = 'published'
+      AND ea.input_revision = e.revision
+    ORDER BY ea.created_at ASC, ea.id ASC
+  `);
+
+  const artifacts: EventArtifactsView = {
+    brief: null,
+    explanations: {},
+    decoder: null,
+  };
+
+  for (const row of artifactRows) {
+    try {
+      const parsedJson = JSON.parse(row.content);
+      if (row.type === "story_brief") {
+        const res = storyBriefSchema.safeParse(parsedJson);
+        if (res.success) artifacts.brief = res.data;
+      } else if (row.type === "audience_explain") {
+        const res = audienceExplainSchema.safeParse(parsedJson);
+        if (res.success) {
+          const aud = (row.audience || res.data.audience) as ArtifactAudience;
+          artifacts.explanations[aud] = res.data;
+        }
+      } else if (row.type === "research_paper_decoder") {
+        const res = researchPaperDecoderSchema.safeParse(parsedJson);
+        if (res.success) artifacts.decoder = res.data;
+      }
+    } catch {
+      // ignore invalid json in publication layer
+    }
+  }
+
   return {
     id: eventId,
     // Event public title: title of earliest approved article (refinement invariant 7)
@@ -62,6 +111,7 @@ export async function getEvent(
     section,
     articles,
     corrections: correctionRows.map((c) => c.body),
+    artifacts,
   };
 }
 

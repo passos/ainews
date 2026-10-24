@@ -23,7 +23,12 @@ export type DigestMessage = {
   periodStart: string;
 };
 
-export type GenerateMessage = DigestMessage;
+export type ArtifactsMessage = {
+  kind: "artifacts";
+  eventId: number;
+};
+
+export type GenerateMessage = DigestMessage | ArtifactsMessage;
 
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
 export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {

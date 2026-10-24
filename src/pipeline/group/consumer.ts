@@ -11,7 +11,7 @@ import {
   bindingTransport,
   type ModelTransport,
 } from "../../providers/transport";
-import type { GroupMessage, PipelineEnv } from "../messages";
+import { sendGenerate, type GroupMessage, type PipelineEnv } from "../messages";
 import { groupArticle, type GroupArticleDeps } from "./group-article";
 
 export interface GroupConsumerDeps {
@@ -83,7 +83,23 @@ export async function handleGroupBatch(
     const deps = defaultDeps(env, overrides, now);
 
     try {
-      await groupArticle(deps, body.articleId);
+      const result = await groupArticle(deps, body.articleId);
+      if (
+        (result.status === "grouped" || result.status === "already_grouped") &&
+        env.Q_GENERATE
+      ) {
+        if (result.status === "already_grouped") {
+          await deps.db
+            .prepare(
+              "UPDATE events SET revision = revision + 1, updated_at = ?2 WHERE id = ?1",
+            )
+            .bind(result.eventId, now)
+            .run();
+        }
+        await sendGenerate(env, [
+          { kind: "artifacts", eventId: result.eventId },
+        ]);
+      }
       msg.ack();
     } catch (e) {
       if (
