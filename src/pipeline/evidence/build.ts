@@ -105,6 +105,7 @@ export function defaultEvidenceDeps(
 
 export const NO_CLAIMS_SENTINEL = "[no_verifiable_claims]";
 export const EVIDENCE_COMPLETE_SENTINEL = "[evidence_batch_complete]";
+export const EVIDENCE_INCOMPLETE_SENTINEL = "[evidence_incomplete]";
 
 export async function generateEventEvidence(
   env: PipelineEnv,
@@ -187,7 +188,7 @@ export async function generateEventEvidence(
       `SELECT id FROM claims
        WHERE event_id = ?1
          AND input_revision = ?2
-         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
        LIMIT 1`,
     )
     .bind(eventId, inputRevision)
@@ -366,8 +367,12 @@ export async function generateEventEvidence(
     };
   }
 
-  // If output legitimately had 0 verifiable claims, record a sentinel empty row to prevent scheduler loop
+  // If output legitimately had 0 verifiable claims, record a sentinel row to prevent scheduler loop
   if (parsed.claims.length === 0) {
+    const sentinelText = hasIncompleteInspection
+      ? EVIDENCE_INCOMPLETE_SENTINEL
+      : NO_CLAIMS_SENTINEL;
+
     await deps.db
       .prepare(
         `INSERT INTO claims (
@@ -379,7 +384,7 @@ export async function generateEventEvidence(
       )
       .bind(
         eventId,
-        NO_CLAIMS_SENTINEL,
+        sentinelText,
         inputRevision,
         CLAIMS_PROMPT_VERSION,
         modelName,
@@ -401,7 +406,7 @@ export async function generateEventEvidence(
       `SELECT id FROM claims
        WHERE event_id = ?1
          AND input_revision = ?2
-         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
        LIMIT 1`,
     )
     .bind(eventId, inputRevision)
@@ -417,6 +422,7 @@ export async function generateEventEvidence(
   const citationIndices: number[] = [];
 
   // 1. Delete child citations from previously aborted attempts on this revision
+  // Admin-reviewed claims (status != 'pending_review') are strictly preserved.
   batchStatements.push(
     deps.db
       .prepare(
@@ -425,31 +431,33 @@ export async function generateEventEvidence(
            SELECT id FROM claims
            WHERE event_id = ?1
              AND input_revision = ?2
-             AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+             AND status = 'pending_review'
+             AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
          )
          AND NOT EXISTS (
            SELECT 1 FROM claims
            WHERE event_id = ?1
              AND input_revision = ?2
-             AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+             AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
          )`,
       )
       .bind(eventId, inputRevision),
   );
 
-  // 2. Delete parent claims from previously aborted attempts on this revision
+  // 2. Delete parent pending claims from previously aborted attempts on this revision
   batchStatements.push(
     deps.db
       .prepare(
         `DELETE FROM claims
          WHERE event_id = ?1
            AND input_revision = ?2
-           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+           AND status = 'pending_review'
+           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
            AND NOT EXISTS (
              SELECT 1 FROM claims
              WHERE event_id = ?1
                AND input_revision = ?2
-               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
            )`,
       )
       .bind(eventId, inputRevision),
@@ -589,7 +597,7 @@ export async function generateEventEvidence(
                SELECT 1 FROM claims
                WHERE event_id = ?1
                  AND input_revision = ?6
-                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
         )
@@ -629,7 +637,7 @@ export async function generateEventEvidence(
                  SELECT 1 FROM claims
                  WHERE event_id = ?11
                    AND input_revision = ?12
-                   AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+                   AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
                )`,
           )
           .bind(
@@ -653,8 +661,12 @@ export async function generateEventEvidence(
     }
   }
 
-  // 5. Mark completion of the evidence batch (only when inspection was complete)
-  if (mergedClaimsMap.size > 0 && !hasIncompleteInspection) {
+  // 5. Mark completion of the evidence batch
+  if (mergedClaimsMap.size > 0) {
+    const batchSentinel = hasIncompleteInspection
+      ? EVIDENCE_INCOMPLETE_SENTINEL
+      : EVIDENCE_COMPLETE_SENTINEL;
+
     batchStatements.push(
       deps.db
         .prepare(
@@ -673,13 +685,13 @@ export async function generateEventEvidence(
                SELECT 1 FROM claims
                WHERE event_id = ?1
                  AND input_revision = ?3
-                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}')
+                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
         )
         .bind(
           eventId,
-          EVIDENCE_COMPLETE_SENTINEL,
+          batchSentinel,
           inputRevision,
           CLAIMS_PROMPT_VERSION,
           modelName,

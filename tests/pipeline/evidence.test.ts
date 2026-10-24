@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import {
   EVIDENCE_COMPLETE_SENTINEL,
+  EVIDENCE_INCOMPLETE_SENTINEL,
+  NO_CLAIMS_SENTINEL,
   generateEventEvidence,
 } from "../../src/pipeline/evidence/build";
 import { MAX_BODY_CHARS_PER_ARTICLE } from "../../src/pipeline/evidence/prompts";
@@ -665,7 +667,33 @@ describe("Evidence Chunks & Quote Verification", () => {
       false,
     );
 
-    // 4. Contrastive clause: post-negation in subsequent clause should NOT invalidate preceding clause
+    // 4. Post-negation: "has been proven false" / "was found to be false" / "proved false"
+    const chipBody =
+      "The claim that the chip doubled processing throughput has been proven false by independent benchmarks.";
+    expect(
+      verifyQuoteInBody(chipBody, "the chip doubled processing throughput")
+        .verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        chipBody,
+        "The claim that the chip doubled processing throughput has been proven false by independent benchmarks.",
+      ).verified,
+    ).toBe(true);
+
+    const hackBody =
+      "The claim that the system was unhackable was found to be false after the audit.";
+    expect(
+      verifyQuoteInBody(hackBody, "the system was unhackable").verified,
+    ).toBe(false);
+
+    const provedBody =
+      "The report that production stopped proved false after the factory visit.";
+    expect(verifyQuoteInBody(provedBody, "production stopped").verified).toBe(
+      false,
+    );
+
+    // 5. Contrastive clause: post-negation in subsequent clause should NOT invalidate preceding clause
     const contrastBody =
       "The treatment is effective, but it did not cure all patients in the cohort.";
     expect(
@@ -2658,14 +2686,20 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     expect(claim?.consensus_status).toBe("unverified");
     expect(claim?.status).toBe("pending_review");
 
-    // Sentinel must NOT be inserted when inspection is incomplete
-    const sentinel = await env.DB.prepare(
+    // Complete sentinel is null, but incomplete sentinel IS inserted
+    const completeSentinel = await env.DB.prepare(
       "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
     )
       .bind(event!.id, EVIDENCE_COMPLETE_SENTINEL)
       .first<{ id: number }>();
+    expect(completeSentinel).toBeNull();
 
-    expect(sentinel).toBeNull();
+    const incompleteSentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, EVIDENCE_INCOMPLETE_SENTINEL)
+      .first<{ id: number }>();
+    expect(incompleteSentinel).not.toBeNull();
   });
 
   it("generateEventEvidence marks claims unverified and pending_review and omits completion sentinel when article body exceeds MAX_BODY_CHARS_PER_ARTICLE", async () => {
@@ -2756,7 +2790,187 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     )
       .bind(event!.id, EVIDENCE_COMPLETE_SENTINEL)
       .first<{ id: number }>();
-
     expect(sentinel).toBeNull();
+
+    const incSentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, EVIDENCE_INCOMPLETE_SENTINEL)
+      .first<{ id: number }>();
+    expect(incSentinel).not.toBeNull();
+  });
+
+  it("generateEventEvidence preserves human reviews upon rerun and does not re-enqueue completed incomplete batches", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('rerun-ind', 'Rerun Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://rerun/feed', 'rerun.com', 'Rerun Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const bodyText =
+      "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, body_truncated, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://rerun.com/a1', 'https://rerun.com/a1', 'Rerun Article', 'Summary', 'shaRerun', 1, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaRerun', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Rerun Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaRerun.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    const transport = makeFakeTransport(async () => ({
+      claims: [
+        {
+          claimText:
+            "Total investment reached $300 million this year for semiconductor manufacturing.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote:
+                "The agency confirmed that total investment reached $300 million this year for semiconductor manufacturing.",
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    // First run creates claims and EVIDENCE_INCOMPLETE_SENTINEL
+    const res1 = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res1.status).toBe("generated");
+
+    // Admin manually reviews and approves the claim
+    const claimBefore = await env.DB.prepare(
+      "SELECT id, status FROM claims WHERE event_id = ?1 AND claim_text NOT LIKE '[%]'",
+    )
+      .bind(event!.id)
+      .first<{ id: number; status: string }>();
+    expect(claimBefore?.status).toBe("pending_review");
+
+    await env.DB.prepare("UPDATE claims SET status = 'published' WHERE id = ?1")
+      .bind(claimBefore!.id)
+      .run();
+
+    // Verify scheduler does NOT re-enqueue this event (no infinite loop)
+    const due = await enqueueDueEvidence(testEnv, 1000);
+    expect(due).not.toContain(event!.id);
+
+    // Rerunning generateEventEvidence returns already_exists and does NOT delete the published claim
+    const res2 = await generateEventEvidence(testEnv, event!.id, 2000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res2.status).toBe("skipped");
+
+    const claimAfter = await env.DB.prepare(
+      "SELECT id, status FROM claims WHERE id = ?1",
+    )
+      .bind(claimBefore!.id)
+      .first<{ id: number; status: string }>();
+    expect(claimAfter).toBeDefined();
+    expect(claimAfter?.status).toBe("published");
+  });
+
+  it("generateEventEvidence with empty claims output on incomplete inspection writes EVIDENCE_INCOMPLETE_SENTINEL rather than NO_CLAIMS_SENTINEL", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('empty-inc-ind', 'Empty Inc Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://empty-inc/feed', 'empty-inc.com', 'Empty Inc Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const bodyText = "Some truncated prefix text here.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, body_truncated, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://empty-inc.com/a1', 'https://empty-inc.com/a1', 'Empty Inc Article', 'Summary', 'shaEmptyInc', 1, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEmptyInc', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Empty Inc Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaEmptyInc.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    // Model returns empty claims
+    const transport = makeFakeTransport(async () => ({
+      claims: [],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+
+    expect(res.status).toBe("generated");
+
+    const noClaimsSentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, NO_CLAIMS_SENTINEL)
+      .first<{ id: number }>();
+    expect(noClaimsSentinel).toBeNull();
+
+    const incompleteSentinel = await env.DB.prepare(
+      "SELECT id FROM claims WHERE event_id = ?1 AND claim_text = ?2",
+    )
+      .bind(event!.id, EVIDENCE_INCOMPLETE_SENTINEL)
+      .first<{ id: number }>();
+    expect(incompleteSentinel).not.toBeNull();
   });
 });

@@ -24,7 +24,11 @@ export async function enqueueDueEvidence(
          SELECT 1 FROM claims c
          WHERE c.event_id = e.id
            AND c.input_revision = e.revision
-           AND c.claim_text IN ('[no_verifiable_claims]', '[evidence_batch_complete]')
+           AND c.claim_text IN (
+            '[no_verifiable_claims]',
+            '[evidence_batch_complete]',
+            '[evidence_incomplete]'
+          )
        )
      ORDER BY e.updated_at DESC
      LIMIT ?1`,
