@@ -497,18 +497,24 @@ export function verifyQuoteInBody(
     const quoteStartsCurrency = /^[\p{Sc}]/u.test(quoteClean);
     const quoteEndsDigit = /[\p{N}]$/u.test(quoteClean);
 
+    const beforeText = bodyClean.slice(0, cleanIdx);
+    const beforeTrimmed = beforeText.trimEnd();
+
     if (quoteStartsDigit) {
-      // Cannot be preceded by minus/plus signs (negation or sign clipping: -15, +15, −15, ±15)
-      if (/^[-+−±]$/u.test(charB)) {
-        return false;
-      }
-      // Cannot be preceded by currency symbol ($15 quoted as 15)
-      if (/^[\p{Sc}]$/u.test(charB)) {
-        return false;
-      }
       // Cannot be preceded by decimal point or thousands separator (.15, 0.15, 1,015)
       if (charB === "." || charB === ",") {
         return false;
+      }
+      // Cannot strip currency symbol ($15 or $ 15 quoted as 15)
+      if (/[\p{Sc}]$/u.test(beforeTrimmed)) {
+        return false;
+      }
+      // Cannot strip minus/plus signs (-15, − 15, - 15, ± 15 quoted as 15)
+      if (/[-+−±]$/u.test(beforeTrimmed)) {
+        const beforeSign = beforeTrimmed.slice(0, -1).trimEnd();
+        if (!/[\p{N}\p{Sc}]$/u.test(beforeSign)) {
+          return false;
+        }
       }
     }
 
@@ -518,7 +524,6 @@ export function verifyQuoteInBody(
         return false;
       }
       // Also catch '- $15' where whitespace separates the minus sign from the currency symbol
-      const beforeTrimmed = bodyClean.slice(0, cleanIdx).trimEnd();
       if (/[-+−±]$/u.test(beforeTrimmed)) {
         const beforeSign = beforeTrimmed.slice(0, -1).trimEnd();
         if (!/[\p{N}\p{Sc}]$/u.test(beforeSign)) {

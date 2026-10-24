@@ -497,10 +497,15 @@ export async function generateEventEvidence(
       verified: boolean;
     }> = [];
 
+    let hasSnapshotDispute = false;
+
     for (const cit of rawClaim.citations) {
       const articleRow = articleRows.find((a) => a.id === cit.articleId);
       if (!articleRow) {
-        // Discard hallucinated article IDs not in input snapshot
+        // Discard hallucinated article IDs not in input snapshot, but preserve dispute signal
+        if (cit.stance === "dispute") {
+          hasSnapshotDispute = true;
+        }
         continue;
       }
 
@@ -530,12 +535,16 @@ export async function generateEventEvidence(
       });
     }
 
-    const consensusStatus = evaluateClaimConsensus(verifiedCitations);
+    const hasUnresolvedDispute =
+      hasSnapshotDispute ||
+      verifiedCitations.some((c) => !c.verified && c.stance === "dispute");
+
+    const consensusStatus = hasSnapshotDispute
+      ? "unverified"
+      : evaluateClaimConsensus(verifiedCitations);
+
     const primarySourcePreferred = verifiedCitations.some(
       (c) => c.verified && c.isPrimarySource,
-    );
-    const hasUnresolvedDispute = verifiedCitations.some(
-      (c) => !c.verified && c.stance === "dispute",
     );
 
     // Track index of this claim insert statement in the batch

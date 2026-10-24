@@ -530,6 +530,40 @@ describe("Evidence Chunks & Quote Verification", () => {
         .verified,
     ).toBe(true);
 
+    // Number with space before minus or currency symbol must not strip sign
+    const spacedNegativeBody =
+      "The company reported − 15 million in net income last quarter.";
+    expect(
+      verifyQuoteInBody(
+        spacedNegativeBody,
+        "15 million in net income last quarter.",
+      ).verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        spacedNegativeBody,
+        "− 15 million in net income last quarter.",
+      ).verified,
+    ).toBe(true);
+
+    const nbspNegativeBody =
+      "The company reported -\u00A015 million in net income last quarter.";
+    expect(
+      verifyQuoteInBody(
+        nbspNegativeBody,
+        "15 million in net income last quarter.",
+      ).verified,
+    ).toBe(false);
+
+    const spacedCurrencyBody =
+      "The company reported $ 15 million in net income last quarter.";
+    expect(
+      verifyQuoteInBody(
+        spacedCurrencyBody,
+        "15 million in net income last quarter.",
+      ).verified,
+    ).toBe(false);
+
     const positiveCurrencyBody =
       "The company reported $15 million in net income last quarter.";
     expect(
@@ -1335,6 +1369,95 @@ describe("generateEventEvidence Integration", () => {
             {
               articleId: art2!.id,
               quote: "Non-verbatim dispute citation that fails quote match.",
+              stance: "dispute",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+    });
+    expect(res.status).toBe("generated");
+
+    // D1 assertion: Claim consensus must be 'unverified' and routed to 'pending_review'
+    const claimRow = await env.DB.prepare(
+      "SELECT consensus_status, status FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ consensus_status: string; status: string }>();
+
+    expect(claimRow).toBeDefined();
+    expect(claimRow?.consensus_status).toBe("unverified");
+    expect(claimRow?.status).toBe("pending_review");
+
+    // Public evidence query: not published, so public event evidence returns 0 claims
+    const publicEvidence = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(publicEvidence.claims).toHaveLength(0);
+  });
+
+  it("preserves dispute signal from out-of-snapshot articleId and routes to pending_review rather than auto-publishing as verified", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('out-snap-ind', 'Out Snapshot Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (name, site_domain, feed_url, kind, industry_id, created_at) VALUES ('Src Snap', 'example.com', 'https://example.com/feed', 'rss', ?1, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test/art-snap1', 'https://test/art-snap1', 'Art Snap 1', 'Summary', 'shaSnap', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaSnap', 'approved', 'auto', 1000)",
+    )
+      .bind(art1!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Snap Dispute Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art1!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art1!.id}/shaSnap.md`,
+      "Verified groundbreaking discovery confirmed by international teams.",
+    );
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [
+        {
+          claimText: "Groundbreaking discovery confirmed.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art1!.id,
+              quote:
+                "Verified groundbreaking discovery confirmed by international teams.",
+              stance: "support",
+            },
+            {
+              // Hallucinated / out-of-snapshot articleId 99999 reporting dispute!
+              articleId: 99999,
+              quote: "Dispute citation from hallucinated article.",
               stance: "dispute",
             },
           ],
