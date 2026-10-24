@@ -10,19 +10,48 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteRouteImport } from './routes/admin/route'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
+import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
+import { Route as AdminReviewRouteImport } from './routes/admin/review'
 import { Route as RssChar123sectionChar125DotxmlRouteImport } from './routes/rss/{$section}[.]xml'
 import { Route as SSectionRouteImport } from './routes/s/$section'
+import { Route as AdminArticlesArticleIdRouteImport } from './routes/admin/articles/$articleId'
+import { Route as AdminIndustriesIndexRouteImport } from './routes/admin/industries/index'
+import { Route as AdminIndustriesIndustryIdRouteImport } from './routes/admin/industries/$industryId'
+import { Route as AdminSourcesIndexRouteImport } from './routes/admin/sources/index'
+import { Route as AdminSourcesSourceIdRouteImport } from './routes/admin/sources/$sourceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminIndexRoute = AdminIndexRouteImport.update({
-  id: '/admin/',
-  path: '/admin/',
+const AdminRouteRoute = AdminRouteRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminDlqRoute = AdminDlqRouteImport.update({
+  id: '/dlq',
+  path: '/dlq',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminLedgerRoute = AdminLedgerRouteImport.update({
+  id: '/ledger',
+  path: '/ledger',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminReviewRoute = AdminReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => AdminRouteRoute,
 } as any)
 const RssChar123sectionChar125DotxmlRoute =
   RssChar123sectionChar125DotxmlRouteImport.update({
@@ -35,39 +64,130 @@ const SSectionRoute = SSectionRouteImport.update({
   path: '/s/$section',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminArticlesArticleIdRoute = AdminArticlesArticleIdRouteImport.update({
+  id: '/articles/$articleId',
+  path: '/articles/$articleId',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminIndustriesIndexRoute = AdminIndustriesIndexRouteImport.update({
+  id: '/industries/',
+  path: '/industries/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminIndustriesIndustryIdRoute =
+  AdminIndustriesIndustryIdRouteImport.update({
+    id: '/industries/$industryId',
+    path: '/industries/$industryId',
+    getParentRoute: () => AdminRouteRoute,
+  } as any)
+const AdminSourcesIndexRoute = AdminSourcesIndexRouteImport.update({
+  id: '/sources/',
+  path: '/sources/',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminSourcesSourceIdRoute = AdminSourcesSourceIdRouteImport.update({
+  id: '/sources/$sourceId',
+  path: '/sources/$sourceId',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/dlq': typeof AdminDlqRoute
+  '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/review': typeof AdminReviewRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
+  '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
+  '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/admin/industries/': typeof AdminIndustriesIndexRoute
+  '/admin/sources/': typeof AdminSourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/dlq': typeof AdminDlqRoute
+  '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/review': typeof AdminReviewRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin': typeof AdminIndexRoute
+  '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
+  '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
+  '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/admin/industries': typeof AdminIndustriesIndexRoute
+  '/admin/sources': typeof AdminSourcesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteRouteWithChildren
+  '/admin/dlq': typeof AdminDlqRoute
+  '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/review': typeof AdminReviewRoute
   '/rss/{$section}.xml': typeof RssChar123sectionChar125DotxmlRoute
   '/s/$section': typeof SSectionRoute
   '/admin/': typeof AdminIndexRoute
+  '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
+  '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
+  '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
+  '/admin/industries/': typeof AdminIndustriesIndexRoute
+  '/admin/sources/': typeof AdminSourcesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin/'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/admin/dlq'
+    | '/admin/ledger'
+    | '/admin/review'
+    | '/rss/{$section}.xml'
+    | '/s/$section'
+    | '/admin/'
+    | '/admin/articles/$articleId'
+    | '/admin/industries/$industryId'
+    | '/admin/sources/$sourceId'
+    | '/admin/industries/'
+    | '/admin/sources/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin'
-  id: '__root__' | '/' | '/rss/{$section}.xml' | '/s/$section' | '/admin/'
+  to:
+    | '/'
+    | '/admin/dlq'
+    | '/admin/ledger'
+    | '/admin/review'
+    | '/rss/{$section}.xml'
+    | '/s/$section'
+    | '/admin'
+    | '/admin/articles/$articleId'
+    | '/admin/industries/$industryId'
+    | '/admin/sources/$sourceId'
+    | '/admin/industries'
+    | '/admin/sources'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/admin/dlq'
+    | '/admin/ledger'
+    | '/admin/review'
+    | '/rss/{$section}.xml'
+    | '/s/$section'
+    | '/admin/'
+    | '/admin/articles/$articleId'
+    | '/admin/industries/$industryId'
+    | '/admin/sources/$sourceId'
+    | '/admin/industries/'
+    | '/admin/sources/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRouteRoute: typeof AdminRouteRouteWithChildren
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
-  AdminIndexRoute: typeof AdminIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -79,12 +199,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/': {
       id: '/admin/'
-      path: '/admin'
+      path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/dlq': {
+      id: '/admin/dlq'
+      path: '/dlq'
+      fullPath: '/admin/dlq'
+      preLoaderRoute: typeof AdminDlqRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/ledger': {
+      id: '/admin/ledger'
+      path: '/ledger'
+      fullPath: '/admin/ledger'
+      preLoaderRoute: typeof AdminLedgerRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/review': {
+      id: '/admin/review'
+      path: '/review'
+      fullPath: '/admin/review'
+      preLoaderRoute: typeof AdminReviewRouteImport
+      parentRoute: typeof AdminRouteRoute
     }
     '/rss/{$section}.xml': {
       id: '/rss/{$section}.xml'
@@ -100,14 +248,77 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SSectionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/articles/$articleId': {
+      id: '/admin/articles/$articleId'
+      path: '/articles/$articleId'
+      fullPath: '/admin/articles/$articleId'
+      preLoaderRoute: typeof AdminArticlesArticleIdRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/industries/': {
+      id: '/admin/industries/'
+      path: '/industries'
+      fullPath: '/admin/industries/'
+      preLoaderRoute: typeof AdminIndustriesIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/industries/$industryId': {
+      id: '/admin/industries/$industryId'
+      path: '/industries/$industryId'
+      fullPath: '/admin/industries/$industryId'
+      preLoaderRoute: typeof AdminIndustriesIndustryIdRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/sources/': {
+      id: '/admin/sources/'
+      path: '/sources'
+      fullPath: '/admin/sources/'
+      preLoaderRoute: typeof AdminSourcesIndexRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/sources/$sourceId': {
+      id: '/admin/sources/$sourceId'
+      path: '/sources/$sourceId'
+      fullPath: '/admin/sources/$sourceId'
+      preLoaderRoute: typeof AdminSourcesSourceIdRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
   }
 }
 
+interface AdminRouteRouteChildren {
+  AdminDlqRoute: typeof AdminDlqRoute
+  AdminLedgerRoute: typeof AdminLedgerRoute
+  AdminReviewRoute: typeof AdminReviewRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+  AdminArticlesArticleIdRoute: typeof AdminArticlesArticleIdRoute
+  AdminIndustriesIndustryIdRoute: typeof AdminIndustriesIndustryIdRoute
+  AdminSourcesSourceIdRoute: typeof AdminSourcesSourceIdRoute
+  AdminIndustriesIndexRoute: typeof AdminIndustriesIndexRoute
+  AdminSourcesIndexRoute: typeof AdminSourcesIndexRoute
+}
+
+const AdminRouteRouteChildren: AdminRouteRouteChildren = {
+  AdminDlqRoute: AdminDlqRoute,
+  AdminLedgerRoute: AdminLedgerRoute,
+  AdminReviewRoute: AdminReviewRoute,
+  AdminIndexRoute: AdminIndexRoute,
+  AdminArticlesArticleIdRoute: AdminArticlesArticleIdRoute,
+  AdminIndustriesIndustryIdRoute: AdminIndustriesIndustryIdRoute,
+  AdminSourcesSourceIdRoute: AdminSourcesSourceIdRoute,
+  AdminIndustriesIndexRoute: AdminIndustriesIndexRoute,
+  AdminSourcesIndexRoute: AdminSourcesIndexRoute,
+}
+
+const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
+  AdminRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRouteRoute: AdminRouteRouteWithChildren,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,
-  AdminIndexRoute: AdminIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

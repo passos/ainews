@@ -3,6 +3,7 @@ import { bindingTransport } from "../providers/transport";
 import { analyzeArticle, type AnalyzeDeps } from "./analyze/analyze";
 import { processBody, type BodyDeps } from "./body/body";
 import { collectSource } from "./collect/collect";
+import { persistDeadLetters } from "./dlq";
 import { INGEST_QUEUE, type IngestMessage, type PipelineEnv } from "./messages";
 
 export type QueueDeps = BodyDeps & AnalyzeDeps;
@@ -34,6 +35,10 @@ export async function runQueue(
   _ctx: ExecutionContext,
   overrides: Partial<QueueDeps> = {},
 ): Promise<void> {
+  if (batch.queue === "ainews-dlq") {
+    await persistDeadLetters(batch, env);
+    return;
+  }
   if (batch.queue !== INGEST_QUEUE) {
     console.log({ queue: batch.queue, messages: batch.messages.length });
     batch.ackAll();
