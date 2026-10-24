@@ -198,6 +198,27 @@ async function main() {
     fail(`GET / content-security-policy is "${csp}"`);
   }
 
+  // Theme: the server always renders light. The inline init script is in
+  // <head>, so a stored dark choice is applied before first paint (React
+  // hoists the stylesheet link in front of it; a script that follows a
+  // stylesheet runs before the first paint too). <html> itself carries no
+  // data-theme.
+  const htmlTag = body.match(/<html\b[^>]*>/i)?.[0] ?? "";
+  if (!htmlTag || htmlTag.includes("data-theme")) {
+    fail(`GET / <html> tag is "${htmlTag}"`);
+  }
+  const head = body.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+  const initAt = head.indexOf("pn:prefs:v1");
+  if (initAt < 0) fail("GET / has no theme init script in <head>");
+  const openAt = head.lastIndexOf("<script", initAt);
+  const openTag =
+    openAt < 0 ? "" : head.slice(openAt, head.indexOf(">", openAt));
+  // type=, defer and async all postpone the script, so a stored dark choice
+  // would flash light.
+  if (!openTag || /\b(src|type|defer|async)\b/i.test(openTag)) {
+    fail(`GET / theme init script tag is "${openTag}"`);
+  }
+
   // The test env has empty Access vars, so every admin variant fails closed.
   // "//admin" is not sent: vite preview parses it as a protocol-relative URL,
   // so the worker sees http://admin/. "/%2Fadmin" reaches the worker and

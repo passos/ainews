@@ -11,7 +11,9 @@ import { AudienceSelector } from "../components/AudienceSelector";
 import { Beacon } from "../components/Beacon";
 import { PrefsSync } from "../components/PrefsSync";
 import { SectionNav } from "../components/SectionNav";
+import { ThemeSwitcher } from "../components/ThemeSwitcher";
 import { AUDIENCES } from "../lib/reader-prefs";
+import { THEME_INIT_SCRIPT } from "../lib/theme";
 import { getSiteShell } from "../server/publication/site";
 import appCss from "../styles.css?url";
 
@@ -38,8 +40,9 @@ export const Route = createRootRoute({
 function RootDocument({ children }: { children: ReactNode }) {
   const { beaconToken } = Route.useLoaderData();
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -66,9 +69,12 @@ function RootLayout() {
           >
             {name}
           </Link>
-          <p className="font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
-            Approved stories · every one traced to its source
-          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <p className="font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
+              Approved stories · every one traced to its source
+            </p>
+            <ThemeSwitcher />
+          </div>
         </div>
         <div className="mt-3 flex flex-col gap-2 border-y-2 py-2 sm:flex-row sm:items-center sm:justify-between">
           <SectionNav sections={sections} />
