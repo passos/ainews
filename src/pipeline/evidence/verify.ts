@@ -379,6 +379,92 @@ export function cleanMarkdown(str: string): string {
   return cleanMarkdownWithMap(str).cleanText;
 }
 
+const ABBREVIATIONS = new Set([
+  "dr",
+  "mr",
+  "mrs",
+  "ms",
+  "prof",
+  "sr",
+  "jr",
+  "gen",
+  "rep",
+  "sen",
+  "st",
+  "rev",
+  "inc",
+  "ltd",
+  "corp",
+  "co",
+  "vs",
+  "etc",
+  "al",
+  "fig",
+  "dept",
+  "approx",
+  "est",
+  "ie",
+  "eg",
+]);
+
+function isSentenceBoundary(text: string, pos: number): boolean {
+  const ch = text[pos];
+  if (ch === "\n" || ch === "\r") {
+    return true;
+  }
+  if (ch === "!" || ch === "?") {
+    return true;
+  }
+  if (ch === ".") {
+    // Check if part of a number: e.g. '3.5' or '.5'
+    const prevChar = pos > 0 ? text[pos - 1] : "";
+    const nextChar = pos + 1 < text.length ? text[pos + 1] : "";
+    if (/^[\p{N}]$/u.test(prevChar) || /^[\p{N}]$/u.test(nextChar)) {
+      return false;
+    }
+
+    // Check if ellipsis: '..'
+    if (prevChar === "." || nextChar === ".") {
+      return false;
+    }
+
+    // Check preceding word for abbreviations
+    let wordStart = pos - 1;
+    while (wordStart >= 0 && /[\p{L}]/u.test(text[wordStart])) {
+      wordStart--;
+    }
+    const word = text.slice(wordStart + 1, pos).toLowerCase();
+
+    // Single letter initial: e.g. 'Dr. Smith', 'John F. Kennedy'
+    if (word.length === 1) {
+      return false;
+    }
+
+    // Known abbreviation: e.g. 'Dr.', 'Prof.', 'Inc.'
+    if (ABBREVIATIONS.has(word)) {
+      return false;
+    }
+
+    // Special check for 'e.g.' and 'i.e.'
+    if (pos >= 3 && /^[ei]\.g$/i.test(text.slice(pos - 3, pos))) {
+      return false;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+function findSentenceStart(text: string, cleanIdx: number): number {
+  for (let i = cleanIdx - 1; i >= 0; i--) {
+    if (isSentenceBoundary(text, i)) {
+      return i + 1;
+    }
+  }
+  return 0;
+}
+
 /**
  * Verifies that a quoted passage actually appears in the original markdown body.
  * Enforces minimum length of 15 characters and word boundary safety.
@@ -466,16 +552,8 @@ export function verifyQuoteInBody(
   }
 
   function hasDroppedNegation(cleanIdx: number): boolean {
-    const beforeText = bodyClean.slice(0, cleanIdx);
-    const lastBoundary = Math.max(
-      beforeText.lastIndexOf("."),
-      beforeText.lastIndexOf("!"),
-      beforeText.lastIndexOf("?"),
-      beforeText.lastIndexOf("\n"),
-    );
-    const sentencePrefix = beforeText.slice(
-      lastBoundary === -1 ? 0 : lastBoundary + 1,
-    );
+    const sentenceStart = findSentenceStart(bodyClean, cleanIdx);
+    const sentencePrefix = bodyClean.slice(sentenceStart, cleanIdx);
     const negationRegex =
       /(?:\b\w+n['’]t|\bnot|\bcannot|\bnever|\bno|\bneither|\bnor|\bhardly|\bbarely|\bscarcely|\bfailed\s+to|\bfails\s+to|\bdenied|\bdenies|\bwithout)\b/i;
 
@@ -511,9 +589,16 @@ export function verifyQuoteInBody(
     origStarts,
     origEnds,
   } = cleanMarkdownWithMap(bodyMd);
+
+  const MAX_QUOTE_CANDIDATE_SEARCHES = 100;
+  let candidateSearches = 0;
+
   let cleanIndex = bodyClean.indexOf(quoteClean);
 
   while (cleanIndex !== -1) {
+    if (++candidateSearches > MAX_QUOTE_CANDIDATE_SEARCHES) {
+      break;
+    }
     // Read full Unicode code point before
     const beforeSlice = bodyClean.slice(
       Math.max(0, cleanIndex - 2),
@@ -561,31 +646,36 @@ export function verifyQuoteInBody(
 }
 
 /**
- * Determines claim consensus based on verified citations:
- * - "verified": has at least 1 verified support citation and 0 dispute citations.
- * - "disputed": has both verified support and dispute citations.
- * - "unverified": has 0 verified support citations.
+ * Determines claim consensus based on verified and unresolved citations:
+ * - "verified": has at least 1 verified support citation, 0 verified dispute citations,
+ *   and 0 unresolved (unverified) dispute citations.
+ * - "disputed": has both verified support and verified dispute citations.
+ * - "unverified": has 0 verified support citations OR has an unresolved dispute citation.
  */
 export function evaluateClaimConsensus(
   citations: Array<{ verified: boolean; stance: EvidenceStance }>,
 ): ConsensusStatus {
-  const verifiedCitations = citations.filter((c) => c.verified);
-  if (verifiedCitations.length === 0) {
-    return "unverified";
-  }
-
-  const supportCount = verifiedCitations.filter(
-    (c) => c.stance === "support",
+  const verifiedSupport = citations.filter(
+    (c) => c.verified && c.stance === "support",
   ).length;
-  const disputeCount = verifiedCitations.filter(
-    (c) => c.stance === "dispute",
+  const verifiedDispute = citations.filter(
+    (c) => c.verified && c.stance === "dispute",
   ).length;
 
-  if (supportCount > 0 && disputeCount > 0) {
+  if (verifiedSupport > 0 && verifiedDispute > 0) {
     return "disputed";
   }
 
-  if (supportCount > 0 && disputeCount === 0) {
+  // If ANY dispute was extracted but could not be verified in text, the dispute remains
+  // unresolved. The claim MUST NOT be promoted to "verified".
+  const hasUnresolvedDispute = citations.some(
+    (c) => !c.verified && c.stance === "dispute",
+  );
+  if (hasUnresolvedDispute) {
+    return "unverified";
+  }
+
+  if (verifiedSupport > 0 && verifiedDispute === 0) {
     return "verified";
   }
 

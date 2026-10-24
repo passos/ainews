@@ -534,6 +534,9 @@ export async function generateEventEvidence(
     const primarySourcePreferred = verifiedCitations.some(
       (c) => c.verified && c.isPrimarySource,
     );
+    const hasUnresolvedDispute = verifiedCitations.some(
+      (c) => !c.verified && c.stance === "dispute",
+    );
 
     // Track index of this claim insert statement in the batch
     claimIndices.push(batchStatements.length);
@@ -551,6 +554,7 @@ export async function generateEventEvidence(
              ?5,
              CASE
                WHEN i.slug = '${FINANCE_SLUG}' THEN 'pending_review'
+               WHEN ?10 = 1 THEN 'pending_review'
                WHEN i.publish_mode = 'auto' THEN 'published'
                ELSE 'pending_review'
              END,
@@ -580,6 +584,7 @@ export async function generateEventEvidence(
           CLAIMS_PROMPT_VERSION,
           modelName,
           now,
+          hasUnresolvedDispute ? 1 : 0,
         ),
     );
 

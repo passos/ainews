@@ -547,6 +547,50 @@ describe("Evidence Chunks & Quote Verification", () => {
       verifyQuoteInBody(failedBody, "failed to meet quarterly revenue targets.")
         .verified,
     ).toBe(true);
+
+    // Abbreviations in parentheticals must not strip sentence negation context
+    const drAbbreviationBody =
+      "The company did not, as Dr. Smith explained, report record revenue this year.";
+    expect(
+      verifyQuoteInBody(drAbbreviationBody, "report record revenue this year.")
+        .verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        drAbbreviationBody,
+        "did not, as Dr. Smith explained, report record revenue this year.",
+      ).verified,
+    ).toBe(true);
+
+    const egAbbreviationBody =
+      "The platform failed to, e.g., process user transactions promptly.";
+    expect(
+      verifyQuoteInBody(
+        egAbbreviationBody,
+        "process user transactions promptly.",
+      ).verified,
+    ).toBe(false);
+
+    const drRealSentenceBody =
+      "The initial study was unsuccessful. Dr. Smith stated that the follow-up trial was successful.";
+    expect(
+      verifyQuoteInBody(
+        drRealSentenceBody,
+        "the follow-up trial was successful.",
+      ).verified,
+    ).toBe(true);
+
+    // Performance regression: highly repetitive candidate text does not cause quadratic slowdown
+    const repeatedCandidateBody =
+      "not " + "revenue increased this year ".repeat(10000);
+    const startPerf = Date.now();
+    const perfRes = verifyQuoteInBody(
+      repeatedCandidateBody,
+      "revenue increased this year",
+    );
+    const elapsedPerf = Date.now() - startPerf;
+    expect(perfRes.verified).toBe(false);
+    expect(elapsedPerf).toBeLessThan(100);
   });
 
   it("verifyQuoteInBody handles autolinks and single quotes in URLs without skipping characters", () => {
@@ -626,13 +670,21 @@ describe("Evidence Chunks & Quote Verification", () => {
       evaluateClaimConsensus([{ verified: true, stance: "support" }]),
     ).toBe("verified");
 
-    // Support and dispute
+    // Support and dispute both verified
     expect(
       evaluateClaimConsensus([
         { verified: true, stance: "support" },
         { verified: true, stance: "dispute" },
       ]),
     ).toBe("disputed");
+
+    // Support verified, but an unresolved (unverified) dispute exists -> unverified
+    expect(
+      evaluateClaimConsensus([
+        { verified: true, stance: "support" },
+        { verified: false, stance: "dispute" },
+      ]),
+    ).toBe("unverified");
 
     // Only unverified citations
     expect(
@@ -1210,6 +1262,106 @@ describe("generateEventEvidence Integration", () => {
     expect(res2.status).toBe("skipped");
     expect((res2 as { reason: string }).reason).toBe("already_exists");
     expect(modelCalls).toBe(1);
+  });
+
+  it("preserves unresolved dispute citations as unverified and routes to pending_review rather than auto-publishing as verified", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('unres-disp-ind', 'Unresolved Dispute Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (name, site_domain, feed_url, kind, industry_id, created_at) VALUES ('Src Disp', 'example.com', 'https://example.com/feed', 'rss', ?1, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test/art1', 'https://test/art1', 'Art 1', 'Summary', 'sha1', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://test/art2', 'https://test/art2', 'Art 2', 'Summary', 'sha2', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha1', 'approved', 'auto', 1000), (?2, 'sha2', 'approved', 'auto', 1000)",
+    )
+      .bind(art1!.id, art2!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Dispute Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000), (?1, ?3, 1000)",
+    )
+      .bind(event!.id, art1!.id, art2!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art1!.id}/sha1.md`,
+      "The company reported record revenue of $100 million this year.",
+    );
+    fakeR2.put(
+      `bodies/${art2!.id}/sha2.md`,
+      "Analysts questioned the accounting methods and disputed the figures.",
+    );
+
+    const transport = makeFakeTransport((_model, _input) => ({
+      claims: [
+        {
+          claimText: "The company achieved record revenue.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art1!.id,
+              quote:
+                "The company reported record revenue of $100 million this year.",
+              stance: "support",
+            },
+            {
+              articleId: art2!.id,
+              quote: "Non-verbatim dispute citation that fails quote match.",
+              stance: "dispute",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+    });
+    expect(res.status).toBe("generated");
+
+    // D1 assertion: Claim consensus must be 'unverified' and routed to 'pending_review'
+    const claimRow = await env.DB.prepare(
+      "SELECT consensus_status, status FROM claims WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .first<{ consensus_status: string; status: string }>();
+
+    expect(claimRow).toBeDefined();
+    expect(claimRow?.consensus_status).toBe("unverified");
+    expect(claimRow?.status).toBe("pending_review");
+
+    // Public evidence query: not published, so public event evidence returns 0 claims
+    const publicEvidence = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(publicEvidence.claims).toHaveLength(0);
   });
 });
 
