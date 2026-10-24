@@ -304,8 +304,11 @@ async function main() {
   }
 
   const homePage = await page("/");
-  if (!homePage.text.includes("End of approved stories")) {
-    fail("GET / lacks 'End of approved stories' filler for shorter section");
+  if (!homePage.text.includes("lg:columns-2")) {
+    fail("GET / lacks 'lg:columns-2' multi-column flow layout");
+  }
+  if (!homePage.text.includes("break-inside-avoid")) {
+    fail("GET / lacks 'break-inside-avoid' on sections");
   }
 
   const tech = await page("/s/technology");
