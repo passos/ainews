@@ -195,6 +195,46 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
   });
 
+  it("verifyQuoteInBody rejects partial quote crossing markdown link boundaries", () => {
+    const body =
+      "This material is un[safe for human use](https://example.com) in food preparation.";
+    const badQuote = "safe for human use";
+    const res = verifyQuoteInBody(body, badQuote);
+    expect(res.verified).toBe(false);
+  });
+
+  it("verifyQuoteInBody handles massive unclosed brackets linearly without quadratic re-scan", () => {
+    const body =
+      "[".repeat(100000) + " The company reported record revenue in Q4.";
+    const quote = "company reported record revenue in Q4";
+    const t0 = Date.now();
+    const res = verifyQuoteInBody(body, quote);
+    const elapsed = Date.now() - t0;
+    expect(res.verified).toBe(true);
+    expect(elapsed).toBeLessThan(1000); // Must be linear, well under 1 second
+  });
+
+  it("verifyQuoteInBody preserves literal symbols like C# and distinguishes from other words", () => {
+    const body = "The C# language is memory-safe.";
+    // Quote with "The C language" must NOT match "The C# language"
+    expect(
+      verifyQuoteInBody(body, "The C language is memory-safe.").verified,
+    ).toBe(false);
+    // Exact quote with "The C# language" must match
+    const res = verifyQuoteInBody(body, "The C# language is memory-safe.");
+    expect(res.verified).toBe(true);
+    expect(body.slice(res.startOffset, res.endOffset)).toBe(
+      "The C# language is memory-safe.",
+    );
+  });
+
+  it("verifyQuoteInBody respects Unicode code point boundaries including astral plane characters", () => {
+    const body = "The initial funding round was 𝟙15 million in capital.";
+    const badQuote = "15 million in capital";
+    const res = verifyQuoteInBody(body, badQuote);
+    expect(res.verified).toBe(false);
+  });
+
   it("evaluateClaimConsensus calculates correct status", () => {
     // Only support
     expect(

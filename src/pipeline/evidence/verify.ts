@@ -19,98 +19,185 @@ export function normalizeWhitespace(str: string): string {
   return str.replace(/\s+/g, " ").trim();
 }
 
+function parseImagesLinear(
+  str: string,
+  map: Int32Array<ArrayBufferLike>,
+): { str: string; map: Int32Array<ArrayBufferLike> } {
+  const len = str.length;
+  const parts: string[] = [];
+  const nextMap = new Int32Array(len);
+  let dest = 0;
+  let lastIndex = 0;
+  let i = 0;
+
+  while (i < len) {
+    if (str[i] === "!" && i + 1 < len && str[i + 1] === "[") {
+      const closeBracket = str.indexOf("]", i + 2);
+      if (closeBracket === -1) break;
+      if (closeBracket + 1 < len && str[closeBracket + 1] === "(") {
+        const closeParen = str.indexOf(")", closeBracket + 2);
+        if (closeParen !== -1) {
+          if (i > lastIndex) {
+            parts.push(str.slice(lastIndex, i));
+            const count = i - lastIndex;
+            nextMap.set(map.subarray(lastIndex, i), dest);
+            dest += count;
+          }
+          const altLen = closeBracket - (i + 2);
+          if (altLen > 0) {
+            parts.push(str.slice(i + 2, closeBracket));
+            nextMap.set(map.subarray(i + 2, closeBracket), dest);
+            dest += altLen;
+          }
+          i = closeParen + 1;
+          lastIndex = i;
+          continue;
+        }
+      }
+    }
+    i++;
+  }
+
+  if (lastIndex < len) {
+    parts.push(str.slice(lastIndex));
+    const count = len - lastIndex;
+    nextMap.set(map.subarray(lastIndex, len), dest);
+    dest += count;
+  }
+
+  return { str: parts.join(""), map: nextMap.subarray(0, dest) };
+}
+
+function parseLinksLinear(
+  str: string,
+  map: Int32Array<ArrayBufferLike>,
+): { str: string; map: Int32Array<ArrayBufferLike> } {
+  const len = str.length;
+  const parts: string[] = [];
+  const nextMap = new Int32Array(len);
+  let dest = 0;
+  let lastIndex = 0;
+  let i = 0;
+
+  while (i < len) {
+    if (str[i] === "[") {
+      const closeBracket = str.indexOf("]", i + 1);
+      if (closeBracket === -1) break;
+      if (
+        closeBracket > i + 1 &&
+        closeBracket + 1 < len &&
+        str[closeBracket + 1] === "("
+      ) {
+        const closeParen = str.indexOf(")", closeBracket + 2);
+        if (closeParen !== -1) {
+          if (i > lastIndex) {
+            parts.push(str.slice(lastIndex, i));
+            const count = i - lastIndex;
+            nextMap.set(map.subarray(lastIndex, i), dest);
+            dest += count;
+          }
+          const textLen = closeBracket - (i + 1);
+          parts.push(str.slice(i + 1, closeBracket));
+          nextMap.set(map.subarray(i + 1, closeBracket), dest);
+          dest += textLen;
+          i = closeParen + 1;
+          lastIndex = i;
+          continue;
+        }
+      }
+    }
+    i++;
+  }
+
+  if (lastIndex < len) {
+    parts.push(str.slice(lastIndex));
+    const count = len - lastIndex;
+    nextMap.set(map.subarray(lastIndex, len), dest);
+    dest += count;
+  }
+
+  return { str: parts.join(""), map: nextMap.subarray(0, dest) };
+}
+
 /**
  * Strips basic Markdown formatting while tracking exact character indices back to the original text.
  * Uses bounded Int32Array mapping to avoid call stack limits or unbounded memory on large documents.
  */
-export function cleanMarkdownWithMap(str: string): CleanMarkdownMapResult {
-  let len = str.length;
-  let map = new Int32Array(len);
-  for (let i = 0; i < len; i++) {
+export function cleanMarkdownWithMap(rawStr: string): CleanMarkdownMapResult {
+  const initialLen = rawStr.length;
+  let map: Int32Array<ArrayBufferLike> = new Int32Array(initialLen);
+  for (let i = 0; i < initialLen; i++) {
     map[i] = i;
   }
 
-  // Step 1: Images !\[([^\]]*)\]\([^)]*\)
-  const imgMatches = Array.from(str.matchAll(/!\[([^\]]*)\]\([^)]*\)/g));
-  if (imgMatches.length > 0) {
-    const parts: string[] = [];
-    const nextMap = new Int32Array(len);
-    let dest = 0;
-    let lastIndex = 0;
-    for (const m of imgMatches) {
-      if (m.index === undefined) continue;
-      if (m.index > lastIndex) {
-        parts.push(str.slice(lastIndex, m.index));
-        const count = m.index - lastIndex;
-        nextMap.set(map.subarray(lastIndex, m.index), dest);
-        dest += count;
-      }
-      const alt = m[1];
-      if (alt.length > 0) {
-        const altStart = m.index + 2;
-        parts.push(alt);
-        nextMap.set(map.subarray(altStart, altStart + alt.length), dest);
-        dest += alt.length;
-      }
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < len) {
-      parts.push(str.slice(lastIndex));
-      const count = len - lastIndex;
-      nextMap.set(map.subarray(lastIndex, len), dest);
-      dest += count;
-    }
-    str = parts.join("");
-    map = nextMap.subarray(0, dest);
-    len = dest;
-  }
+  // Step 1: Images !\[([^\]]*)\]\([^)]*\) in O(N)
+  const resImages = parseImagesLinear(rawStr, map);
+  const strImages = resImages.str;
+  map = resImages.map;
 
-  // Step 2: Links \[([^\]]+)\]\([^)]*\)
-  const linkMatches = Array.from(str.matchAll(/\[([^\]]+)\]\([^)]*\)/g));
-  if (linkMatches.length > 0) {
-    const parts: string[] = [];
-    const nextMap = new Int32Array(len);
-    let dest = 0;
-    let lastIndex = 0;
-    for (const m of linkMatches) {
-      if (m.index === undefined) continue;
-      if (m.index > lastIndex) {
-        parts.push(str.slice(lastIndex, m.index));
-        const count = m.index - lastIndex;
-        nextMap.set(map.subarray(lastIndex, m.index), dest);
-        dest += count;
-      }
-      const linkText = m[1];
-      if (linkText.length > 0) {
-        const linkStart = m.index + 1;
-        parts.push(linkText);
-        nextMap.set(map.subarray(linkStart, linkStart + linkText.length), dest);
-        dest += linkText.length;
-      }
-      lastIndex = m.index + m[0].length;
-    }
-    if (lastIndex < len) {
-      parts.push(str.slice(lastIndex));
-      const count = len - lastIndex;
-      nextMap.set(map.subarray(lastIndex, len), dest);
-      dest += count;
-    }
-    str = parts.join("");
-    map = nextMap.subarray(0, dest);
-    len = dest;
-  }
+  // Step 2: Links \[([^\]]+)\]\([^)]*\) in O(N)
+  const resLinks = parseLinksLinear(strImages, map);
+  const str = resLinks.str;
+  map = resLinks.map;
+  const len = str.length;
 
-  // Step 3 & 4: Markdown styling symbols [*_~`#] + whitespace collapse \s+
+  // Step 3 & 4: Markdown styling symbols + whitespace collapse \s+
   const outChars: string[] = [];
   const outIndices = new Int32Array(len);
   let outLen = 0;
   let inWs = false;
+  let atLineStart = true;
+  const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
 
   for (let i = 0; i < len; i++) {
-    let ch = str[i];
-    if (ch === "*" || ch === "_" || ch === "~" || ch === "`" || ch === "#") {
-      ch = " ";
+    const ch = str[i];
+
+    // Markdown heading check: # at line start followed by # and whitespace
+    if (atLineStart && ch === "#") {
+      let j = i;
+      while (j < len && str[j] === "#") j++;
+      if (j < len && (str[j] === " " || str[j] === "\t")) {
+        while (j < len && (str[j] === " " || str[j] === "\t")) j++;
+        i = j - 1;
+        inWs = true;
+        continue;
+      }
     }
+
+    if (ch === "\n") {
+      atLineStart = true;
+      if (!inWs) {
+        outChars.push(" ");
+        outIndices[outLen++] = map[i];
+        inWs = true;
+      }
+      continue;
+    }
+
+    if (/\S/.test(ch)) {
+      atLineStart = false;
+    }
+
+    // Markdown emphasis symbols: *, ~, `
+    // Notice: `#` is NOT an inline symbol (prevents breaking terms like C#)
+    let isFormatSymbol = ch === "*" || ch === "~" || ch === "`";
+    if (ch === "_") {
+      const prev = i > 0 ? str[i - 1] : " ";
+      const next = i + 1 < len ? str[i + 1] : " ";
+      if (!isWordChar(prev) || !isWordChar(next)) {
+        isFormatSymbol = true;
+      }
+    }
+
+    if (isFormatSymbol) {
+      if (!inWs) {
+        outChars.push(" ");
+        outIndices[outLen++] = map[i];
+        inWs = true;
+      }
+      continue;
+    }
+
     if (/\s/.test(ch)) {
       if (!inWs) {
         outChars.push(" ");
@@ -160,7 +247,6 @@ export function verifyQuoteInBody(
   bodyMd: string,
   rawQuote: string,
 ): VerifiedQuoteResult {
-  const quoteTrimmed = rawQuote.trim();
   const quoteClean = normalizeWhitespace(cleanMarkdown(rawQuote));
 
   // Reject quotes shorter than 15 characters to prevent accidental trivial matches
@@ -175,35 +261,22 @@ export function verifyQuoteInBody(
 
   const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
 
-  // 1. Direct exact substring match in original markdown body with word boundary safety
-  let directIndex = bodyMd.indexOf(quoteTrimmed);
-  while (directIndex !== -1) {
-    const charBefore = directIndex > 0 ? bodyMd[directIndex - 1] : " ";
-    const charAfter =
-      directIndex + quoteTrimmed.length < bodyMd.length
-        ? bodyMd[directIndex + quoteTrimmed.length]
-        : " ";
-    if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
-      return {
-        verified: true,
-        startOffset: directIndex,
-        endOffset: directIndex + quoteTrimmed.length,
-        quoteClean,
-      };
-    }
-    directIndex = bodyMd.indexOf(quoteTrimmed, directIndex + 1);
-  }
-
-  // 2. Normalized whitespace search with word-boundary awareness and exact character mapping
+  // Normalized whitespace search on visible text with full Unicode word-boundary awareness
   const { cleanText: bodyClean, origIndices } = cleanMarkdownWithMap(bodyMd);
   let cleanIndex = bodyClean.indexOf(quoteClean);
 
   while (cleanIndex !== -1) {
-    const charBefore = cleanIndex > 0 ? bodyClean[cleanIndex - 1] : " ";
-    const charAfter =
-      cleanIndex + quoteClean.length < bodyClean.length
-        ? bodyClean[cleanIndex + quoteClean.length]
-        : " ";
+    // Read full Unicode code point before
+    const beforeSlice = bodyClean.slice(
+      Math.max(0, cleanIndex - 2),
+      cleanIndex,
+    );
+    const charBefore = Array.from(beforeSlice).pop() ?? " ";
+
+    // Read full Unicode code point after
+    const endClean = cleanIndex + quoteClean.length;
+    const afterSlice = bodyClean.slice(endClean, endClean + 2);
+    const charAfter = Array.from(afterSlice)[0] ?? " ";
 
     if (!isWordChar(charBefore) && !isWordChar(charAfter)) {
       const startOffset = origIndices[cleanIndex];
