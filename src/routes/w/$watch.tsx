@@ -138,6 +138,8 @@ function WatchPage() {
                   </p>
                 </div>
 
+                {hit.disclaimer && <Disclaimer text={hit.disclaimer} />}
+
                 <div className="mt-1 flex flex-col gap-2 rounded bg-muted/40 p-3">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-xs font-bold text-muted-foreground">

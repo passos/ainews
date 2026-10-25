@@ -162,9 +162,9 @@ export async function getWatchView(
 
     if (
       evidenceArticleIds.length > 0 &&
-      !evidenceArticleIds.some((id) => approvedIds.has(id))
+      !evidenceArticleIds.every((id) => approvedIds.has(id))
     ) {
-      // The specific article(s) reporting this development were retracted; filter out hit
+      // One or more articles supporting this hit were retracted; filter out hit
       continue;
     }
 
@@ -195,9 +195,17 @@ export async function getWatchView(
   }
 
   // If the watch has no section disclaimer, but hits include section disclaimers (e.g. a Finance event in a global watch),
-  // surface the section disclaimer to the watch page as well
+  // surface the Finance disclaimer (or first section disclaimer) to the watch page
+  const financeHitDisclaimer = hitItems.find(
+    (h) =>
+      h.disclaimer &&
+      (h.disclaimer.toLowerCase().includes("investment") ||
+        h.disclaimer.toLowerCase().includes("education only")),
+  )?.disclaimer;
+
   const effectiveWatchDisclaimer =
     watchRow.industryDisclaimer ||
+    financeHitDisclaimer ||
     hitItems.find((h) => h.disclaimer)?.disclaimer ||
     null;
 

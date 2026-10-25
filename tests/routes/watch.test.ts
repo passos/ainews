@@ -259,7 +259,7 @@ describe("tests/routes/watch.test.ts", () => {
     // breakthroughArt was rejected / not approved
     await seedReview(breakthroughArt, "rejected");
 
-    // Hit was recorded based on breakthroughArt (id in rationale.articleIds)
+    // Hit was recorded based on [backgroundArt, breakthroughArt]
     await env.DB.prepare(
       `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
        VALUES (?1, ?2, 2, 2000, 'Breakthrough claimed.', ?3)`,
@@ -267,17 +267,20 @@ describe("tests/routes/watch.test.ts", () => {
       .bind(
         watchId,
         eventId,
-        JSON.stringify({ noul: 0.9, articleIds: [breakthroughArt] }),
+        JSON.stringify({
+          noul: 0.9,
+          articleIds: [backgroundArt, breakthroughArt],
+        }),
       )
       .run();
 
     const view = await getWatchView(db(), "partial-retract-watch");
     expect(view).not.toBeNull();
-    // Hit is filtered out because the article that provided evidence was retracted!
+    // Hit is filtered out because article 2 was retracted!
     expect(view!.hits.length).toBe(0);
   });
 
-  it("surfaces Finance disclaimer for global watch (industry_id = null) when it hits a Finance event", async () => {
+  it("surfaces Finance disclaimer for global watch (industry_id = null) when it hits a Finance event alongside a Tech event", async () => {
     // Global watch with industry_id = null
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
@@ -286,30 +289,59 @@ describe("tests/routes/watch.test.ts", () => {
     ).first<{ id: number }>();
     const watchId = watchRes!.id;
 
-    const eventId = await seedEvent(fin.industryId, "Global Fed Rate Event", 1);
-    const art = await seedArticle({
+    // 1. Tech event (newer hit, t=3000)
+    const techEventId = await seedEvent(
+      tech.industryId,
+      "Tech Chip Subsidies",
+      1,
+    );
+    const techArt = await seedArticle({
+      industryId: tech.industryId,
+      sourceId: tech.sourceId,
+      title: "Tech Chip Subsidies Approved",
+      publishedAt: 3000,
+    });
+    await seedEventArticle(techEventId, techArt, 3000);
+    await seedReview(techArt, "approved");
+
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 3000, 'Tech subsidies rate.', '{}')`,
+    )
+      .bind(watchId, techEventId)
+      .run();
+
+    // 2. Finance event (older hit, t=2000)
+    const finEventId = await seedEvent(
+      fin.industryId,
+      "Global Fed Rate Event",
+      1,
+    );
+    const finArt = await seedArticle({
       industryId: fin.industryId,
       sourceId: fin.sourceId,
       title: "Federal Reserve Adjusts Policy Rate",
       publishedAt: 1000,
     });
-    await seedEventArticle(eventId, art, 1000);
-    await seedReview(art, "approved");
+    await seedEventArticle(finEventId, finArt, 1000);
+    await seedReview(finArt, "approved");
 
     await env.DB.prepare(
       `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
        VALUES (?1, ?2, 1, 2000, 'Federal Reserve policy adjustment announced.', '{}')`,
     )
-      .bind(watchId, eventId)
+      .bind(watchId, finEventId)
       .run();
 
     const view = await getWatchView(db(), "global-finance-watch");
     expect(view).not.toBeNull();
-    // Watch itself had industry_id = null, but the hit came from Finance, so disclaimer is surfaced
-    expect(view!.watch.industryDisclaimer).toBeTruthy();
-    expect(view!.hits[0].disclaimer).toBeTruthy();
+    // Watch itself had industry_id = null, and newer hit is Tech, but Finance hit has disclaimer,
+    // so Finance disclaimer is bubbled to watch level and present on Finance hit
+    expect(view!.watch.industryDisclaimer).toContain("investment advice");
+    const finHit = view!.hits.find((h) => h.eventId === finEventId);
+    expect(finHit?.disclaimer).toContain("investment advice");
 
     const rss = renderWatchFeed(view!, "https://news.ioenv.com");
-    expect(rss).toContain(view!.watch.industryDisclaimer!);
+    expect(rss).toContain("investment advice");
   });
 });

@@ -839,4 +839,92 @@ describe("pipeline: watch evaluation", () => {
     expect(hit?.summary).not.toContain("95.4%");
     expect(hit?.rationale).toContain('"articleIds"');
   });
+
+  it("evaluates article that was approved before being grouped (ea.created_at > r.created_at) without misidentifying as retraction", async () => {
+    // 1. Initial event at revision 1, updated at 1000
+    const eventRes = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (1, 'Initial Event', 1, 1000, 1000)`,
+    ).run();
+    const eventId = Number(eventRes.meta.last_row_id);
+
+    const art1 = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (1, ?1, 'https://example.com/art-init', 'https://example.com/art-init', 'Initial Article', 'Summary', 'shaInit', 'grouped', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(sourceId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'shaInit', 'approved', 'admin', 1000)`,
+    )
+      .bind(art1!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, 1000)`,
+    )
+      .bind(eventId, art1!.id)
+      .run();
+
+    // 2. Later, article 2 was approved at t=2000, but grouped into this event at t=3000 bumping revision to 2
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (1, ?1, 'https://example.com/art-late-group', 'https://example.com/art-late-group', 'Late Grouped Breakthrough', 'Breakthrough details', 'shaLate', 'grouped', 2000, 2000)
+       RETURNING id`,
+    )
+      .bind(sourceId)
+      .first<{ id: number }>();
+
+    // Approved at 2000
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'shaLate', 'approved', 'admin', 2000)`,
+    )
+      .bind(art2!.id)
+      .run();
+
+    // Grouped at 3000, bumping event revision to 2 and updated_at to 3000
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, 3000)`,
+    )
+      .bind(eventId, art2!.id)
+      .run();
+
+    await env.DB.prepare(
+      `UPDATE events SET revision = 2, updated_at = 3000 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('late-group-watch', 'Question?', 'Criteria', '["Breakthrough"]', 1, 'active', 1000, 1000)`,
+    ).run();
+
+    const mockJudge = vi.fn().mockResolvedValue({ progress: { noul: 0.95 } });
+    const mockGenerateText = vi.fn().mockResolvedValue({
+      text: "Late grouped article confirmed new breakthrough.",
+      finishReason: "STOP",
+    });
+    const mockModels = {
+      judge: mockJudge,
+      generateText: mockGenerateText,
+    } as unknown as ModelClient;
+
+    const res = await evaluateEventWatches(env, eventId, 3000, {
+      models: mockModels,
+    });
+
+    // Should NOT be misidentified as retraction, should be evaluated as new reporting
+    expect(res.evaluatedCount).toBe(1);
+    expect(res.hitCount).toBe(1);
+    expect(mockJudge).toHaveBeenCalled();
+    const judgeState = mockJudge.mock.calls[0][1] as { body: string };
+    expect(judgeState.body).toContain("Late Grouped Breakthrough");
+  });
 });

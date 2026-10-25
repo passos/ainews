@@ -38,7 +38,7 @@ interface ApprovedArticleRow {
   summary: string | null;
   body_sha: string;
   published_at: number | null;
-  approved_at: number;
+  effective_at: number;
 }
 
 interface WatchRow {
@@ -116,14 +116,17 @@ export async function evaluateEventWatches(
   }
 
   // 2. Fetch approved articles for this event (strictly approvedArticleWhere)
+  // An article becomes an approved member of this event when BOTH linked (ea.created_at)
+  // and approved (r.created_at). Its effective timestamp is MAX(ea.created_at, r.created_at).
   const { results: articles } = await db
     .prepare(
-      `SELECT a.id, a.title, a.summary, a.body_sha, a.published_at, r.created_at AS approved_at
+      `SELECT a.id, a.title, a.summary, a.body_sha, a.published_at,
+              MAX(ea.created_at, r.created_at) AS effective_at
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
        JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
        WHERE ea.event_id = ?1
-       ORDER BY r.created_at ASC, a.id ASC`,
+       ORDER BY MAX(ea.created_at, r.created_at) ASC, a.id ASC`,
     )
     .bind(eventId)
     .all<ApprovedArticleRow>();
@@ -137,12 +140,12 @@ export async function evaluateEventWatches(
     };
   }
 
-  // If revision > 1, verify if this revision bump was from a newly approved article.
-  // When an article is approved, r.created_at equals event.updated_at in the same batch.
-  // If an article was retracted, no article has approved_at == updated_at.
-  const maxApprovedAt = Math.max(...articles.map((a) => a.approved_at));
+  // If revision > 1, verify if this revision bump was from a newly joined/approved article.
+  // When an article is approved or grouped, event.updated_at matches effective_at.
+  // If an article was retracted, no remaining article has effective_at == updated_at.
+  const maxEffectiveAt = Math.max(...articles.map((a) => a.effective_at));
   const isRetractionRevision =
-    event.revision > 1 && maxApprovedAt < event.updated_at;
+    event.revision > 1 && maxEffectiveAt < event.updated_at;
 
   if (isRetractionRevision) {
     // Retraction of an article cannot constitute a new material development
@@ -252,8 +255,8 @@ export async function evaluateEventWatches(
         priorArticles = [];
       }
     } else {
-      newArticles = articles.filter((a) => a.approved_at === maxApprovedAt);
-      priorArticles = articles.filter((a) => a.approved_at < maxApprovedAt);
+      newArticles = articles.filter((a) => a.effective_at === maxEffectiveAt);
+      priorArticles = articles.filter((a) => a.effective_at < maxEffectiveAt);
       if (newArticles.length === 0) {
         newArticles = [articles[articles.length - 1]];
         priorArticles = articles.slice(0, -1);
