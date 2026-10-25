@@ -25,6 +25,7 @@ import type {
   SkillsCareerTrends,
   StoryBrief,
 } from "../src/lib/artifacts/types";
+import { quizQuestionSchema } from "../src/lib/artifacts/types";
 
 describe("StoryBriefCard", () => {
   it("renders the 4 key sections", () => {
@@ -178,6 +179,17 @@ describe("LearningMaterialCard", () => {
       }),
     );
     expect(html).toBe("");
+  });
+
+  it("rejects quiz with answerIndex out of bounds", () => {
+    const invalidQuiz = {
+      question: "Which model?",
+      options: ["Option A", "Option B"],
+      answerIndex: 5,
+      explanation: "Out of bounds answer",
+    };
+    const res = quizQuestionSchema.safeParse(invalidQuiz);
+    expect(res.success).toBe(false);
   });
 });
 

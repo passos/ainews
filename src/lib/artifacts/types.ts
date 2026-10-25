@@ -95,12 +95,21 @@ export type RevisionDiff = z.infer<typeof revisionDiffSchema>;
 // Learning Material Schema & Type (N§2.3: News-to-Learning - quiz, discussion, activities)
 // -----------------------------------------------------------------------------
 
-export const quizQuestionSchema = z.strictObject({
-  question: z.string().min(1),
-  options: z.array(z.string().min(1)).min(2),
-  answerIndex: z.number().int().min(0),
-  explanation: z.string().min(1),
-});
+export const quizQuestionSchema = z
+  .strictObject({
+    question: z.string().min(1),
+    options: z.array(z.string().min(1)).min(2),
+    answerIndex: z.number().int().min(0),
+    explanation: z.string().min(1),
+  })
+  .superRefine((data, ctx) => {
+    if (data.answerIndex >= data.options.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "answerIndex must be strictly less than options.length",
+      });
+    }
+  });
 export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 
 export const learningMaterialSchema = z.strictObject({

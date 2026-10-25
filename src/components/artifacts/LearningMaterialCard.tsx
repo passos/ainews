@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type ArtifactAudience,
   type LearningMaterial,
@@ -12,8 +12,9 @@ export function LearningMaterialCard({
   materials: Partial<Record<ArtifactAudience, LearningMaterial>>;
   initialAudience?: ArtifactAudience;
 }) {
-  const availableAudiences = ARTIFACT_AUDIENCES.filter(
-    (aud) => !!materials[aud],
+  const availableAudiences = useMemo(
+    () => ARTIFACT_AUDIENCES.filter((aud) => !!materials[aud]),
+    [materials],
   );
 
   const resolveAudience = (pref?: ArtifactAudience): ArtifactAudience => {
@@ -35,7 +36,7 @@ export function LearningMaterialCard({
     if (initialAudience && availableAudiences.includes(initialAudience)) {
       setSelectedAudience(initialAudience);
     }
-  }, [initialAudience, availableAudiences]);
+  }, [initialAudience]);
 
   if (availableAudiences.length === 0) {
     return null;

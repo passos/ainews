@@ -1136,25 +1136,34 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(ind!.id)
       .first<{ id: number }>();
 
-    const art = await env.DB.prepare(
+    const art1 = await env.DB.prepare(
       `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
-       VALUES (?1, ?2, 'https://ed/art-policy', 'https://ed/art-policy', 'Department of Education AI Policy and Classroom Trial Results', 'A comprehensive study evaluating teacher pedagogy and legislative mandate.', 'shaEduPol', 1000, 'grouped', 1000)
+       VALUES (?1, ?2, 'https://ed/art-policy', 'https://ed/art-policy', 'Department of Education AI Policy Directives', 'A comprehensive legislative mandate for classroom AI.', 'shaEduPol', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ed/art-study', 'https://ed/art-study', 'Classroom Trial Empirical Results', 'A peer-reviewed trial evaluating teacher pedagogy and outcomes.', 'shaEduStudy', 1000, 'grouped', 1000)
        RETURNING id`,
     )
       .bind(src!.id, ind!.id)
       .first<{ id: number }>();
 
     await env.DB.prepare(
-      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEduPol', 'approved', 'auto', 1000)",
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEduPol', 'approved', 'auto', 1000), (?2, 'shaEduStudy', 'approved', 'auto', 1000)",
     )
-      .bind(art!.id)
+      .bind(art1!.id, art2!.id)
       .run();
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'research_study', '["policy", "research"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'policy_change', '["regulatory_finding"]', 65, 0.9, 1, 'cat', 'none', 1, 1000),
+              (?2, 'pv1', '{}', 'research_study', '["peer_reviewed"]', 68, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
-      .bind(art!.id)
+      .bind(art1!.id, art2!.id)
       .run();
 
     const event = await env.DB.prepare(
@@ -1164,9 +1173,9 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .first<{ id: number }>();
 
     await env.DB.prepare(
-      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000), (?1, ?3, 1000)",
     )
-      .bind(event!.id, art!.id)
+      .bind(event!.id, art1!.id, art2!.id)
       .run();
 
     const transport = makeFakeTransport((_model, input) => {
@@ -1425,7 +1434,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'regulatory_action', '["backtest", "sec"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'regulatory_action', '["backtest", "regulatory_finding"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -1573,7 +1582,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'workforce_and_skills', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'market_trend', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();

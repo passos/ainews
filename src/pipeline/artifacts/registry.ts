@@ -3,6 +3,7 @@ import {
   type ArtifactType,
   ARTIFACT_AUDIENCES,
 } from "../../lib/artifacts/types";
+import { FINANCE_SLUG } from "../analyze/analyze";
 import type { TextRequest } from "../../providers/adapters";
 import {
   AUDIENCE_EXPLAIN_PROMPT_VERSION,
@@ -189,8 +190,8 @@ export const ARTIFACT_REGISTRY: Record<
           (a) =>
             a.contentType === "research_study" ||
             a.contentType === "tool_or_product" ||
-            a.evidenceTags.includes("research") ||
-            a.evidenceTags.includes("peer_reviewed"),
+            a.evidenceTags.includes("peer_reviewed") ||
+            a.evidenceTags.includes("test_scores"),
         )
       );
     },
@@ -203,7 +204,7 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: [""],
     promptVersion: FINANCE_REALITY_CHECK_PROMPT_VERSION,
     isEligible: (ctx) => {
-      if (ctx.industrySlug !== "finance") return false;
+      if (ctx.industrySlug !== FINANCE_SLUG) return false;
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
@@ -212,8 +213,8 @@ export const ARTIFACT_REGISTRY: Record<
         ctx.articles.some(
           (a) =>
             a.contentType === "ai_in_finance_claim" ||
-            a.evidenceTags.includes("ai_finance") ||
-            a.evidenceTags.includes("backtest"),
+            a.evidenceTags.includes("backtest") ||
+            a.evidenceTags.includes("simulated"),
         )
       );
     },
@@ -226,7 +227,7 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: [""],
     promptVersion: REGULATION_WATCH_PROMPT_VERSION,
     isEligible: (ctx) => {
-      if (ctx.industrySlug !== "finance") return false;
+      if (ctx.industrySlug !== FINANCE_SLUG) return false;
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
@@ -235,9 +236,7 @@ export const ARTIFACT_REGISTRY: Record<
         ctx.articles.some(
           (a) =>
             a.contentType === "regulatory_action" ||
-            a.evidenceTags.includes("regulation") ||
-            a.evidenceTags.includes("sec") ||
-            a.evidenceTags.includes("finra"),
+            a.evidenceTags.includes("regulatory_finding"),
         )
       );
     },
@@ -250,7 +249,7 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: [""],
     promptVersion: FINANCE_CONCEPT_PROMPT_VERSION,
     isEligible: (ctx) => {
-      if (ctx.industrySlug !== "finance") return false;
+      if (ctx.industrySlug !== FINANCE_SLUG) return false;
       return ctx.articles.length > 0 && ctx.eventScore >= ctx.selectThreshold;
     },
     buildRequest: (material) => buildFinanceConceptExplainerRequest(material),
@@ -270,8 +269,8 @@ export const ARTIFACT_REGISTRY: Record<
         ctx.eventScore >= ctx.deepThreshold ||
         ctx.articles.some(
           (a) =>
-            a.contentType === "workforce_and_skills" ||
-            a.contentType === "market_trend",
+            a.contentType === "market_trend" ||
+            a.contentType === "company_move",
         )
       );
     },
