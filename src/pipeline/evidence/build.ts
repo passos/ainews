@@ -551,15 +551,16 @@ export async function generateEventEvidence(
       });
     }
 
-    const hasUnresolvedDispute =
-      hasSnapshotDispute ||
-      hasIncompleteInspection ||
-      verifiedCitations.some((c) => !c.verified && c.stance === "dispute");
-
     const consensusStatus =
       hasSnapshotDispute || hasIncompleteInspection
         ? "unverified"
         : evaluateClaimConsensus(verifiedCitations);
+
+    const hasUnresolvedDispute =
+      hasSnapshotDispute ||
+      hasIncompleteInspection ||
+      consensusStatus === "unverified" ||
+      verifiedCitations.some((c) => !c.verified && c.stance === "dispute");
 
     const primarySourcePreferred = verifiedCitations.some(
       (c) => c.verified && c.isPrimarySource,
@@ -582,7 +583,7 @@ export async function generateEventEvidence(
              CASE
                WHEN i.slug = '${FINANCE_SLUG}' THEN 'pending_review'
                WHEN ?10 = 1 THEN 'pending_review'
-               WHEN i.publish_mode = 'auto' THEN 'published'
+               WHEN i.publish_mode = 'auto' AND ?4 != 'unverified' THEN 'published'
                ELSE 'pending_review'
              END,
              ?6,

@@ -615,8 +615,18 @@ export function verifyQuoteInBody(
         ? sentenceSuffix.slice(0, boundaryMatch.index)
         : sentenceSuffix;
 
-    const postNegationRegex =
-      /(?:\b(?:is|are|was|were|has\s+been|have\s+been|had\s+been|could\s+be|would\s+be|can\s+be)\s+(?:(?:proven|proved|found\s+to\s+be|shown\s+to\s+be|deemed|determined\s+to\s+be)\s+)?(?:not|unlikely|unproven|unfounded|baseless|false|untrue|incorrect|refuted|debunked|denied|rejected|dismissed|disputed|unsupported|inaccurate|wrong)\b|\b(?:proved|proven|turned\s+out\s+to\s+be)\s+(?:to\s+be\s+)?(?:false|untrue|incorrect|unfounded|baseless|unsupported|wrong)\b|\b(?:was|were|is|are|been|being)\s+(?:proven\s+false|found\s+to\s+be\s+false|shown\s+to\s+be\s+false|denied|refuted|debunked|rejected|dismissed|disputed)\b|\b(?:remains?|remained)\s+(?:unproven|unclear|unsupported|disputed|unfounded|unconfirmed|unsubstantiated)\b|\b(?:fails?\s+to|failed\s+to|lacks?\s+evidence|lacks?\s+support|has\s+no\s+basis|have\s+no\s+basis|had\s+no\s+basis)\b|\b(?:isn['’]t|wasn['’]t|aren['’]t|weren['’]t|hasn['’]t|haven['’]t|hadn['’]t|couldn['’]t|wouldn['’]t)\b)/i;
+    const adverbOrModifier =
+      /(?:(?:\b\w+ly\b|\bproven\b|\bproved\b|\bfound\s+to\s+be\b|\bshown\s+to\s+be\b|\bdeemed\b|\bdetermined\s+to\s+be\b|\bdeclared\b|\bcalled\b|\blabeled\b|\bconsidered\b|\bsimply\b|\bquite\b|\butterly\b|\bentirely\b|\bpurely\b|\blargely\b|\baltogether\b|\bso-called\b|\bto\s+be\b)\s+)*/
+        .source;
+
+    const disputeTerms =
+      /(?:not|unlikely|unproven|unfounded|baseless|false|untrue|incorrect|refuted|debunked|denied|rejected|dismissed|disputed|unsupported|inaccurate|wrong|a\s+myth|a\s+hoax|fake|fabricated|unsubstantiated|unconfirmed|groundless|doubtful|dubious|misleading|flawed|invalid)\b/
+        .source;
+
+    const postNegationRegex = new RegExp(
+      `(?:\\b(?:is|are|was|were|has\\s+been|have\\s+been|had\\s+been|could\\s+be|would\\s+be|can\\s+be|might\\s+be)\\s+${adverbOrModifier}${disputeTerms}|\\b(?:proved|proven|turned\\s+out|remains?|remained)\\s+${adverbOrModifier}${disputeTerms}|\\b(?:was|were|is|are|been|being)\\s+${adverbOrModifier}(?:denied|refuted|debunked|rejected|dismissed|disputed)\\b|\\b(?:fails?\\s+to|failed\\s+to|lacks?\\s+evidence|lacks?\\s+support|has\\s+no\\s+basis|have\\s+no\\s+basis|had\\s+no\\s+basis)\\b|\\b(?:isn['’]t|wasn['’]t|aren['’]t|weren['’]t|hasn['’]t|haven['’]t|hadn['’]t|couldn['’]t|wouldn['’]t)\\b)`,
+      "i",
+    );
 
     return postNegationRegex.test(quoteClauseSuffix);
   }

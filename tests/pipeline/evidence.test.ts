@@ -693,6 +693,18 @@ describe("Evidence Chunks & Quote Verification", () => {
       false,
     );
 
+    const cancerBody =
+      "The claim that the device cures cancer is demonstrably false.";
+    expect(
+      verifyQuoteInBody(cancerBody, "the device cures cancer").verified,
+    ).toBe(false);
+    expect(
+      verifyQuoteInBody(
+        cancerBody,
+        "The claim that the device cures cancer is demonstrably false.",
+      ).verified,
+    ).toBe(true);
+
     // 5. Contrastive clause: post-negation in subsequent clause should NOT invalidate preceding clause
     const contrastBody =
       "The treatment is effective, but it did not cure all patients in the cohort.";
@@ -2972,5 +2984,90 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
       .bind(event!.id, EVIDENCE_INCOMPLETE_SENTINEL)
       .first<{ id: number }>();
     expect(incompleteSentinel).not.toBeNull();
+  });
+
+  it("generateEventEvidence rejects cropped debunked claims from auto-publishing and routes to pending_review", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('auto-debunk-ind', 'Auto Debunk Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, name, kind, created_at) VALUES (?1, 'https://debunk/feed', 'debunk.com', 'Debunk Source', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const bodyText =
+      "The claim that the device cures cancer is demonstrably false according to medical experts.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, body_truncated, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://debunk.com/a1', 'https://debunk.com/a1', 'Debunk Article', 'Summary', 'shaDebunk', 0, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaDebunk', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Debunk Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaDebunk.md`, bodyText);
+    const fakeVectors = new FakeVectors();
+
+    // Adversarial model output: cropped affirmative quote from debunking sentence claiming support
+    const transport = makeFakeTransport(async () => ({
+      claims: [
+        {
+          claimText: "The device cures cancer.",
+          claimType: "fact",
+          citations: [
+            {
+              articleId: art!.id,
+              quote: "the device cures cancer",
+              stance: "support",
+            },
+          ],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: fakeVectors as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+
+    expect(res.status).toBe("generated");
+
+    // 1. Claim in database MUST be unverified and pending_review
+    const claim = await env.DB.prepare(
+      "SELECT consensus_status, status FROM claims WHERE event_id = ?1 AND claim_text = 'The device cures cancer.'",
+    )
+      .bind(event!.id)
+      .first<{ consensus_status: string; status: string }>();
+
+    expect(claim).toBeDefined();
+    expect(claim?.consensus_status).toBe("unverified");
+    expect(claim?.status).toBe("pending_review");
+
+    // 2. Public getEventEvidence MUST NOT return this claim
+    const publicEvidence = await getEventEvidence(getDb(env.DB), event!.id);
+    expect(publicEvidence.claims).toHaveLength(0);
   });
 });
