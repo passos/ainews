@@ -2,22 +2,34 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { readPrefs } from "../lib/reader-prefs";
 
-/** "Your sections": rendered on the client only; empty during SSR. */
+/** "Your sections & topics": rendered on the client only; empty during SSR. */
 export function YourSections({
   sections,
+  watches = [],
 }: {
   sections: { slug: string; name: string }[];
+  watches?: { slug: string; question: string }[];
 }) {
-  const [followed, setFollowed] = useState<string[]>([]);
+  const [followedSections, setFollowedSections] = useState<string[]>([]);
+  const [followedWatches, setFollowedWatches] = useState<string[]>([]);
+
   useEffect(() => {
-    setFollowed(readPrefs().sections ?? []);
+    const prefs = readPrefs();
+    setFollowedSections(prefs.sections ?? []);
+    setFollowedWatches(prefs.watches ?? []);
   }, []);
-  const mine = sections.filter((s) => followed.includes(s.slug));
-  if (mine.length === 0) return null;
+
+  const mineSections = sections.filter((s) =>
+    followedSections.includes(s.slug),
+  );
+  const mineWatches = watches.filter((w) => followedWatches.includes(w.slug));
+
+  if (mineSections.length === 0 && mineWatches.length === 0) return null;
+
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 pb-2 font-mono text-xs uppercase tracking-wider">
-      <span className="font-bold text-muted-foreground">Your sections</span>
-      {mine.map((s) => (
+      <span className="font-bold text-muted-foreground">Your follows</span>
+      {mineSections.map((s) => (
         <Link
           key={s.slug}
           to="/s/$section"
@@ -27,6 +39,18 @@ export function YourSections({
           className="font-bold text-sec-ink underline"
         >
           {s.name}
+        </Link>
+      ))}
+      {mineWatches.map((w) => (
+        <Link
+          key={w.slug}
+          to="/w/$watch"
+          params={{ watch: w.slug }}
+          search={(prev) => ({ audience: prev.audience })}
+          data-watch={w.slug}
+          className="font-bold text-sec-ink underline"
+        >
+          [Watch] {w.question.slice(0, 30)}...
         </Link>
       ))}
     </p>

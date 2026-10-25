@@ -1,15 +1,29 @@
 import { useEffect, useState } from "react";
-import { readPrefs, toggleSection, writePrefs } from "../lib/reader-prefs";
+import {
+  readPrefs,
+  toggleSection,
+  toggleWatch,
+  writePrefs,
+} from "../lib/reader-prefs";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 
-/** Follow / Following for a section; stored in this browser only. */
-export function FollowButton({ slug }: { slug: string }) {
+/** Follow / Following for a section or topic watch; stored in this browser only. */
+export function FollowButton({
+  slug,
+  kind = "section",
+}: {
+  slug: string;
+  kind?: "section" | "watch";
+}) {
   // Server and first client render both show "Follow".
   const [following, setFollowing] = useState(false);
   useEffect(() => {
-    setFollowing(readPrefs().sections?.includes(slug) ?? false);
-  }, [slug]);
+    const prefs = readPrefs();
+    const list = kind === "watch" ? prefs.watches : prefs.sections;
+    setFollowing(list?.includes(slug) ?? false);
+  }, [slug, kind]);
+
   return (
     <Button
       type="button"
@@ -17,9 +31,14 @@ export function FollowButton({ slug }: { slug: string }) {
       size="sm"
       aria-pressed={following}
       onClick={() => {
-        const next = toggleSection(readPrefs(), slug);
+        const prefs = readPrefs();
+        const next =
+          kind === "watch"
+            ? toggleWatch(prefs, slug)
+            : toggleSection(prefs, slug);
         writePrefs(next);
-        setFollowing(next.sections?.includes(slug) ?? false);
+        const list = kind === "watch" ? next.watches : next.sections;
+        setFollowing(list?.includes(slug) ?? false);
       }}
       className={cn(
         "rounded-sm border-2 font-mono text-xs font-bold uppercase tracking-wider",

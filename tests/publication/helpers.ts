@@ -11,6 +11,8 @@ export const DISCLAIMER =
 export async function resetPublication(): Promise<void> {
   await env.DB.batch(
     [
+      "watch_hits",
+      "watches",
       "claim_evidence",
       "claims",
       "event_artifacts",

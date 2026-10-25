@@ -43,12 +43,18 @@ export type DiscoverMessage = {
   runId: number;
 };
 
+export type WatchMessage = {
+  kind: "watch";
+  eventId: number;
+};
+
 export type GenerateMessage =
   | DigestMessage
   | ArtifactsMessage
   | EvidenceMessage
   | AskMessage
-  | DiscoverMessage;
+  | DiscoverMessage
+  | WatchMessage;
 
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
 export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {

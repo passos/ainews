@@ -8,11 +8,13 @@ import { answerQuestion } from "../ask/answer";
 import { buildDailyDigest } from "../digest/build";
 import { generateEventEvidence } from "../evidence/build";
 import { runDiscovery, type DiscoverDeps } from "../discover/run";
+import { evaluateEventWatches, type WatchDeps } from "../watch/evaluate";
 import type { GenerateMessage, PipelineEnv } from "../messages";
 
 export interface GenerateConsumerDeps {
   transport?: ModelTransport;
   discoverDeps?: DiscoverDeps;
+  watchDeps?: WatchDeps;
 }
 
 function defaultDeps(
@@ -58,6 +60,14 @@ export async function handleGenerateBatch(
             body.runId,
             Date.now(),
             overrides.discoverDeps,
+          );
+          break;
+        case "watch":
+          await evaluateEventWatches(
+            env,
+            body.eventId,
+            Date.now(),
+            overrides.watchDeps,
           );
           break;
         default:

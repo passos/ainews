@@ -120,6 +120,13 @@
       "when": 1792894773770,
       "tag": "0016_cooing_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792899169116,
+      "tag": "0017_talented_dagger",
+      "breakpoints": true
     }
   ]
 }

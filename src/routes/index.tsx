@@ -19,7 +19,7 @@ function Home() {
   const { home, corrections } = Route.useLoaderData();
   return (
     <div className="flex flex-col gap-4 pt-4">
-      <YourSections sections={home.sections} />
+      <YourSections sections={home.sections} watches={home.watches} />
       <div className="space-y-6 lg:columns-2 lg:gap-x-6 lg:space-y-0">
         {home.sections.map((s) => (
           <section
