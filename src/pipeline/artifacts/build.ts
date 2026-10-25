@@ -382,13 +382,9 @@ export async function generateEventArtifacts(
 
   // Ensure revision_diff artifact exists for updates (inputRevision > 1) (N§2.2)
   if (inputRevision > 1) {
-    await syncRevisionDiff(
-      deps.db,
-      eventId,
-      inputRevision,
-      initialStatus,
-      deps.now(),
-    );
+    for (let r = 2; r <= inputRevision; r++) {
+      await syncRevisionDiff(deps.db, eventId, r, initialStatus, deps.now());
+    }
   }
 
   return {

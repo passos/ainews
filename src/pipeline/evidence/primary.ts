@@ -7,6 +7,7 @@ import {
   type ToMarkdown,
 } from "../body/ladder";
 import { extractWhitelistedUrls } from "./verify";
+import { syncRevisionDiff } from "./diff";
 import { normalizeUrl } from "../../lib/url";
 import { isEnabled } from "../../lib/flags";
 import { FINANCE_SLUG } from "../../server/admin/ops";
@@ -26,6 +27,7 @@ interface EventRow {
   id: number;
   industry_id: number;
   industry_slug: string;
+  industry_publish_mode: string;
   revision: number;
   primary_domains: string;
 }
@@ -72,7 +74,7 @@ export async function trackEventPrimarySources(
   // 1. Fetch event and industry primary domains
   const event = await deps.db
     .prepare(
-      `SELECT e.id, e.industry_id, e.revision, i.slug AS industry_slug, i.primary_domains
+      `SELECT e.id, e.industry_id, e.revision, i.slug AS industry_slug, i.publish_mode AS industry_publish_mode, i.primary_domains
        FROM events e
        JOIN industries i ON i.id = e.industry_id
        WHERE e.id = ?1`,
@@ -247,7 +249,18 @@ export async function trackEventPrimarySources(
         ]);
 
         if (batchRes[0].meta.changes === 1) {
+          event.revision += 1;
           trackedCount++;
+          const isFinance = event.industry_slug === FINANCE_SLUG;
+          const isAuto = !isFinance && event.industry_publish_mode === "auto";
+          const diffStatus = isAuto ? "published" : "pending_review";
+          await syncRevisionDiff(
+            deps.db,
+            eventId,
+            event.revision,
+            diffStatus,
+            now,
+          );
           await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
           await deps.qEvidence?.send({ eventId, kind: "evidence" });
         }
@@ -307,7 +320,17 @@ export async function trackEventPrimarySources(
           ]);
 
           if (batchRes[2].meta.changes === 1) {
+            event.revision += 1;
             trackedCount++;
+            const isAuto = !isFinance && event.industry_publish_mode === "auto";
+            const diffStatus = isAuto ? "published" : "pending_review";
+            await syncRevisionDiff(
+              deps.db,
+              eventId,
+              event.revision,
+              diffStatus,
+              now,
+            );
             await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
             await deps.qEvidence?.send({ eventId, kind: "evidence" });
           }
@@ -488,7 +511,19 @@ export async function trackEventPrimarySources(
                 .bind(now, eventId),
             ]);
 
+            event.revision += 1;
             trackedCount++;
+
+            // Synchronize deterministic revision diff for the new revision
+            const isAuto = !isFinance && event.industry_publish_mode === "auto";
+            const diffStatus = isAuto ? "published" : "pending_review";
+            await syncRevisionDiff(
+              deps.db,
+              eventId,
+              event.revision,
+              diffStatus,
+              now,
+            );
 
             // Enqueue downstream updates
             await deps.qArtifacts?.send({ eventId, kind: "artifacts" });

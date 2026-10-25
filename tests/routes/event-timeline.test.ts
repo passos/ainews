@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getEvent } from "../../src/server/publication/events";
 import {
   db,
@@ -269,4 +269,107 @@ it("independent review: withdrawal removes changed claims whose own text contain
   const after = await getEvent(db(), eventId);
   expect(after!.articles.map((a) => a.id)).toEqual([kept]);
   expect(JSON.stringify(after!.timelineRevisions)).not.toContain(text);
+});
+
+it("independent review: creates a diff for each revision when two primary sources are tracked before the queue drains", async () => {
+  const { trackEventPrimarySources } =
+    await import("../../src/pipeline/evidence/primary");
+  const { generateEventArtifacts } =
+    await import("../../src/pipeline/artifacts/build");
+  const { syncRevisionDiff } = await import("../../src/pipeline/evidence/diff");
+  type PipelineEnv = import("../../src/pipeline/messages").PipelineEnv;
+  type ModelClient = import("../../src/providers/models").ModelClient;
+
+  await env.DB.prepare(
+    "UPDATE industries SET publish_mode='auto',primary_domains='[\"arxiv.org\",\"whitehouse.gov\"]' WHERE id=?",
+  )
+    .bind(tech.industryId)
+    .run();
+  const eventId = await seedEvent(tech.industryId, "Event", 1);
+  const article = await seedArticle({ ...tech, title: "Original reporting" });
+  await seedEventArticle(eventId, article, 1000, 1);
+  await seedReview(article, "approved");
+  await env.BODIES.put(
+    `bodies/${article}/sha-current.md`,
+    "[Paper](https://arxiv.org/abs/review-new) [Release](https://whitehouse.gov/review-new)",
+  );
+  await syncRevisionDiff(env.DB, eventId, 1, "published", 1000);
+  const messages: Array<{ eventId: number; kind: string }> = [];
+  const queue = {
+    send: async (m: unknown) => {
+      messages.push(m as { eventId: number; kind: string });
+    },
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("robots.txt"))
+      return new Response("User-agent: *\nAllow: /", { status: 200 });
+    return new Response(
+      "# Primary publication\n\n" +
+        "This public document reports original research with detailed measurements and supporting experimental evidence. ".repeat(
+          5,
+        ),
+      { status: 200, headers: { "Content-Type": "text/markdown" } },
+    );
+  });
+  const tracked = await trackEventPrimarySources(
+    { db: env.DB, bodies: env.BODIES, fetch: fetchMock, qArtifacts: queue },
+    env,
+    eventId,
+    [],
+    1000,
+  );
+  expect(tracked.trackedCount).toBe(2);
+  expect(
+    await env.DB.prepare("SELECT revision FROM events WHERE id=?")
+      .bind(eventId)
+      .first(),
+  ).toEqual({ revision: 3 });
+  expect(messages).toHaveLength(2);
+  const models = {
+    generateText: vi.fn(async (_slot: string, key: string) => {
+      let value: unknown;
+      if (key.includes(":story_brief:")) {
+        value = {
+          whatHappened: "Original results",
+          whatIsNew: "Two primary sources",
+          whatEvidenceExists: "Published documents",
+          whatToWatchNext: "Independent evaluation",
+        };
+      } else if (key.includes(":audience_explain:")) {
+        const audience = key.split(":")[3];
+        value = {
+          audience,
+          overview: "Original results",
+          keyPoints: ["Two sources"],
+          implications: ["More evidence"],
+          glossary: [],
+        };
+      } else {
+        value = {
+          hypothesis: "Original results",
+          method: "Experiment",
+          findings: "Measured results",
+          limitations: "Small sample",
+          applications: "Further research",
+        };
+      }
+      return { text: JSON.stringify(value), finishReason: "STOP" };
+    }),
+  } as unknown as ModelClient;
+  for (const message of messages) {
+    await generateEventArtifacts(env as PipelineEnv, message.eventId, 2000, {
+      db: env.DB,
+      bodies: env.BODIES,
+      models,
+    });
+  }
+  const view = (await getEvent(db(), eventId))!;
+  expect(view.timelineRevisions.map((r) => r.revision)).toEqual([1, 2, 3]);
+  expect(
+    view.timelineRevisions.find((r) => r.revision === 3)!.diff,
+  ).not.toBeNull();
+  expect(
+    view.timelineRevisions.find((r) => r.revision === 2)!.diff,
+  ).not.toBeNull();
 });

@@ -167,7 +167,7 @@ export async function syncRevisionDiff(
          event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
        )
        SELECT ?1, 'revision_diff', '', ?2, 'diff-v1', 'deterministic', ?3, ?4, ?5
-       WHERE (SELECT revision FROM events WHERE id = ?1) = ?2
+       WHERE (SELECT revision FROM events WHERE id = ?1) >= ?2
        ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
        DO UPDATE SET
          content = CASE
