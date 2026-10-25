@@ -430,3 +430,100 @@ it("review probe: claim approval retry repairs failed diff sync", async () => {
     .first<{ content: string }>();
   expect(JSON.parse(diff!.content).newClaims).toContain("Reviewed result");
 });
+
+it("independent review: retry repairs an existing diff after nonempty claim sync failure", async () => {
+  const quote = "Independent experiments demonstrate substantial improvements.";
+  await env.BODIES.put(`bodies/${articleId}/sha.md`, quote);
+  await env.DB.prepare("UPDATE events SET revision=2 WHERE id=?")
+    .bind(eventId)
+    .run();
+  await syncRevisionDiff(env.DB, eventId, 2, "published", 1000);
+  const claimModels = {
+    generateText: async () => ({
+      text: JSON.stringify({
+        claims: [
+          {
+            claimText: "A newly verified result",
+            claimType: "fact",
+            citations: [
+              {
+                articleId,
+                quote,
+                stance: "support",
+                sourceRole: "independent",
+              },
+            ],
+          },
+        ],
+      }),
+      finishReason: "STOP",
+    }),
+  } as unknown as ModelClient;
+  const enabled = { ...env, MODEL_CALLS_ENABLED: "true" } as PipelineEnv;
+  await expect(
+    generateEventEvidence(enabled, eventId, 1000, {
+      db: failFirstDiffWrite(),
+      bodies: env.BODIES,
+      models: claimModels,
+    }),
+  ).rejects.toThrow("transient diff write failure");
+  const claim = await env.DB.prepare(
+    "SELECT status FROM claims WHERE event_id=? AND claim_text='A newly verified result'",
+  )
+    .bind(eventId)
+    .first<{ status: string }>();
+  expect(claim?.status).toBe("published");
+  await generateEventEvidence(enabled, eventId, 1001, {
+    db: env.DB,
+    bodies: env.BODIES,
+    models: claimModels,
+  });
+  const diff = await env.DB.prepare(
+    "SELECT content FROM event_artifacts WHERE event_id=? AND type='revision_diff'",
+  )
+    .bind(eventId)
+    .first<{ content: string }>();
+  expect(JSON.parse(diff!.content).newClaims).toContain(
+    "A newly verified result",
+  );
+});
+
+it("independent review: retry recovers a transient primary approval batch failure", async () => {
+  let failed = false;
+  const failFirstBatch = {
+    prepare: (sql: string) => env.DB.prepare(sql),
+    async batch(statements: D1PreparedStatement[]) {
+      if (!failed) {
+        failed = true;
+        throw new Error("transient approval batch failure");
+      }
+      return env.DB.batch(statements);
+    },
+  } as unknown as D1Database;
+  await trackEventPrimarySources(
+    {
+      db: failFirstBatch,
+      bodies: env.BODIES,
+      fetch: mockFetch as typeof fetch,
+    },
+    env,
+    eventId,
+    ["arxiv.org"],
+    1000,
+  );
+  const orphan = await env.DB.prepare(
+    "SELECT a.id,a.stage,r.decision FROM articles a LEFT JOIN reviews r ON r.article_id=a.id WHERE a.canonical_url=?",
+  )
+    .bind(target)
+    .first<{ id: number; stage: string; decision: string | null }>();
+  expect(orphan?.stage).toBe("grouped");
+  expect(orphan?.decision).toBeNull();
+  const retry = await trackEventPrimarySources(
+    { db: env.DB, bodies: env.BODIES, fetch: mockFetch as typeof fetch },
+    env,
+    eventId,
+    ["arxiv.org"],
+    2000,
+  );
+  expect(retry.trackedCount).toBe(1);
+});

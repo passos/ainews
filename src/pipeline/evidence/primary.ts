@@ -170,9 +170,11 @@ export async function trackEventPrimarySources(
 
     // Check if URL already in articles
     const existing = await deps.db
-      .prepare(`SELECT id, stage FROM articles WHERE canonical_url = ?1`)
+      .prepare(
+        `SELECT id, stage, body_sha FROM articles WHERE canonical_url = ?1`,
+      )
       .bind(canonical)
-      .first<{ id: number; stage: string }>();
+      .first<{ id: number; stage: string; body_sha: string | null }>();
 
     if (existing) {
       // Check if this article is already assigned to ANY event
@@ -223,6 +225,55 @@ export async function trackEventPrimarySources(
           trackedCount++;
           await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
           await deps.qEvidence?.send({ eventId, kind: "evidence" });
+        }
+        continue;
+      }
+
+      // If existing article was created by primary tracker but its approval batch failed,
+      // recover and complete the approval + event linking on retry:
+      if (!isApproved && !assigned && existing.stage === "grouped") {
+        const isFinance = event.industry_slug === FINANCE_SLUG;
+        if (!isFinance) {
+          const bodySha = existing.body_sha || (await sha256Hex(canonical));
+          const batchRes = await deps.db.batch([
+            deps.db
+              .prepare(
+                `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+                 VALUES (?1, ?2, 'approved', 'system:primary_tracker', ?3)
+                 ON CONFLICT (article_id, body_sha) DO UPDATE SET decision = excluded.decision`,
+              )
+              .bind(existing.id, bodySha, now),
+            deps.db
+              .prepare(
+                `INSERT INTO analyses (
+                   article_id, prompt_version, scores, content_type, evidence_tags, total_score,
+                   prefilter_pass, selected, created_at
+                 )
+                 VALUES (?1, 'primary_tracker', '{}', 'primary_source', '{"kind":"primary_source"}', 100, 1, 1, ?2)
+                 ON CONFLICT (article_id, prompt_version) DO NOTHING`,
+              )
+              .bind(existing.id, now),
+            deps.db
+              .prepare(
+                `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+                 VALUES (?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?4))`,
+              )
+              .bind(eventId, existing.id, now, eventId),
+            deps.db
+              .prepare(
+                `UPDATE events SET revision = revision + 1, updated_at = ?1 WHERE id = ?2`,
+              )
+              .bind(now, eventId),
+          ]);
+
+          if (
+            batchRes[0].meta.changes === 1 ||
+            batchRes[2].meta.changes === 1
+          ) {
+            trackedCount++;
+            await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
+            await deps.qEvidence?.send({ eventId, kind: "evidence" });
+          }
         }
       }
       continue;

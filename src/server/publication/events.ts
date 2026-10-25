@@ -116,6 +116,7 @@ export async function getEvent(
   const evidence = await getEventEvidence(db, eventId);
 
   // Load all published revision_diff artifacts for this event (N§2.2)
+  // Architecture §7 publication guard: only load diffs for revisions that currently have approved articles
   const diffRows = await db.all<{
     input_revision: number;
     content: string;
@@ -125,6 +126,13 @@ export async function getEvent(
     WHERE ea.event_id = ${eventId}
       AND ea.type = 'revision_diff'
       AND ea.status = 'published'
+      AND EXISTS (
+        SELECT 1 FROM event_articles ea2
+        JOIN articles a ON a.id = ea2.article_id
+        WHERE ea2.event_id = ea.event_id
+          AND ea2.input_revision = ea.input_revision
+          AND ${approvedArticleWhere}
+      )
     ORDER BY ea.input_revision ASC
   `);
 
@@ -143,9 +151,6 @@ export async function getEvent(
   const revisionSet = new Set<number>();
   for (const a of articles) {
     revisionSet.add(a.inputRevision);
-  }
-  for (const r of diffMap.keys()) {
-    revisionSet.add(r);
   }
   if (revisionSet.size === 0) revisionSet.add(1);
 

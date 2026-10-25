@@ -149,3 +149,45 @@ describe("tests/routes/event-timeline.test.ts", () => {
     expect(indCit?.isPrimarySource).toBe(true);
   });
 });
+
+it("independent review: withdrawal removes derived claims from historical timeline", async () => {
+  const { syncRevisionDiff } = await import("../../src/pipeline/evidence/diff");
+  const { decideReview } = await import("../../src/server/admin/ops");
+  const eventId = await seedEvent(tech.industryId, "An event", 2);
+  const kept = await seedArticle({
+    ...tech,
+    title: "Still approved reporting",
+  });
+  const withdrawn = await seedArticle({
+    ...tech,
+    title: "Withdrawn sole evidence",
+  });
+  await seedEventArticle(eventId, kept, 1000, 1);
+  await seedEventArticle(eventId, withdrawn, 2000, 2);
+  await seedReview(kept, "approved");
+  await seedReview(withdrawn, "approved");
+  const claim = (await env.DB.prepare(
+    "INSERT INTO claims(event_id,claim_text,claim_type,consensus_status,status,input_revision,prompt_version,model,created_at) VALUES(?,'Withdrawn unsupported result','fact','verified','published',2,'v1','mock',2000) RETURNING id",
+  )
+    .bind(eventId)
+    .first<{ id: number }>())!;
+  await env.DB.prepare(
+    "INSERT INTO claim_evidence(claim_id,article_id,body_sha,quote,quote_clean,start_offset,end_offset,stance,verified,created_at) VALUES(?,?,'sha-current','Withdrawn unsupported result','Withdrawn unsupported result',0,27,'support',1,2000)",
+  )
+    .bind(claim.id, withdrawn)
+    .run();
+  await syncRevisionDiff(env.DB, eventId, 2, "published", 2000);
+  await decideReview(env.DB, {
+    articleId: withdrawn,
+    bodySha: "sha-current",
+    decision: "rejected",
+    reviewer: "admin",
+  });
+  const view = await getEvent(db(), eventId);
+  expect(view).not.toBeNull();
+  expect(view!.articles.map((a) => a.id)).toEqual([kept]);
+  expect(view!.evidence.claims).toEqual([]);
+  expect(
+    view!.timelineRevisions.map((r) => r.diff?.summary).join(" "),
+  ).not.toContain("Withdrawn unsupported result");
+});
