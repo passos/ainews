@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type ArtifactAudience,
   type AudienceExplain,
@@ -12,8 +12,9 @@ export function AudienceExplainCard({
   explanations: Partial<Record<ArtifactAudience, AudienceExplain>>;
   initialAudience?: ArtifactAudience;
 }) {
-  const availableAudiences = ARTIFACT_AUDIENCES.filter(
-    (aud) => !!explanations[aud],
+  const availableAudiences = useMemo(
+    () => ARTIFACT_AUDIENCES.filter((aud) => !!explanations[aud]),
+    [explanations],
   );
 
   const resolveAudience = (pref?: ArtifactAudience): ArtifactAudience => {

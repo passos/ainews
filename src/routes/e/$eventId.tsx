@@ -2,7 +2,15 @@ import { Suspense } from "react";
 import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { ArticleCard } from "../../components/ArticleCard";
 import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainCard";
+import { ClassroomDiscussionCard } from "../../components/artifacts/ClassroomDiscussionCard";
+import { EducationEvidenceCard } from "../../components/artifacts/EducationEvidenceCard";
+import { FinanceConceptCard } from "../../components/artifacts/FinanceConceptCard";
+import { FinanceRealityCheckCard } from "../../components/artifacts/FinanceRealityCheckCard";
+import { LearningMaterialCard } from "../../components/artifacts/LearningMaterialCard";
 import { PaperDecoderCard } from "../../components/artifacts/PaperDecoderCard";
+import { PolicyImpactCard } from "../../components/artifacts/PolicyImpactCard";
+import { RegulationWatchCard } from "../../components/artifacts/RegulationWatchCard";
+import { SkillsCareerTrendsCard } from "../../components/artifacts/SkillsCareerTrendsCard";
 import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
@@ -108,6 +116,42 @@ function EventPage() {
       )}
 
       {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}
+
+      {artifacts?.learningMaterials &&
+        Object.keys(artifacts.learningMaterials).length > 0 && (
+          <LearningMaterialCard
+            materials={artifacts.learningMaterials}
+            initialAudience={audience}
+          />
+        )}
+
+      {artifacts?.policyImpact && (
+        <PolicyImpactCard policy={artifacts.policyImpact} />
+      )}
+
+      {artifacts?.classroomDiscussion && (
+        <ClassroomDiscussionCard guide={artifacts.classroomDiscussion} />
+      )}
+
+      {artifacts?.educationEvidence && (
+        <EducationEvidenceCard evidence={artifacts.educationEvidence} />
+      )}
+
+      {artifacts?.financeRealityCheck && (
+        <FinanceRealityCheckCard check={artifacts.financeRealityCheck} />
+      )}
+
+      {artifacts?.regulationWatch && (
+        <RegulationWatchCard watch={artifacts.regulationWatch} />
+      )}
+
+      {artifacts?.financeConcept && (
+        <FinanceConceptCard concept={artifacts.financeConcept} />
+      )}
+
+      {artifacts?.skillsCareerTrends && (
+        <SkillsCareerTrendsCard trends={artifacts.skillsCareerTrends} />
+      )}
 
       {corrections.length > 0 && (
         <div className="border-2 border-destructive p-3">

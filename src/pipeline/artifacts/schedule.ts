@@ -9,7 +9,7 @@ export async function enqueueDueArtifacts(
     return [];
   }
 
-  // Find events with approved articles where current revision is missing story_brief or deep explainers
+  // Find events with approved articles where current revision is missing story_brief, deep explainers, or learning material
   const { results } = await env.DB.prepare(
     `SELECT e.id
      FROM events e
@@ -33,11 +33,19 @@ export async function enqueueDueArtifacts(
              JOIN analyses an ON an.article_id = ea3.article_id
              WHERE ea3.event_id = e.id AND an.total_score >= 80
            )
-           AND NOT EXISTS (
-             SELECT 1 FROM event_artifacts ea4
-             WHERE ea4.event_id = e.id
-               AND ea4.input_revision = e.revision
-               AND ea4.type = 'audience_explain'
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM event_artifacts ea4
+               WHERE ea4.event_id = e.id
+                 AND ea4.input_revision = e.revision
+                 AND ea4.type = 'audience_explain'
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM event_artifacts ea5
+               WHERE ea5.event_id = e.id
+                 AND ea5.input_revision = e.revision
+                 AND ea5.type = 'learning_material'
+             )
            )
          )
        )

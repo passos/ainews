@@ -4,8 +4,16 @@ import {
   type EventArtifactsView,
   type RevisionDiff,
   audienceExplainSchema,
+  classroomDiscussionBuilderSchema,
+  educationEvidenceCheckerSchema,
+  financeConceptExplainerSchema,
+  financeRealityCheckSchema,
+  learningMaterialSchema,
+  policyImpactExplorerSchema,
+  regulationWatchSchema,
   researchPaperDecoderSchema,
   revisionDiffSchema,
+  skillsCareerTrendsSchema,
   storyBriefSchema,
 } from "../../lib/artifacts/types";
 import type { EventEvidenceView } from "../../lib/evidence/types";
@@ -90,6 +98,14 @@ export async function getEvent(
     brief: null,
     explanations: {},
     decoder: null,
+    learningMaterials: {},
+    policyImpact: null,
+    classroomDiscussion: null,
+    educationEvidence: null,
+    financeRealityCheck: null,
+    regulationWatch: null,
+    financeConcept: null,
+    skillsCareerTrends: null,
   };
 
   for (const row of artifactRows) {
@@ -107,6 +123,34 @@ export async function getEvent(
       } else if (row.type === "research_paper_decoder") {
         const res = researchPaperDecoderSchema.safeParse(parsedJson);
         if (res.success) artifacts.decoder = res.data;
+      } else if (row.type === "learning_material") {
+        const res = learningMaterialSchema.safeParse(parsedJson);
+        if (res.success) {
+          const aud = (row.audience || res.data.audience) as ArtifactAudience;
+          if (!artifacts.learningMaterials) artifacts.learningMaterials = {};
+          artifacts.learningMaterials[aud] = res.data;
+        }
+      } else if (row.type === "policy_impact_explorer") {
+        const res = policyImpactExplorerSchema.safeParse(parsedJson);
+        if (res.success) artifacts.policyImpact = res.data;
+      } else if (row.type === "classroom_discussion_builder") {
+        const res = classroomDiscussionBuilderSchema.safeParse(parsedJson);
+        if (res.success) artifacts.classroomDiscussion = res.data;
+      } else if (row.type === "education_evidence_checker") {
+        const res = educationEvidenceCheckerSchema.safeParse(parsedJson);
+        if (res.success) artifacts.educationEvidence = res.data;
+      } else if (row.type === "finance_reality_check") {
+        const res = financeRealityCheckSchema.safeParse(parsedJson);
+        if (res.success) artifacts.financeRealityCheck = res.data;
+      } else if (row.type === "regulation_watch") {
+        const res = regulationWatchSchema.safeParse(parsedJson);
+        if (res.success) artifacts.regulationWatch = res.data;
+      } else if (row.type === "finance_concept_explainer") {
+        const res = financeConceptExplainerSchema.safeParse(parsedJson);
+        if (res.success) artifacts.financeConcept = res.data;
+      } else if (row.type === "skills_career_trends") {
+        const res = skillsCareerTrendsSchema.safeParse(parsedJson);
+        if (res.success) artifacts.skillsCareerTrends = res.data;
       }
     } catch {
       // ignore invalid json in publication layer
