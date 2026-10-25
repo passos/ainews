@@ -54,15 +54,25 @@ export const getEventSources = createServerFn({ method: "GET" })
 const digestInput = z.object({
   slug: z.string().min(1).max(64),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  kind: z.enum(["daily", "weekly"]).optional(),
 });
 
 export const getDigest = createServerFn({ method: "GET" })
   .validator(digestInput)
-  .handler(({ data }) => readDigest(getDb(env.DB), data.slug, data.date));
+  .handler(({ data }) =>
+    readDigest(getDb(env.DB), data.slug, data.date, data.kind),
+  );
+
+const recentDigestsInput = z.object({
+  slug: z.string().min(1).max(64),
+  kind: z.enum(["daily", "weekly"]).optional(),
+});
 
 export const getRecentDigests = createServerFn({ method: "GET" })
-  .validator(sectionInput)
-  .handler(({ data }) => readRecentDigests(getDb(env.DB), data.slug));
+  .validator(recentDigestsInput)
+  .handler(({ data }) =>
+    readRecentDigests(getDb(env.DB), data.slug, 7, data.kind),
+  );
 
 const watchInput = z.object({ slug: z.string().min(1).max(64) });
 

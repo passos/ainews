@@ -5,7 +5,7 @@ import {
 } from "../../providers/transport";
 import { generateEventArtifacts } from "../artifacts/build";
 import { answerQuestion } from "../ask/answer";
-import { buildDailyDigest } from "../digest/build";
+import { buildDigest } from "../digest/build";
 import { generateEventEvidence } from "../evidence/build";
 import { runDiscovery, type DiscoverDeps } from "../discover/run";
 import { evaluateEventWatches, type WatchDeps } from "../watch/evaluate";
@@ -43,7 +43,7 @@ export async function handleGenerateBatch(
     try {
       switch (body.kind) {
         case "digest":
-          await buildDailyDigest(env, body, Date.now(), deps);
+          await buildDigest(env, body, Date.now(), deps);
           break;
         case "artifacts":
           await generateEventArtifacts(env, body.eventId, Date.now(), deps);

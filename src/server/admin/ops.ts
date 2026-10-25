@@ -953,6 +953,7 @@ export interface AdminDigestRow {
   industryId: number;
   industrySlug: string;
   industryName: string;
+  kind: "daily" | "weekly";
   periodStart: string;
   status: string;
   intro: string;
@@ -974,6 +975,7 @@ export async function listAdminDigests(database: D1Database): Promise<{
         d.industry_id AS industryId,
         i.slug AS industrySlug,
         i.name AS industryName,
+        d.kind AS kind,
         d.period_start AS periodStart,
         d.status,
         d.intro,
@@ -992,6 +994,7 @@ export async function listAdminDigests(database: D1Database): Promise<{
       industryId: number;
       industrySlug: string;
       industryName: string;
+      kind: "daily" | "weekly";
       periodStart: string;
       status: string;
       intro: string;
@@ -1017,6 +1020,7 @@ export async function listAdminDigests(database: D1Database): Promise<{
       industryId: r.industryId,
       industrySlug: r.industrySlug,
       industryName: r.industryName,
+      kind: r.kind,
       periodStart: r.periodStart,
       status: r.status,
       intro: r.intro,

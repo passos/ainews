@@ -294,3 +294,50 @@ export function dayBoundsUtc(dateStr: string, tz: string): [number, number] {
   );
   return [start, end];
 }
+
+/**
+ * Returns [startMs, endMs) UTC bounds for a 7-day week starting on `mondayDateStr` ("YYYY-MM-DD") in `tz`.
+ * Handles DST shifts deterministically across the 7-day span.
+ */
+export function weekBoundsUtc(
+  mondayDateStr: string,
+  tz: string,
+): [number, number] {
+  const [y, m, d] = mondayDateStr.split("-").map(Number);
+  const start = getZonedMidnightUtc(y, m, d, tz);
+  const nextMonday = new Date(Date.UTC(y, m - 1, d + 7));
+  const end = getZonedMidnightUtc(
+    nextMonday.getUTCFullYear(),
+    nextMonday.getUTCMonth() + 1,
+    nextMonday.getUTCDate(),
+    tz,
+  );
+  return [start, end];
+}
+
+/**
+ * Checks if a weekly digest is due for the given timestamp and timezone.
+ * A weekly digest is due when the local date in `tz` is Monday (day 1).
+ * When due, `periodStart` is the date string ("YYYY-MM-DD") of the preceding Monday (7 days prior).
+ */
+export function isWeeklyDigestDue(
+  now: number,
+  tz: string,
+): { due: boolean; periodStart: string } {
+  const todayStr = localDate(now, tz);
+  const [y, m, d] = todayStr.split("-").map(Number);
+  const dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (dayOfWeek === 1) {
+    const prevMon = new Date(Date.UTC(y, m - 1, d - 7));
+    const py = prevMon.getUTCFullYear();
+    const pm = String(prevMon.getUTCMonth() + 1).padStart(2, "0");
+    const pd = String(prevMon.getUTCDate()).padStart(2, "0");
+    return { due: true, periodStart: `${py}-${pm}-${pd}` };
+  }
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  const lastMonday = new Date(Date.UTC(y, m - 1, d - daysSinceMonday - 7));
+  const py = lastMonday.getUTCFullYear();
+  const pm = String(lastMonday.getUTCMonth() + 1).padStart(2, "0");
+  const pd = String(lastMonday.getUTCDate()).padStart(2, "0");
+  return { due: false, periodStart: `${py}-${pm}-${pd}` };
+}

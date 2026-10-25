@@ -4,6 +4,9 @@ import { WRITE_THINKING } from "../analyze/prompts";
 export const DIGEST_PROMPT_VERSION = "digest-daily-v1";
 export const DIGEST_MAX_OUTPUT_TOKENS = 2000;
 
+export const WEEKLY_DIGEST_PROMPT_VERSION = "digest-weekly-v1";
+export const WEEKLY_DIGEST_MAX_OUTPUT_TOKENS = 3000;
+
 export interface DigestPromptEvent {
   id: number;
   title: string;
@@ -45,6 +48,37 @@ Respond ONLY with a valid JSON object matching this schema:
     system: parts.filter(Boolean).join("\n\n"),
     prompt: `Candidate events for ${input.periodStart} (JSON):\n${JSON.stringify(input.events)}`,
     maxOutputTokens: DIGEST_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function buildWeeklyDigestRequest(
+  input: DigestPromptInput,
+): TextRequest {
+  const parts: string[] = [
+    `You are an executive editor for Personal News (${input.industryName}).`,
+    `Synthesize a comprehensive weekly intelligence briefing for the week of ${input.periodStart}.`,
+    input.disclaimer ? `Editorial constraint: ${input.disclaimer}` : "",
+    `Required output format:
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "intro": "A 100-200 word overarching synthesis explaining the week's key narratives, strategic milestones, or emerging patterns across these developments. Do not merely list stories. Maintain an objective, disciplined editorial tone.",
+  "items": [
+    {
+      "event_id": <number>,
+      "one_liner": "A single sentence (under 30 words) synthesizing why this development matters in the context of the week's broader narrative."
+    }
+  ]
+}`,
+    "Rules:",
+    "- Provide an entry in 'items' for each candidate event.",
+    "- Output raw JSON only. Do not add markdown code fences, notes, or explanations.",
+  ];
+
+  return {
+    system: parts.filter(Boolean).join("\n\n"),
+    prompt: `Candidate events for the week of ${input.periodStart} (JSON):\n${JSON.stringify(input.events)}`,
+    maxOutputTokens: WEEKLY_DIGEST_MAX_OUTPUT_TOKENS,
     thinkingConfig: WRITE_THINKING,
   };
 }

@@ -18,7 +18,7 @@ export type GroupMessage = { kind: "group"; articleId: number };
 export type DigestMessage = {
   kind: "digest";
   industryId: number;
-  digestKind: "daily";
+  digestKind: "daily" | "weekly";
   /** "YYYY-MM-DD" */
   periodStart: string;
 };

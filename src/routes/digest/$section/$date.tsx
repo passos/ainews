@@ -1,52 +1,91 @@
 import { Suspense } from "react";
 import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { z } from "zod";
 import { Disclaimer } from "../../../components/Disclaimer";
 import { getDigest, getRecentDigests } from "../../../server/publication/api";
+import type {
+  DigestView,
+  RecentDigestLink,
+} from "../../../server/publication/digests";
+
+const digestSearchSchema = z.object({
+  kind: z.enum(["daily", "weekly"]).optional().catch(undefined),
+});
+
+export interface LoadDigestFns {
+  getDigest?: (
+    slug: string,
+    date: string,
+    kind?: "daily" | "weekly",
+  ) => Promise<DigestView | null>;
+  getRecentDigests?: (
+    slug: string,
+    kind?: "daily" | "weekly",
+  ) => Promise<RecentDigestLink[]>;
+}
 
 export async function loadDigest(
   params: { section: string; date: string },
-  fns = {
-    getDigest: (slug: string, date: string) =>
-      getDigest({ data: { slug, date } }),
-    getRecentDigests: (slug: string) => getRecentDigests({ data: { slug } }),
-  },
+  kindOrFns?: "daily" | "weekly" | LoadDigestFns,
+  maybeFns?: LoadDigestFns,
 ) {
+  const kind = typeof kindOrFns === "string" ? kindOrFns : "daily";
+  const customFns =
+    typeof kindOrFns === "object" && kindOrFns !== null ? kindOrFns : maybeFns;
+
+  const fns = {
+    getDigest:
+      customFns?.getDigest ??
+      ((slug: string, date: string, k?: "daily" | "weekly") =>
+        getDigest({ data: { slug, date, kind: k } })),
+    getRecentDigests:
+      customFns?.getRecentDigests ??
+      ((slug: string, k?: "daily" | "weekly") =>
+        getRecentDigests({ data: { slug, kind: k } })),
+  };
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(params.date)) {
     throw notFound();
   }
-  const data = await fns.getDigest(params.section, params.date);
+  const data = await fns.getDigest(params.section, params.date, kind);
   if (!data) throw notFound();
 
   return {
     data,
-    recent: fns.getRecentDigests(params.section),
+    recent: fns.getRecentDigests(params.section, kind),
   };
 }
 
 export const Route = createFileRoute("/digest/$section/$date")({
-  loader: ({ params }) => loadDigest(params),
-  head: ({ loaderData }) => ({
-    meta: [
-      {
-        title: loaderData
-          ? `${loaderData.data.section.name} Daily Digest (${loaderData.data.periodStart}) — Personal News`
-          : "Personal News",
-      },
-    ],
-    links: loaderData
-      ? [
-          {
-            rel: "alternate",
-            type: "application/rss+xml",
-            title: `Personal News — ${loaderData.data.section.name} Daily Digest`,
-            href: `/rss/digest/${loaderData.data.section.slug}.xml`,
-          },
-        ]
-      : [],
-  }),
+  validateSearch: (search) => digestSearchSchema.parse(search),
+  loaderDeps: ({ search }) => ({ kind: search.kind ?? "daily" }),
+  loader: ({ params, deps }) => loadDigest(params, deps.kind),
+  head: ({ loaderData }) => {
+    if (!loaderData) return { meta: [{ title: "Personal News" }] };
+    const isWeekly = loaderData.data.kind === "weekly";
+    const kindLabel = isWeekly ? "Weekly Digest" : "Daily Digest";
+    const dateLabel = isWeekly
+      ? `Week of ${loaderData.data.periodStart}`
+      : loaderData.data.periodStart;
+    return {
+      meta: [
+        {
+          title: `${loaderData.data.section.name} ${kindLabel} (${dateLabel}) — Personal News`,
+        },
+      ],
+      links: [
+        {
+          rel: "alternate",
+          type: "application/rss+xml",
+          title: `Personal News — ${loaderData.data.section.name} ${kindLabel}`,
+          href: `/rss/digest/${loaderData.data.section.slug}.xml`,
+        },
+      ],
+    };
+  },
   notFoundComponent: () => (
     <p className="pt-6 font-mono text-sm uppercase tracking-wider">
-      No such daily digest.
+      No such digest.
     </p>
   ),
   component: DigestPage,
@@ -54,7 +93,8 @@ export const Route = createFileRoute("/digest/$section/$date")({
 
 function DigestPage() {
   const { data, recent } = Route.useLoaderData();
-  const { section, items, intro, periodStart } = data;
+  const { section, items, intro, periodStart, kind } = data;
+  const isWeekly = kind === "weekly";
 
   return (
     <div data-section={section.slug} className="flex flex-col gap-4 pt-4">
@@ -70,7 +110,8 @@ function DigestPage() {
 
       <div className="flex flex-wrap items-baseline justify-between gap-3 border-t-[5px] border-sec pt-1">
         <h1 className="font-serif text-2xl font-black uppercase tracking-tight text-sec-ink sm:text-3xl">
-          {section.name} Daily Digest · {periodStart}
+          {section.name} {isWeekly ? "Weekly Digest" : "Daily Digest"} ·{" "}
+          {isWeekly ? `Week of ${periodStart}` : periodStart}
         </h1>
         <div className="flex items-center gap-3">
           <a
@@ -86,7 +127,7 @@ function DigestPage() {
 
       {intro ? (
         <section
-          aria-label="Daily synthesis"
+          aria-label={isWeekly ? "Weekly synthesis" : "Daily synthesis"}
           className="border-l-4 border-sec bg-muted/40 p-4 font-sans text-sm leading-relaxed"
         >
           <h2 className="mb-1 font-mono text-xs font-bold uppercase tracking-wider text-sec-ink">
@@ -103,7 +144,7 @@ function DigestPage() {
 
         {items.length === 0 ? (
           <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-            No approved events for this day.
+            No approved events for this {isWeekly ? "week" : "day"}.
           </p>
         ) : (
           <ol className="flex flex-col gap-3">
@@ -143,7 +184,7 @@ function DigestPage() {
 
       <aside className="mt-6 border-t pt-4">
         <h3 className="mb-2 font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
-          Recent {section.name} Digests
+          Recent {section.name} {isWeekly ? "Weekly" : "Daily"} Digests
         </h3>
         <Suspense fallback={null}>
           <Await promise={recent}>
@@ -161,6 +202,7 @@ function DigestPage() {
                         <Link
                           to="/digest/$section/$date"
                           params={{ section: section.slug, date: d.date }}
+                          search={isWeekly ? { kind: "weekly" } : undefined}
                           className="underline hover:text-sec-ink"
                         >
                           {d.date}
