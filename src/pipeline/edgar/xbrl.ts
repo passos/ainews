@@ -95,9 +95,10 @@ export function extractFactsForFiling(
             }
           }
 
-          // 2. If 10-Q or quarterly period, prefer single-quarter duration (~60 to 110 days) over YTD
+          // 2. If 10-Q, 10-Q/A or quarterly period, prefer single-quarter duration (~60 to 110 days) over YTD
           const isQuarterly =
             filingMeta?.form === "10-Q" ||
+            filingMeta?.form === "10-Q/A" ||
             (filingMeta?.fiscalPeriod &&
               ["Q1", "Q2", "Q3", "Q4"].includes(filingMeta.fiscalPeriod));
           if (isQuarterly) {

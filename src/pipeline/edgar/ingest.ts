@@ -207,6 +207,7 @@ export async function ingestCompanyFilings(
               ex99Match[1],
               exErr,
             );
+            docFetchOk = false;
           }
         }
       }
@@ -245,7 +246,7 @@ export async function ingestCompanyFilings(
     const title = `${company.ticker} ${form}: ${company.name} Reports Financial Results (${filingDate})`;
     const summary = `${company.name} (${company.ticker}) filed ${form} with the SEC on ${filingDate}. Report date: ${reportDate || filingDate}.`;
 
-    // 1. Create article record in DB
+    // 1. Create or update article record in DB
     const articleInsert = await env.DB.prepare(
       `INSERT INTO articles (
         source_id, industry_id, canonical_url, url, title, summary,
@@ -256,7 +257,12 @@ export async function ingestCompanyFilings(
         ?7, ?8, ?9, 'body_ready', ?10,
         ?11, 'full', ?12
       )
-      ON CONFLICT(canonical_url) DO UPDATE SET stage = stage
+      ON CONFLICT(canonical_url) DO UPDATE SET
+        body_sha = CASE WHEN excluded.body_sha != articles.body_sha THEN excluded.body_sha ELSE articles.body_sha END,
+        body_fetched_at = CASE WHEN excluded.body_sha != articles.body_sha THEN excluded.body_fetched_at ELSE articles.body_fetched_at END,
+        stage = CASE WHEN excluded.body_sha != articles.body_sha THEN 'body_ready' ELSE articles.stage END,
+        stage_updated_at = CASE WHEN excluded.body_sha != articles.body_sha THEN excluded.stage_updated_at ELSE articles.stage_updated_at END,
+        requeue_count = CASE WHEN excluded.body_sha != articles.body_sha THEN 0 ELSE articles.requeue_count END
       RETURNING id`,
     )
       .bind(
@@ -363,6 +369,18 @@ export async function ingestCompanyFilings(
       const isAmended = form.includes("/A");
 
       for (const fact of normalizedFacts) {
+        // Prevent duplicate fact insertion on filing retry
+        const existingFact = await env.DB.prepare(
+          `SELECT id FROM financial_facts
+           WHERE filing_id = ?1 AND concept = ?2 AND period_end = ?3 AND unit = ?4`,
+        )
+          .bind(filingId, fact.concept, fact.periodEnd, fact.unit)
+          .first<{ id: number }>();
+
+        if (existingFact) {
+          continue;
+        }
+
         const factInsert = await env.DB.prepare(
           `INSERT INTO financial_facts (
             company_id, filing_id, accession_number, taxonomy, concept,

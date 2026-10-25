@@ -147,10 +147,13 @@ export async function edgarFetch(
         backoffSec = parsed;
       }
     }
+    const backoffUntil = currentNow + backoffSec * 1000;
     await env.DB.prepare(
-      `UPDATE fetch_hosts SET next_allowed_at = ?2 WHERE host = ?1`,
+      `UPDATE fetch_hosts
+       SET next_allowed_at = ?2
+       WHERE host = ?1 AND (next_allowed_at IS NULL OR next_allowed_at < ?2)`,
     )
-      .bind(host, now + backoffSec * 1000)
+      .bind(host, backoffUntil)
       .run();
     throw new Error(
       `SEC EDGAR returned HTTP 429 Too Many Requests. Backing off host ${host} for ${backoffSec}s.`,

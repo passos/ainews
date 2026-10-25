@@ -706,4 +706,118 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     expect(bodyContent).toContain("Exhibit 99.1 (Earnings Press Release)");
     expect(bodyContent).toContain("Apple Reports Net Sales of $85.8B");
   });
+
+  it("marks filing as failed when EX-99.1 fetch fails, and retrying updates article body and avoids duplicate facts", async () => {
+    await resetPipeline();
+    await seedIndustry("finance");
+
+    const comp = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0000320193', 'AAPL', 'Apple Inc.', 1, ?1, ?1) RETURNING id",
+    )
+      .bind(NOW)
+      .first<{ id: number }>();
+    const companyId = comp!.id;
+
+    const mock8KSubmissions = {
+      cik: "0000320193",
+      entityType: "operating",
+      name: "Apple Inc.",
+      tickers: ["AAPL"],
+      filings: {
+        recent: {
+          accessionNumber: ["0000320193-24-000099"],
+          filingDate: ["2024-08-01"],
+          reportDate: ["2024-08-01"],
+          acceptanceDateTime: ["2024-08-01T16:30:00.000Z"],
+          form: ["8-K"],
+          items: ["2.02"],
+          primaryDocument: ["aapl-8k.htm"],
+        },
+      },
+    };
+
+    let ex99Status = 503;
+    const fakeFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("submissions")) {
+        return new Response(JSON.stringify(mock8KSubmissions), { status: 200 });
+      }
+      if (url.includes("companyfacts")) {
+        return new Response(JSON.stringify({ facts: {} }), { status: 200 });
+      }
+      if (url.includes("aapl-8k.htm")) {
+        return new Response(
+          '<html><body>Item 2.02. See <a href="ex9901.htm">Exhibit 99.1</a>.</body></html>',
+          { status: 200 },
+        );
+      }
+      if (url.includes("ex9901.htm")) {
+        if (ex99Status === 503) {
+          return new Response("Service Unavailable", { status: 503 });
+        }
+        return new Response(
+          "<html><body><h1>Q3 Earnings Release</h1><p>Net sales $85.8B</p></body></html>",
+          { status: 200 },
+        );
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const mockEnv = {
+      DB: env.DB,
+      BODIES: env.BODIES,
+      SEC_USER_AGENT: "Personal News test@example.com",
+      COLLECT_ENABLED: "true",
+    };
+
+    // First attempt: EX-99.1 fails with 503
+    const res1 = await ingestCompanyFilings(
+      mockEnv as unknown as PipelineEnv,
+      companyId,
+      NOW,
+      { fetch: fakeFetch, sleep: async () => {} },
+    );
+    expect(res1.ingestedCount).toBe(0);
+
+    const filing1 = await env.DB.prepare(
+      "SELECT id, status FROM filings WHERE accession_number = '0000320193-24-000099'",
+    ).first<{ id: number; status: string }>();
+    expect(filing1?.status).toBe("failed");
+
+    const art1 = await env.DB.prepare(
+      "SELECT id, body_sha, stage FROM articles WHERE canonical_url LIKE '%aapl-8k.htm'",
+    ).first<{ id: number; body_sha: string; stage: string }>();
+    const oldSha = art1!.body_sha;
+
+    // Simulate stage being moved forward (e.g. grouped)
+    await env.DB.prepare("UPDATE articles SET stage = 'grouped' WHERE id = ?1")
+      .bind(art1!.id)
+      .run();
+
+    // Second attempt: EX-99.1 succeeds!
+    ex99Status = 200;
+    const res2 = await ingestCompanyFilings(
+      mockEnv as unknown as PipelineEnv,
+      companyId,
+      NOW + 1000,
+      { fetch: fakeFetch, sleep: async () => {} },
+    );
+    expect(res2.ingestedCount).toBe(1);
+
+    const filing2 = await env.DB.prepare(
+      "SELECT status FROM filings WHERE id = ?1",
+    )
+      .bind(filing1!.id)
+      .first<{ status: string }>();
+    expect(filing2?.status).toBe("processed");
+
+    // Check that article body_sha was updated and stage was reset to body_ready!
+    const art2 = await env.DB.prepare(
+      "SELECT body_sha, stage, requeue_count FROM articles WHERE id = ?1",
+    )
+      .bind(art1!.id)
+      .first<{ body_sha: string; stage: string; requeue_count: number }>();
+    expect(art2?.body_sha).not.toBe(oldSha);
+    expect(art2?.stage).toBe("body_ready");
+    expect(art2?.requeue_count).toBe(0);
+  });
 });
