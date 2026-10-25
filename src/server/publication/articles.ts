@@ -45,6 +45,7 @@ export const CARD_COLUMNS = sql`
   (SELECT body FROM corrections c WHERE c.target_type = 'articles' AND c.target_id = a.id
     ORDER BY c.created_at DESC, c.id DESC LIMIT 1) AS correction,
   ea.event_id AS event_id,
+  COALESCE(ea.input_revision, 1) AS input_revision,
   (SELECT count(*) FROM event_articles ea2
    JOIN articles a2 ON a2.id = ea2.article_id
    WHERE ea2.event_id = ea.event_id
@@ -91,6 +92,7 @@ export interface ArticleView {
   sectionDisclaimer: string | null;
   eventId: number | null;
   eventReportCount: number;
+  inputRevision: number;
 }
 
 export interface CardRow {
@@ -108,6 +110,7 @@ export interface CardRow {
   correction: string | null;
   event_id: number | null;
   event_report_count: number | null;
+  input_revision: number | null;
 }
 
 // Label options that say nothing: skipped on the card.
@@ -144,6 +147,7 @@ export function toViews(rows: CardRow[]): ArticleView[] {
     sectionDisclaimer: r.section_disclaimer,
     eventId: r.event_id ?? null,
     eventReportCount: Number(r.event_report_count ?? 0),
+    inputRevision: Number(r.input_revision ?? 1),
   }));
 }
 

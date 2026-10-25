@@ -2,6 +2,7 @@ import { enqueueDueArtifacts } from "./artifacts/schedule";
 import { scheduleDueSources } from "./collect/schedule";
 import { enqueueDueDigests } from "./digest/schedule";
 import { enqueueDueEvidence } from "./evidence/schedule";
+import { trackDuePrimarySources } from "./evidence/primary";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
 import { enqueueDueWatches } from "./watch/schedule";
@@ -17,6 +18,7 @@ export async function runScheduled(
   const requeued = await requeueStuck(env, now);
   const digests = await enqueueDueDigests(env, now);
   const artifacts = await enqueueDueArtifacts(env, now);
+  const tracked = await trackDuePrimarySources(env, now);
   const evidence = await enqueueDueEvidence(env, now);
   const watches = await enqueueDueWatches(env, now);
   console.log({
@@ -25,6 +27,7 @@ export async function runScheduled(
     requeued: requeued.length,
     digests: digests.length,
     artifacts: artifacts.length,
+    tracked: tracked.length,
     evidence: evidence.length,
     watches: watches.length,
   });

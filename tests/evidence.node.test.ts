@@ -22,6 +22,7 @@ describe("InspectEvidencePanel", () => {
       claimType: "fact",
       consensusStatus: "verified",
       primarySourcePreferred: true,
+      realityCheck: "vendor_only",
       status: "published",
       evidence: [
         {
@@ -39,6 +40,7 @@ describe("InspectEvidencePanel", () => {
           endOffset: 205,
           verified: true,
           isPrimarySource: true,
+          sourceRole: "vendor",
         },
       ],
     };
@@ -49,6 +51,7 @@ describe("InspectEvidencePanel", () => {
       claimType: "prediction",
       consensusStatus: "disputed",
       primarySourcePreferred: false,
+      realityCheck: "independent_disputed",
       status: "published",
       evidence: [
         {
@@ -66,6 +69,7 @@ describe("InspectEvidencePanel", () => {
           endOffset: 138,
           verified: true,
           isPrimarySource: false,
+          sourceRole: "independent",
         },
       ],
     };

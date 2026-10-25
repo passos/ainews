@@ -18,6 +18,7 @@ const article: ArticleView = {
   sectionDisclaimer: null,
   eventId: null,
   eventReportCount: 0,
+  inputRevision: 1,
 };
 
 describe("ArticleCard link", () => {

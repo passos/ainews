@@ -27,10 +27,14 @@ export interface EventEvidenceInput {
   articles: ArticleEvidenceInput[];
 }
 
+export const SOURCE_ROLES = ["vendor", "independent"] as const;
+export type SourceRole = (typeof SOURCE_ROLES)[number];
+
 export const rawCitationSchema = z.strictObject({
   articleId: z.number().int().positive(),
   quote: z.string().min(15),
   stance: z.enum(EVIDENCE_STANCES),
+  sourceRole: z.enum(SOURCE_ROLES).optional(),
 });
 
 export type RawCitation = z.infer<typeof rawCitationSchema>;
@@ -72,6 +76,8 @@ export function buildClaimsExtractionRequest(
     "3. For each claim, cite verbatim quotes from the provided articles:",
     "   - 'quote': MUST be an exact, word-for-word excerpt from the article body (minimum 15 characters). DO NOT paraphrase or modify quotes.",
     "   - 'stance': 'support' if the article affirms or provides evidence for the claim; 'dispute' if the article contradicts, questions, or denies the claim.",
+    "4. Launch Reality Check: Distinguish vendor/origin claims from independent/third-party evaluations:",
+    "   - 'sourceRole': 'vendor' if the article is an official vendor release, company announcement, or primary author paper; 'independent' if it is third-party journalism, independent evaluation, benchmark, or regulatory filing.",
     material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
     "Output MUST be valid JSON adhering strictly to this schema:",
     `{
@@ -83,7 +89,8 @@ export function buildClaimsExtractionRequest(
         {
           "articleId": 123,
           "quote": "Exact verbatim sentence or clause from article 123",
-          "stance": "support" | "dispute"
+          "stance": "support" | "dispute",
+          "sourceRole": "vendor" | "independent"
         }
       ]
     }

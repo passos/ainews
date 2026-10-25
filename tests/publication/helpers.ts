@@ -170,10 +170,11 @@ export async function seedEventArticle(
   eventId: number,
   articleId: number,
   createdAt = 0,
+  inputRevision = 1,
 ): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, ?3)",
+    "INSERT INTO event_articles (event_id, article_id, created_at, input_revision) VALUES (?1, ?2, ?3, ?4)",
   )
-    .bind(eventId, articleId, createdAt)
+    .bind(eventId, articleId, createdAt, inputRevision)
     .run();
 }

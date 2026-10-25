@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
+import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -522,6 +523,18 @@ export async function decideReview(
       data.decision,
       now,
     ),
+    database
+      .prepare(
+        `UPDATE event_articles
+         SET input_revision = (SELECT revision FROM events WHERE id = event_articles.event_id)
+         WHERE article_id = ?1
+           AND ?2 = 'approved'
+           AND NOT EXISTS (
+             SELECT 1 FROM reviews
+             WHERE article_id = ?1 AND decision = 'approved' AND body_sha = ?3
+           )`,
+      )
+      .bind(data.articleId, data.decision, data.bodySha),
     database
       .prepare(
         `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
@@ -1080,7 +1093,7 @@ export async function listPendingArtifacts(
     JOIN events e ON e.id = ea.event_id
     JOIN industries i ON i.id = e.industry_id
     WHERE ea.status = 'pending_review'
-      AND ea.input_revision = e.revision
+      AND (ea.input_revision = e.revision OR (ea.type = 'revision_diff' AND ea.input_revision <= e.revision))
     ORDER BY ea.created_at DESC
   `);
   return rows;
@@ -1105,7 +1118,7 @@ export async function reviewArtifact(
          AND EXISTS (
            SELECT 1 FROM events e
            WHERE e.id = event_artifacts.event_id
-             AND e.revision = ?3
+             AND (e.revision = ?3 OR (event_artifacts.type = 'revision_diff' AND e.revision >= ?3))
          )`,
     )
     .bind(targetStatus, data.artifactId, data.expectedRevision)
@@ -1265,7 +1278,39 @@ export async function reviewClaim(
     .bind(targetStatus, data.claimId, data.expectedRevision)
     .run();
 
-  return res.meta.changes === 1;
+  const changes = res.meta.changes ?? 0;
+
+  // Retrieve current claim state to support idempotent retries / diff synchronization
+  const claim = await database
+    .prepare(
+      `SELECT event_id, status FROM claims
+       WHERE id = ?1
+         AND input_revision = ?2
+         AND EXISTS (
+           SELECT 1 FROM events e
+           WHERE e.id = claims.event_id
+             AND e.revision = ?2
+         )`,
+    )
+    .bind(data.claimId, data.expectedRevision)
+    .first<{ event_id: number; status: string }>();
+
+  if (!claim) {
+    return false;
+  }
+
+  if (claim.status === "published" && data.decision === "approved") {
+    await syncRevisionDiff(
+      database,
+      claim.event_id,
+      data.expectedRevision,
+      "published",
+      Date.now(),
+    );
+    return true;
+  }
+
+  return changes === 1 || claim.status === targetStatus;
 }
 
 // -----------------------------------------------------------------------------

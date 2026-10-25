@@ -27,6 +27,16 @@ export const claims = sqliteTable(
     primarySourcePreferred: integer("primary_source_preferred")
       .notNull()
       .default(0),
+    realityCheck: text("reality_check", {
+      enum: [
+        "vendor_only",
+        "independent_verified",
+        "independent_disputed",
+        "unspecified",
+      ],
+    })
+      .notNull()
+      .default("unspecified"),
     status: text("status", {
       enum: ["published", "pending_review", "rejected"],
     })
@@ -85,6 +95,11 @@ export const claimEvidence = sqliteTable(
       enum: ["support", "dispute"],
     }).notNull(),
     isPrimarySource: integer("is_primary_source").notNull().default(0),
+    sourceRole: text("source_role", {
+      enum: ["vendor", "independent"],
+    })
+      .notNull()
+      .default("independent"),
     verified: integer("verified").notNull().default(0),
     createdAt: integer("created_at").notNull(),
   },

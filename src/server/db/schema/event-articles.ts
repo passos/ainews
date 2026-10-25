@@ -16,6 +16,8 @@ export const eventArticles = sqliteTable(
       .references(() => articles.id),
     /** Epoch milliseconds. */
     createdAt: integer("created_at").notNull(),
+    /** Event revision when article joined. */
+    inputRevision: integer("input_revision").notNull().default(1),
   },
   (t) => [index("event_articles_event_id_idx").on(t.eventId)],
 );

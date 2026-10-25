@@ -4,6 +4,7 @@ export const ARTIFACT_TYPES = [
   "story_brief",
   "audience_explain",
   "research_paper_decoder",
+  "revision_diff",
 ] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
@@ -68,6 +69,20 @@ export const researchPaperDecoderSchema = z.strictObject({
 export type ResearchPaperDecoder = z.infer<typeof researchPaperDecoderSchema>;
 
 // -----------------------------------------------------------------------------
+// Revision Diff Schema & Type (N§2.2: What is new across event revisions)
+// -----------------------------------------------------------------------------
+
+export const revisionDiffSchema = z.strictObject({
+  revision: z.number().int().min(1),
+  summary: z.string().min(1),
+  newSources: z.array(z.string()),
+  newClaims: z.array(z.string()),
+  changedClaims: z.array(z.string()),
+});
+
+export type RevisionDiff = z.infer<typeof revisionDiffSchema>;
+
+// -----------------------------------------------------------------------------
 // Aggregate view of published event artifacts
 // -----------------------------------------------------------------------------
 
@@ -75,4 +90,5 @@ export interface EventArtifactsView {
   brief: StoryBrief | null;
   explanations: Partial<Record<ArtifactAudience, AudienceExplain>>;
   decoder: ResearchPaperDecoder | null;
+  revisionDiff?: RevisionDiff | null;
 }

@@ -21,9 +21,22 @@ export const EVIDENCE_PUBLICATION_STATUSES = [
 export type EvidencePublicationStatus =
   (typeof EVIDENCE_PUBLICATION_STATUSES)[number];
 
+export const REALITY_CHECK_STATUSES = [
+  "vendor_only",
+  "independent_verified",
+  "independent_disputed",
+  "unspecified",
+] as const;
+export type RealityCheckStatus = (typeof REALITY_CHECK_STATUSES)[number];
+
+export const SOURCE_ROLES = ["vendor", "independent"] as const;
+export type SourceRole = (typeof SOURCE_ROLES)[number];
+
 export const claimTypeSchema = z.enum(CLAIM_TYPES);
 export const consensusStatusSchema = z.enum(CONSENSUS_STATUSES);
 export const evidenceStanceSchema = z.enum(EVIDENCE_STANCES);
+export const realityCheckStatusSchema = z.enum(REALITY_CHECK_STATUSES);
+export const sourceRoleSchema = z.enum(SOURCE_ROLES);
 export const evidencePublicationStatusSchema = z.enum(
   EVIDENCE_PUBLICATION_STATUSES,
 );
@@ -41,6 +54,7 @@ export const claimEvidenceViewSchema = z.strictObject({
   endOffset: z.number().int().positive(),
   stance: evidenceStanceSchema,
   isPrimarySource: z.boolean(),
+  sourceRole: sourceRoleSchema.default("independent"),
   verified: z.boolean(),
 });
 
@@ -52,6 +66,7 @@ export const claimViewSchema = z.strictObject({
   claimType: claimTypeSchema,
   consensusStatus: consensusStatusSchema,
   primarySourcePreferred: z.boolean(),
+  realityCheck: realityCheckStatusSchema.default("unspecified"),
   status: evidencePublicationStatusSchema,
   evidence: z.array(claimEvidenceViewSchema),
 });

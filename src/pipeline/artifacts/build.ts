@@ -13,6 +13,7 @@ import {
   type ArticleMetadata,
 } from "./registry";
 import type { ArtifactArticleMaterial, ArtifactEventMaterial } from "./prompts";
+import { syncRevisionDiff } from "../evidence/diff";
 
 export interface ArtifactDeps {
   db?: D1Database;
@@ -376,6 +377,13 @@ export async function generateEventArtifacts(
           inputRevision,
         });
       }
+    }
+  }
+
+  // Ensure revision_diff artifact exists for updates (inputRevision > 1) (N§2.2)
+  if (inputRevision > 1) {
+    for (let r = 2; r <= inputRevision; r++) {
+      await syncRevisionDiff(deps.db, eventId, r, initialStatus, deps.now());
     }
   }
 

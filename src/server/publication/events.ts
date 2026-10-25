@@ -2,8 +2,10 @@ import { sql } from "drizzle-orm";
 import {
   type ArtifactAudience,
   type EventArtifactsView,
+  type RevisionDiff,
   audienceExplainSchema,
   researchPaperDecoderSchema,
+  revisionDiffSchema,
   storyBriefSchema,
 } from "../../lib/artifacts/types";
 import type { EventEvidenceView } from "../../lib/evidence/types";
@@ -19,11 +21,18 @@ import {
 } from "./articles";
 import { getEventEvidence } from "./evidence";
 
+export interface RevisionTimelineBlock {
+  revision: number;
+  diff: RevisionDiff | null;
+  articles: ArticleView[];
+}
+
 export interface EventView {
   id: number;
   title: string;
   section: SectionInfo;
   articles: ArticleView[];
+  timelineRevisions: RevisionTimelineBlock[];
   corrections: string[];
   artifacts: EventArtifactsView;
   evidence: EventEvidenceView;
@@ -106,12 +115,142 @@ export async function getEvent(
 
   const evidence = await getEventEvidence(db, eventId);
 
+  // Find claims whose evidence has been completely withdrawn or rejected (publication guard)
+  const withdrawnClaimRows = await db.all<{ claim_text: string }>(sql`
+    SELECT DISTINCT c.claim_text
+    FROM claims c
+    WHERE c.event_id = ${eventId}
+      AND EXISTS (
+        SELECT 1 FROM claim_evidence ce
+        WHERE ce.claim_id = c.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM claim_evidence ce
+        JOIN articles a ON a.id = ce.article_id AND ce.body_sha = a.body_sha AND ${approvedArticleWhere}
+        JOIN event_articles ea ON ea.article_id = a.id AND ea.event_id = ${eventId}
+        WHERE ce.claim_id = c.id AND ce.verified = 1
+      )
+  `);
+  const withdrawnClaimsSet = new Set(
+    withdrawnClaimRows.map((r) => r.claim_text),
+  );
+
+  // Load all published revision_diff artifacts for this event (N§2.2)
+  // Architecture §7 publication guard: only load diffs for revisions that currently have approved articles
+  const diffRows = await db.all<{
+    input_revision: number;
+    content: string;
+  }>(sql`
+    SELECT ea.input_revision, ea.content
+    FROM event_artifacts ea
+    WHERE ea.event_id = ${eventId}
+      AND ea.type = 'revision_diff'
+      AND ea.status = 'published'
+      AND (
+        EXISTS (
+          SELECT 1 FROM event_articles ea2
+          JOIN articles a ON a.id = ea2.article_id
+          WHERE ea2.event_id = ea.event_id
+            AND ea2.input_revision = ea.input_revision
+            AND ${approvedArticleWhere}
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM event_articles ea3
+          WHERE ea3.event_id = ea.event_id
+            AND ea3.input_revision = ea.input_revision
+        )
+      )
+    ORDER BY ea.input_revision ASC
+  `);
+
+  const diffMap = new Map<number, RevisionDiff>();
+  for (const d of diffRows) {
+    try {
+      const parsed = revisionDiffSchema.safeParse(JSON.parse(d.content));
+      if (parsed.success) {
+        diffMap.set(d.input_revision, parsed.data);
+      }
+    } catch {
+      // ignore json error
+    }
+  }
+
+  function sanitizeRevisionDiff(diff: RevisionDiff, rev: number): RevisionDiff {
+    const extractBaseClaim = (c: string): string => {
+      const lastParen = c.lastIndexOf(" (");
+      return lastParen !== -1 && c.endsWith(")") ? c.slice(0, lastParen) : c;
+    };
+
+    const hasWithdrawn =
+      diff.newClaims.some((c) => withdrawnClaimsSet.has(c)) ||
+      diff.changedClaims.some((c) =>
+        withdrawnClaimsSet.has(extractBaseClaim(c)),
+      );
+
+    if (!hasWithdrawn) {
+      return diff;
+    }
+
+    const newClaims = diff.newClaims.filter((c) => !withdrawnClaimsSet.has(c));
+    const changedClaims = diff.changedClaims.filter(
+      (c) => !withdrawnClaimsSet.has(extractBaseClaim(c)),
+    );
+
+    let summary: string;
+    if (rev <= 1) {
+      summary =
+        diff.newSources.length > 0
+          ? `Initial report based on ${diff.newSources.join(", ")}.`
+          : "Initial reporting on the event.";
+    } else if (newClaims.length > 0 && diff.newSources.length > 0) {
+      summary = `New claims identified from ${diff.newSources.join(", ")}: ${newClaims.slice(0, 2).join("; ")}.`;
+    } else if (diff.newSources.length > 0) {
+      summary = `New sources added: ${diff.newSources.join(", ")}.`;
+    } else if (newClaims.length > 0) {
+      summary = `New claims identified: ${newClaims.slice(0, 2).join("; ")}.`;
+    } else if (changedClaims.length > 0) {
+      summary = `Updated reality check status on existing claims.`;
+    } else {
+      summary = `Event updated at revision ${rev}.`;
+    }
+
+    return {
+      revision: rev,
+      summary,
+      newSources: diff.newSources,
+      newClaims,
+      changedClaims,
+    };
+  }
+
+  const revisionSet = new Set<number>();
+  for (const a of articles) {
+    revisionSet.add(a.inputRevision);
+  }
+  for (const d of diffRows) {
+    revisionSet.add(d.input_revision);
+  }
+  if (revisionSet.size === 0) revisionSet.add(1);
+
+  const sortedRevisions = Array.from(revisionSet).sort((a, b) => a - b);
+  const timelineRevisions: RevisionTimelineBlock[] = sortedRevisions.map(
+    (rev) => {
+      const rawDiff = diffMap.get(rev);
+      return {
+        revision: rev,
+        diff: rawDiff ? sanitizeRevisionDiff(rawDiff, rev) : null,
+        articles: articles.filter((a) => a.inputRevision === rev),
+      };
+    },
+  );
+
   return {
     id: eventId,
     // Event public title: title of earliest approved article (refinement invariant 7)
     title: first.title,
     section,
     articles,
+    timelineRevisions,
     corrections: correctionRows.map((c) => c.body),
     artifacts,
     evidence,
