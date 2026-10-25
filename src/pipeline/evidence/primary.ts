@@ -198,12 +198,22 @@ export async function trackEventPrimarySources(
     // Check if URL already in articles
     const existing = await deps.db
       .prepare(
-        `SELECT id, stage, body_sha FROM articles WHERE canonical_url = ?1`,
+        `SELECT id, industry_id, stage, body_sha FROM articles WHERE canonical_url = ?1`,
       )
       .bind(canonical)
-      .first<{ id: number; stage: string; body_sha: string | null }>();
+      .first<{
+        id: number;
+        industry_id: number;
+        stage: string;
+        body_sha: string | null;
+      }>();
 
     if (existing) {
+      if (existing.industry_id !== event.industry_id) {
+        // Architecture §9 & AGENTS.md §4: articles cannot cross industry boundaries
+        continue;
+      }
+
       // Check if this article is already assigned to ANY event
       const assigned = await deps.db
         .prepare(`SELECT event_id FROM event_articles WHERE article_id = ?1`)
@@ -239,7 +249,8 @@ export async function trackEventPrimarySources(
                  AND EXISTS (
                    SELECT 1 FROM reviews r
                    JOIN articles a ON a.id = r.article_id AND r.body_sha = a.body_sha
-                   WHERE a.id = ?2 AND r.decision = 'approved'
+                   JOIN events e ON e.id = ?1
+                   WHERE a.id = ?2 AND r.decision = 'approved' AND a.industry_id = e.industry_id
                  )`,
             )
             .bind(eventId, existing.id, now, event.revision),
@@ -252,9 +263,13 @@ export async function trackEventPrimarySources(
           deps.db
             .prepare(
               `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
-               WHERE id = ?2 AND stage = 'analyzed'`,
+               WHERE id = ?2 AND stage = 'analyzed'
+                 AND EXISTS (
+                   SELECT 1 FROM event_articles
+                   WHERE event_id = ?3 AND article_id = ?2
+                 )`,
             )
-            .bind(now, existing.id),
+            .bind(now, existing.id, eventId),
         ]);
 
         if (batchRes[0].meta.changes === 1) {
@@ -317,6 +332,11 @@ export async function trackEventPrimarySources(
                  WHERE EXISTS (
                    SELECT 1 FROM reviews
                    WHERE article_id = ?2 AND decision = 'approved'
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM articles a
+                   JOIN events e ON e.id = ?1
+                   WHERE a.id = ?2 AND a.industry_id = e.industry_id
                  )`,
               )
               .bind(eventId, existing.id, now),

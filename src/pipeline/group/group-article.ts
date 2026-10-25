@@ -89,259 +89,206 @@ export async function groupArticle(
   // Check if article originated from an event (e.g. primary source tracker)
   const originAnalysis = await deps.db
     .prepare(
-      `SELECT evidence_tags FROM analyses WHERE article_id = ?1 ORDER BY created_at DESC LIMIT 1`,
+      `SELECT evidence_tags FROM analyses
+       WHERE article_id = ?1 AND prompt_version = 'primary_tracker'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
     )
     .bind(articleId)
     .first<{ evidence_tags: string | null }>();
 
-  let originEventId: number | null = null;
+  let targetEventId: number | null = null;
   if (originAnalysis?.evidence_tags) {
     try {
       const parsedTags = JSON.parse(originAnalysis.evidence_tags);
       if (typeof parsedTags.origin_event_id === "number") {
-        originEventId = parsedTags.origin_event_id;
+        const originEvent = await deps.db
+          .prepare(`SELECT id FROM events WHERE id = ?1 AND industry_id = ?2`)
+          .bind(parsedTags.origin_event_id, article.industry_id)
+          .first<{ id: number }>();
+        if (originEvent) {
+          targetEventId = originEvent.id;
+        }
       }
     } catch {
       // ignore json error
     }
   }
 
-  if (originEventId !== null) {
-    const originEvent = await deps.db
-      .prepare(
-        `SELECT id, revision FROM events WHERE id = ?1 AND industry_id = ?2`,
-      )
-      .bind(originEventId, article.industry_id)
-      .first<{ id: number; revision: number }>();
+  if (targetEventId === null) {
+    // 2. Compute embedding
+    const embedText = `${article.title}\n${article.summary ?? ""}`.trim();
+    const textSha = await sha256Hex(embedText);
+    const embedKey = `embed:article:${articleId}:${textSha}`;
+    const [vector] = await deps.models.embed(embedKey, [embedText]);
+    if (!vector || vector.length === 0) {
+      throw new Error(
+        `Embedding generation returned no vector for article ${articleId}`,
+      );
+    }
 
-    if (originEvent) {
-      const commitNow = deps.now();
-      try {
-        const results = await deps.db.batch([
-          deps.db
-            .prepare(
-              `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
-               SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
-               WHERE (SELECT revision FROM events WHERE id = ?1) = ?4
-                 AND NOT EXISTS (SELECT 1 FROM event_articles WHERE article_id = ?2)`,
-            )
-            .bind(originEvent.id, articleId, commitNow, originEvent.revision),
-          deps.db
-            .prepare(
-              `UPDATE events SET revision = revision + 1, updated_at = ?1
-               WHERE id = ?2 AND revision = ?3
-                 AND changes() = 1
-                 AND EXISTS (
-                   SELECT 1 FROM reviews r
-                   JOIN articles a ON a.id = r.article_id
-                   WHERE a.id = ?4 AND r.body_sha = a.body_sha AND r.decision = 'approved'
-                 )`,
-            )
-            .bind(commitNow, originEvent.id, originEvent.revision, articleId),
-          deps.db
-            .prepare(
-              `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
-               WHERE id = ?2 AND stage = 'analyzed' AND industry_id = ?3
-                 AND EXISTS (SELECT 1 FROM event_articles WHERE event_id = ?4 AND article_id = ?2)`,
-            )
-            .bind(commitNow, articleId, article.industry_id, originEvent.id),
-        ]);
+    // 3. Upsert vector into Vectorize (metadata: industry_id is Number)
+    await deps.vectors.upsert([
+      {
+        id: String(articleId),
+        values: vector,
+        metadata: { industry_id: article.industry_id },
+      },
+    ]);
 
-        if (results[0].meta.changes === 1) {
-          return { status: "grouped", eventId: originEvent.id, isNew: false };
+    // 4. Recall candidates from Vectorize
+    const searchRes = await deps.vectors.query(vector, {
+      topK: 30,
+      returnMetadata: "none",
+      filter: { industry_id: { $eq: article.industry_id } },
+    });
+
+    const recalledArticleIds = searchRes.matches
+      .filter((m) => m.id !== String(articleId))
+      .map((m) => Number(m.id))
+      .filter((id) => !Number.isNaN(id));
+
+    const recalledEventIds: number[] = [];
+    if (recalledArticleIds.length > 0) {
+      const placeholders = recalledArticleIds.map(() => "?").join(",");
+      const { results } = await deps.db
+        .prepare(
+          `SELECT article_id, event_id FROM event_articles WHERE article_id IN (${placeholders})`,
+        )
+        .bind(...recalledArticleIds)
+        .all<{ article_id: number; event_id: number }>();
+
+      const artToEvent = new Map<number, number>();
+      for (const row of results) {
+        artToEvent.set(row.article_id, row.event_id);
+      }
+
+      const seenEvents = new Set<number>();
+      for (const aId of recalledArticleIds) {
+        const eId = artToEvent.get(aId);
+        if (eId !== undefined && !seenEvents.has(eId)) {
+          seenEvents.add(eId);
+          recalledEventIds.push(eId);
+          if (recalledEventIds.length >= 10) break;
         }
-        const existing = await deps.db
-          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
-          .bind(articleId)
-          .first<{ event_id: number }>();
-        if (existing) {
-          return { status: "already_grouped", eventId: existing.event_id };
-        }
-      } catch (err) {
-        const existing = await deps.db
-          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
-          .bind(articleId)
-          .first<{ event_id: number }>();
-        if (existing) {
-          return { status: "already_grouped", eventId: existing.event_id };
-        }
-        throw err;
       }
     }
-  }
 
-  // 2. Compute embedding
-  const embedText = `${article.title}\n${article.summary ?? ""}`.trim();
-  const textSha = await sha256Hex(embedText);
-  const embedKey = `embed:article:${articleId}:${textSha}`;
-  const [vector] = await deps.models.embed(embedKey, [embedText]);
-  if (!vector || vector.length === 0) {
-    throw new Error(
-      `Embedding generation returned no vector for article ${articleId}`,
-    );
-  }
-
-  // 3. Upsert vector into Vectorize (metadata: industry_id is Number)
-  await deps.vectors.upsert([
-    {
-      id: String(articleId),
-      values: vector,
-      metadata: { industry_id: article.industry_id },
-    },
-  ]);
-
-  // 4. Recall candidates from Vectorize
-  const searchRes = await deps.vectors.query(vector, {
-    topK: 30,
-    returnMetadata: "none",
-    filter: { industry_id: { $eq: article.industry_id } },
-  });
-
-  const recalledArticleIds = searchRes.matches
-    .filter((m) => m.id !== String(articleId))
-    .map((m) => Number(m.id))
-    .filter((id) => !Number.isNaN(id));
-
-  const recalledEventIds: number[] = [];
-  if (recalledArticleIds.length > 0) {
-    const placeholders = recalledArticleIds.map(() => "?").join(",");
-    const { results } = await deps.db
+    // 5. Recent events from D1 (within RECENT_EVENT_WINDOW_MS)
+    const currentTime = deps.now();
+    const recentEvents = await deps.db
       .prepare(
-        `SELECT article_id, event_id FROM event_articles WHERE article_id IN (${placeholders})`,
-      )
-      .bind(...recalledArticleIds)
-      .all<{ article_id: number; event_id: number }>();
-
-    const artToEvent = new Map<number, number>();
-    for (const row of results) {
-      artToEvent.set(row.article_id, row.event_id);
-    }
-
-    const seenEvents = new Set<number>();
-    for (const aId of recalledArticleIds) {
-      const eId = artToEvent.get(aId);
-      if (eId !== undefined && !seenEvents.has(eId)) {
-        seenEvents.add(eId);
-        recalledEventIds.push(eId);
-        if (recalledEventIds.length >= 10) break;
-      }
-    }
-  }
-
-  // 5. Recent events from D1 (within RECENT_EVENT_WINDOW_MS)
-  const currentTime = deps.now();
-  const recentEvents = await deps.db
-    .prepare(
-      `SELECT id FROM events
+        `SELECT id FROM events
        WHERE industry_id = ?1 AND created_at >= ?2
        ORDER BY created_at DESC LIMIT 10`,
-    )
-    .bind(article.industry_id, currentTime - RECENT_EVENT_WINDOW_MS)
-    .all<{ id: number }>();
+      )
+      .bind(article.industry_id, currentTime - RECENT_EVENT_WINDOW_MS)
+      .all<{ id: number }>();
 
-  // 6. Union: recent first, then vector-recalled, deduplicated, up to MAX_CANDIDATES
-  const candidateEventIds: number[] = [];
-  const seenCandidates = new Set<number>();
+    // 6. Union: recent first, then vector-recalled, deduplicated, up to MAX_CANDIDATES
+    const candidateEventIds: number[] = [];
+    const seenCandidates = new Set<number>();
 
-  for (const r of recentEvents.results) {
-    if (!seenCandidates.has(r.id)) {
-      seenCandidates.add(r.id);
-      candidateEventIds.push(r.id);
-      if (candidateEventIds.length >= MAX_CANDIDATES) break;
-    }
-  }
-
-  for (const eId of recalledEventIds) {
-    if (!seenCandidates.has(eId)) {
-      seenCandidates.add(eId);
-      candidateEventIds.push(eId);
-      if (candidateEventIds.length >= MAX_CANDIDATES) break;
-    }
-  }
-
-  // If no candidate events exist, create new event directly without calling Jev
-  let targetEventId: number | null = null;
-  if (candidateEventIds.length > 0) {
-    // 7. Call Jev choice
-    const candPlaceholders = candidateEventIds.map(() => "?").join(",");
-    const { results: eventRows } = await deps.db
-      .prepare(`SELECT id, title FROM events WHERE id IN (${candPlaceholders})`)
-      .bind(...candidateEventIds)
-      .all<{ id: number; title: string }>();
-
-    const eventTitleMap = new Map<number, string>();
-    for (const ev of eventRows) {
-      eventTitleMap.set(ev.id, ev.title);
+    for (const r of recentEvents.results) {
+      if (!seenCandidates.has(r.id)) {
+        seenCandidates.add(r.id);
+        candidateEventIds.push(r.id);
+        if (candidateEventIds.length >= MAX_CANDIDATES) break;
+      }
     }
 
-    const { results: recentArtRows } = await deps.db
-      .prepare(
-        `SELECT ea.event_id,
+    for (const eId of recalledEventIds) {
+      if (!seenCandidates.has(eId)) {
+        seenCandidates.add(eId);
+        candidateEventIds.push(eId);
+        if (candidateEventIds.length >= MAX_CANDIDATES) break;
+      }
+    }
+
+    // If no candidate events exist, create new event directly without calling Jev
+    if (candidateEventIds.length > 0) {
+      // 7. Call Jev choice
+      const candPlaceholders = candidateEventIds.map(() => "?").join(",");
+      const { results: eventRows } = await deps.db
+        .prepare(
+          `SELECT id, title FROM events WHERE id IN (${candPlaceholders})`,
+        )
+        .bind(...candidateEventIds)
+        .all<{ id: number; title: string }>();
+
+      const eventTitleMap = new Map<number, string>();
+      for (const ev of eventRows) {
+        eventTitleMap.set(ev.id, ev.title);
+      }
+
+      const { results: recentArtRows } = await deps.db
+        .prepare(
+          `SELECT ea.event_id,
                 COALESCE(NULLIF(a.title_override, ''), a.title) AS title
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          WHERE ea.event_id IN (${candPlaceholders})
          ORDER BY ea.created_at DESC`,
-      )
-      .bind(...candidateEventIds)
-      .all<{ event_id: number; title: string }>();
+        )
+        .bind(...candidateEventIds)
+        .all<{ event_id: number; title: string }>();
 
-    const recentArtsMap = new Map<number, string[]>();
-    for (const r of recentArtRows) {
-      const list = recentArtsMap.get(r.event_id) ?? [];
-      if (list.length < 2) {
-        list.push(r.title);
-        recentArtsMap.set(r.event_id, list);
+      const recentArtsMap = new Map<number, string[]>();
+      for (const r of recentArtRows) {
+        const list = recentArtsMap.get(r.event_id) ?? [];
+        if (list.length < 2) {
+          list.push(r.title);
+          recentArtsMap.set(r.event_id, list);
+        }
       }
-    }
 
-    const criteria: Record<string, string> = {};
-    for (const cId of candidateEventIds) {
-      const evTitle = eventTitleMap.get(cId) ?? "";
-      const recentTitles = recentArtsMap.get(cId) ?? [];
-      const snippet =
-        recentTitles.length > 0
-          ? `${evTitle} | ${recentTitles.join("; ")}`
-          : evTitle;
-      criteria[`event_${cId}`] = snippet.slice(0, 300);
-    }
-    criteria.new = "A different event that is not listed";
+      const criteria: Record<string, string> = {};
+      for (const cId of candidateEventIds) {
+        const evTitle = eventTitleMap.get(cId) ?? "";
+        const recentTitles = recentArtsMap.get(cId) ?? [];
+        const snippet =
+          recentTitles.length > 0
+            ? `${evTitle} | ${recentTitles.join("; ")}`
+            : evTitle;
+        criteria[`event_${cId}`] = snippet.slice(0, 300);
+      }
+      criteria.new = "A different event that is not listed";
 
-    // Hash all inputs (article text + criteria) so changes in text or candidates get fresh decisions
-    const inputPayload = JSON.stringify({
-      text: embedText,
-      criteria,
-    });
-    const inputSha = await sha256Hex(inputPayload);
-    const jevKey = `group:${articleId}:${GROUP_PROMPT_VERSION}:${inputSha.slice(0, 16)}`;
+      // Hash all inputs (article text + criteria) so changes in text or candidates get fresh decisions
+      const inputPayload = JSON.stringify({
+        text: embedText,
+        criteria,
+      });
+      const inputSha = await sha256Hex(inputPayload);
+      const jevKey = `group:${articleId}:${GROUP_PROMPT_VERSION}:${inputSha.slice(0, 16)}`;
 
-    const answers = await deps.models.judge(
-      jevKey,
-      {
-        title: article.title,
-        summary: (article.summary ?? "").slice(0, 2000),
-      },
-      {
-        event: {
-          type: "choice",
-          instructions:
-            'Which existing news event does this article report on? Choose "new" if it reports a different event.',
-          criteria,
+      const answers = await deps.models.judge(
+        jevKey,
+        {
+          title: article.title,
+          summary: (article.summary ?? "").slice(0, 2000),
         },
-      },
-    );
+        {
+          event: {
+            type: "choice",
+            instructions:
+              'Which existing news event does this article report on? Choose "new" if it reports a different event.',
+            criteria,
+          },
+        },
+      );
 
-    // 8. Decision evaluation
-    const ans = answers.event;
-    if (
-      ans &&
-      ans.choice !== "new" &&
-      ans.choice.startsWith("event_") &&
-      ans.confidence >= GROUP_JOIN_MIN_CONFIDENCE
-    ) {
-      const chosenId = Number(ans.choice.slice("event_".length));
-      if (candidateEventIds.includes(chosenId)) {
-        targetEventId = chosenId;
+      // 8. Decision evaluation
+      const ans = answers.event;
+      if (
+        ans &&
+        ans.choice !== "new" &&
+        ans.choice.startsWith("event_") &&
+        ans.confidence >= GROUP_JOIN_MIN_CONFIDENCE
+      ) {
+        const chosenId = Number(ans.choice.slice("event_".length));
+        if (candidateEventIds.includes(chosenId)) {
+          targetEventId = chosenId;
+        }
       }
     }
   }

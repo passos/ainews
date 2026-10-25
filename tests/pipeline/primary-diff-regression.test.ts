@@ -276,3 +276,126 @@ it("does not classify an old cached vendor response as independent verification"
     .first();
   expect(claim).toEqual({ reality_check: "vendor_only" });
 });
+
+it("rejects attaching an article to an event in a different industry", async () => {
+  const finance = (await env.DB.prepare(
+    "SELECT i.id AS industryId,s.id AS sourceId FROM industries i JOIN sources s ON s.industry_id=i.id WHERE i.slug='finance'",
+  ).first<{ industryId: number; sourceId: number }>())!;
+
+  // Create an approved article in finance, in stage 'analyzed'
+  const target = "https://sec.gov/filing-diff-ind";
+  const financeArt = await seedArticle({
+    industryId: finance.industryId,
+    sourceId: finance.sourceId,
+    title: "Finance filing",
+    url: target,
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(financeArt)
+    .run();
+  await seedReview(financeArt, "approved");
+
+  // Create a tech event where article body mentions sec.gov filing
+  await env.DB.prepare(
+    "UPDATE industries SET primary_domains='[\"sec.gov\"]' WHERE id=?",
+  )
+    .bind(tech.industryId)
+    .run();
+  const techEventId = await seedEvent(tech.industryId, "Tech event", 1);
+  const techReport = await seedArticle({ ...tech, title: "Tech report" });
+  await seedEventArticle(techEventId, techReport, 1000, 1);
+  await seedReview(techReport, "approved");
+  await env.BODIES.put(
+    `bodies/${techReport}/sha-current.md`,
+    `[Filing](${target})`,
+  );
+
+  await trackEventPrimarySources(
+    {
+      db: env.DB,
+      bodies: env.BODIES,
+      fetch: vi.fn() as unknown as typeof fetch,
+    },
+    env,
+    techEventId,
+    [],
+    1000,
+  );
+
+  // financeArt MUST NOT be attached to tech event
+  const assigned = await env.DB.prepare(
+    "SELECT event_id FROM event_articles WHERE article_id=?",
+  )
+    .bind(financeArt)
+    .first();
+  expect(assigned).toBeNull();
+
+  // financeArt stage MUST remain 'analyzed'
+  const artRow = await env.DB.prepare("SELECT stage FROM articles WHERE id=?")
+    .bind(financeArt)
+    .first<{ stage: string }>();
+  expect(artRow?.stage).toBe("analyzed");
+});
+
+it("does not update article to grouped if event_articles insertion failed due to concurrent revision bump", async () => {
+  const eventId = await seedEvent(tech.industryId, "Tech event", 1);
+  const report = await seedArticle({ ...tech, title: "Tech report" });
+  await seedEventArticle(eventId, report, 1000, 1);
+  await seedReview(report, "approved");
+  const target = "https://arxiv.org/abs/test-orphan";
+  await env.BODIES.put(`bodies/${report}/sha-current.md`, `[Paper](${target})`);
+  await env.DB.prepare(
+    "UPDATE industries SET primary_domains='[\"arxiv.org\"]' WHERE id=?",
+  )
+    .bind(tech.industryId)
+    .run();
+
+  const mockArt = await seedArticle({
+    ...tech,
+    title: "Primary paper",
+    url: target,
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(mockArt)
+    .run();
+  await seedReview(mockArt, "approved");
+
+  // Simulate concurrent bump: between read and batch, event revision is bumped from 1 to 2
+  const dbWithConcurrentBump = {
+    prepare: (sql: string) => env.DB.prepare(sql),
+    async batch(statements: D1PreparedStatement[]) {
+      await env.DB.prepare(
+        "UPDATE events SET revision = revision + 1 WHERE id = ?",
+      )
+        .bind(eventId)
+        .run();
+      return env.DB.batch(statements);
+    },
+  } as unknown as D1Database;
+
+  await trackEventPrimarySources(
+    {
+      db: dbWithConcurrentBump,
+      bodies: env.BODIES,
+      fetch: vi.fn() as unknown as typeof fetch,
+    },
+    env,
+    eventId,
+    [],
+    1000,
+  );
+
+  // event_articles was NOT inserted because expected revision was 1
+  const assigned = await env.DB.prepare(
+    "SELECT event_id FROM event_articles WHERE article_id=?",
+  )
+    .bind(mockArt)
+    .first();
+  expect(assigned).toBeNull();
+
+  // article MUST NOT be marked 'grouped' when it was not actually assigned
+  const artRow = await env.DB.prepare("SELECT stage FROM articles WHERE id=?")
+    .bind(mockArt)
+    .first<{ stage: string }>();
+  expect(artRow?.stage).toBe("analyzed");
+});
