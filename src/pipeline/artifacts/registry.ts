@@ -311,6 +311,7 @@ export const ARTIFACT_REGISTRY: Record<
       }
       return ctx.articles.some(
         (a) =>
+          a.contentType === "supply_chain" ||
           a.contentType === "market_trend" ||
           a.contentType === "company_move" ||
           a.contentType === "tool_or_product" ||

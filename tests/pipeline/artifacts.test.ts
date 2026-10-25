@@ -3241,4 +3241,92 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(stored.affectedOccupations[0].basis).toBe("speculative");
     expect(stored.affectedOccupations[0].citation).toBeNull();
   });
+
+  it("generates supply_chain_ripple_map when article has supply_chain content type", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          supply_chain: {
+            description: "Capacity, sourcing, logistics or supplier changes.",
+            weights: { sig: 4, nov: 2, cred: 2, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["operations"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('industry', 'Industrial Supply & Tech', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://industry.test/feed-sc', 'industry.test', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://industry.test/sc-article', 'https://industry.test/sc-article', 'Wafer Substrate Shortage', 'Summary.', 'shaWaferShort', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaWaferShort', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'supply_chain', '["operations"]', 75, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Substrate Shortage Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("supply_chain_ripple_map");
+  });
 });

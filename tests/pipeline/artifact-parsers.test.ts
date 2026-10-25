@@ -502,6 +502,128 @@ describe("Artifact Output Parsers (Issue #20)", () => {
       expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
       expect(res?.affectedIndustries[0].citation?.articleId).toBe(201);
     });
+
+    it("downgrades disputed or unverified claims to speculative (P2 defense)", () => {
+      const disputedMaterial: ArtifactEventMaterial = {
+        ...mockMaterial,
+        verifiedClaims: [
+          {
+            id: 103,
+            claimText: "Disputed packaging throughput claim.",
+            claimType: "prediction",
+            consensusStatus: "disputed", // Disputed!
+          },
+        ],
+      };
+
+      const payload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Packaging",
+            impact: "Throughput claims are challenged.",
+            transmissionPath: "Vendor debate.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 103,
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(payload),
+        disputedMaterial,
+      );
+      expect(res).not.toBeNull();
+      // Disputed claims cannot support evidence_based badge; must be downgraded
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("sanitizes hallucinated quote attached to a valid claimId (P1 defense)", () => {
+      const payload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face lead time expansion.",
+            transmissionPath: "Wafer volume exceeds packaging.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 101, // Valid claim!
+              articleId: 201,
+              quote: "Completely fabricated quote never present in body", // Fake quote!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(payload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.claimId).toBe(101);
+      // Fabricated quote must be stripped so it is not shown under Verified badge
+      expect(res?.affectedIndustries[0].citation?.quote).toBeUndefined();
+      expect(res?.affectedIndustries[0].citation?.articleId).toBeUndefined();
+    });
+
+    it("rejects quotes that only exist in AI summary or title and not raw bodyText (P1 defense)", () => {
+      const summaryQuotePayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              articleId: 201,
+              // This sentence is in article.summary but NOT in raw bodyText
+              quote: "Packaging delays impact shipment schedules.",
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(summaryQuotePayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      // Must be downgraded because summary is not raw proof
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("rejects whitespace or trivial quotes (P1 defense)", () => {
+      const trivialPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              articleId: 201,
+              quote: "   ",
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(trivialPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
   });
 
   describe("parseSupplyChainRippleMapOutput (Issue #21)", () => {

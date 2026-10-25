@@ -312,7 +312,7 @@ export async function generateEventArtifacts(
     verifiedClaims,
   };
 
-  // 4. Compute deterministic inputSha over all approved inputs
+  // 4. Compute deterministic inputSha over all approved inputs (including verified claims)
   const inputPayload = JSON.stringify({
     eventId,
     inputRevision,
@@ -321,6 +321,11 @@ export async function generateEventArtifacts(
       title: a.title,
       summary: a.summary,
       bodyExcerpt: a.bodyText ? a.bodyText.slice(0, 500) : "",
+    })),
+    verifiedClaims: verifiedClaims.map((c) => ({
+      id: c.id,
+      text: c.claimText,
+      consensus: c.consensusStatus,
     })),
     disclaimer: event.industry_disclaimer,
   });

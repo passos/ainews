@@ -459,8 +459,12 @@ describe("SkillsCareerTrendsCard", () => {
             decisionMaker: "Procurement VP",
             recommendationOrTradeoff:
               "Secure substrate allocation 12 months ahead.",
-            basis: "speculative",
-            citation: null,
+            basis: "evidence_based",
+            citation: {
+              claimId: 791,
+              sourceDomain: "semi.org",
+              quote: "Lead times hit 52 weeks.",
+            },
           },
         ],
       };
@@ -480,7 +484,11 @@ describe("SkillsCareerTrendsCard", () => {
       expect(html).toContain("Automotive Microcontrollers");
       expect(html).toContain("推测 / Speculative");
       expect(html).toContain("Packaging Design Engineer");
+      expect(html).toContain("[Claim #790]");
       expect(html).toContain("Procurement VP");
+      expect(html).toContain("[Claim #791]");
+      expect(html).toContain("(semi.org)");
+      expect(html).toContain("Lead times hit 52 weeks.");
       expect(html).toContain("Secure substrate allocation 12 months ahead.");
     });
   });

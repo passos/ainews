@@ -873,8 +873,8 @@ export function parseIndustryImpactReportOutput(
 
     // Semantic citation verification: if material is provided, verify evidence citations
     if (material) {
-      const validClaimIds = new Set(
-        material.verifiedClaims?.map((c) => c.id) || [],
+      const claimLookup = new Map(
+        (material.verifiedClaims || []).map((c) => [c.id, c]),
       );
       const articleLookup = new Map(material.articles.map((a) => [a.id, a]));
 
@@ -893,37 +893,82 @@ export function parseIndustryImpactReportOutput(
       ): T => {
         if (item.basis === "evidence_based") {
           let verified = false;
-          if (item.citation?.claimId !== undefined) {
-            if (validClaimIds.has(item.citation.claimId)) {
+          const sanitizedCitation = item.citation ? { ...item.citation } : null;
+
+          if (sanitizedCitation?.claimId !== undefined) {
+            const matchedClaim = claimLookup.get(sanitizedCitation.claimId);
+            // Must exist and must have consensusStatus 'verified'
+            // Disputed or unverified claims cannot support evidence_based
+            if (matchedClaim && matchedClaim.consensusStatus === "verified") {
               verified = true;
-            }
-          }
-          if (
-            !verified &&
-            item.citation?.articleId !== undefined &&
-            item.citation?.quote
-          ) {
-            const article = articleLookup.get(item.citation.articleId);
-            if (article) {
-              const fullArticleText =
-                `${article.title}\n${article.summary || ""}\n${article.bodyText || ""}`.toLowerCase();
-              if (
-                fullArticleText.includes(
-                  item.citation.quote.trim().toLowerCase(),
-                )
-              ) {
-                verified = true;
+              // If model additionally provided an attached quote, verify that it's in actual bodyText
+              if (sanitizedCitation.quote) {
+                const trimmedQuote = sanitizedCitation.quote.trim();
+                let quoteMatches = false;
+                if (trimmedQuote.length >= 5) {
+                  const targetArticles = sanitizedCitation.articleId
+                    ? [articleLookup.get(sanitizedCitation.articleId)].filter(
+                        Boolean,
+                      )
+                    : material.articles;
+                  for (const art of targetArticles) {
+                    if (
+                      art?.bodyText &&
+                      art.bodyText
+                        .toLowerCase()
+                        .includes(trimmedQuote.toLowerCase())
+                    ) {
+                      quoteMatches = true;
+                      break;
+                    }
+                  }
+                }
+                if (!quoteMatches) {
+                  // Do not display hallucinated quote alongside verified claim ID
+                  delete sanitizedCitation.quote;
+                  delete sanitizedCitation.articleId;
+                }
               }
             }
           }
+
+          // If not verified via claim, verify via direct raw bodyText quote
+          if (
+            !verified &&
+            sanitizedCitation?.quote &&
+            sanitizedCitation.quote.trim().length >= 5
+          ) {
+            const trimmedQuote = sanitizedCitation.quote.trim();
+            const targetArticles = sanitizedCitation.articleId
+              ? [articleLookup.get(sanitizedCitation.articleId)].filter(Boolean)
+              : material.articles;
+            for (const art of targetArticles) {
+              // Quote MUST come from actual raw bodyText, not AI summary or title
+              if (
+                art?.bodyText &&
+                art.bodyText.toLowerCase().includes(trimmedQuote.toLowerCase())
+              ) {
+                verified = true;
+                sanitizedCitation.articleId = art.id;
+                sanitizedCitation.sourceDomain = art.sourceDomain;
+                break;
+              }
+            }
+          }
+
           if (!verified) {
-            // Phantom or unverified citation: downgrade to speculative
+            // Phantom, disputed, or unverified citation: safely downgrade to speculative
             return {
               ...item,
               basis: "speculative",
               citation: null,
             };
           }
+
+          return {
+            ...item,
+            citation: sanitizedCitation,
+          };
         }
         return item;
       };

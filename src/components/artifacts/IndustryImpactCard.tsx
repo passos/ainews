@@ -66,8 +66,13 @@ export function IndustryImpactCard({
                   {item.basis === "evidence_based" && item.citation && (
                     <div className="mt-2 border-t border-border/40 pt-1.5 text-[0.68rem] text-muted-foreground">
                       {item.citation.claimId && (
-                        <span className="font-mono text-sec-ink">
+                        <span className="font-mono font-semibold text-sec-ink">
                           [Claim #{item.citation.claimId}]
+                        </span>
+                      )}{" "}
+                      {item.citation.sourceDomain && (
+                        <span className="font-mono text-[0.65rem] text-muted-foreground">
+                          ({item.citation.sourceDomain})
                         </span>
                       )}{" "}
                       {item.citation.quote && (
@@ -116,6 +121,25 @@ export function IndustryImpactCard({
                   <p className="mt-1 leading-relaxed text-muted-foreground">
                     {item.impact}
                   </p>
+                  {item.basis === "evidence_based" && item.citation && (
+                    <div className="mt-1.5 border-t border-border/30 pt-1 text-[0.65rem] text-muted-foreground">
+                      {item.citation.claimId && (
+                        <span className="font-mono font-semibold text-sec-ink">
+                          [Claim #{item.citation.claimId}]
+                        </span>
+                      )}{" "}
+                      {item.citation.sourceDomain && (
+                        <span className="font-mono text-[0.62rem] text-muted-foreground">
+                          ({item.citation.sourceDomain})
+                        </span>
+                      )}{" "}
+                      {item.citation.quote && (
+                        <span className="italic">
+                          &ldquo;{item.citation.quote}&rdquo;
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -147,6 +171,25 @@ export function IndustryImpactCard({
                   <p className="text-muted-foreground">
                     {rec.recommendationOrTradeoff}
                   </p>
+                  {rec.basis === "evidence_based" && rec.citation && (
+                    <div className="text-[0.65rem] text-muted-foreground">
+                      {rec.citation.claimId && (
+                        <span className="font-mono font-semibold text-sec-ink">
+                          [Claim #{rec.citation.claimId}]
+                        </span>
+                      )}{" "}
+                      {rec.citation.sourceDomain && (
+                        <span className="font-mono text-[0.62rem] text-muted-foreground">
+                          ({rec.citation.sourceDomain})
+                        </span>
+                      )}{" "}
+                      {rec.citation.quote && (
+                        <span className="italic">
+                          &ldquo;{rec.citation.quote}&rdquo;
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
