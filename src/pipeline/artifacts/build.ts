@@ -12,7 +12,11 @@ import {
   type ArtifactEligibilityContext,
   type ArticleMetadata,
 } from "./registry";
-import type { ArtifactArticleMaterial, ArtifactEventMaterial } from "./prompts";
+import type {
+  ArtifactArticleMaterial,
+  ArtifactEventMaterial,
+  ArtifactVerifiedClaim,
+} from "./prompts";
 import { syncRevisionDiff } from "../evidence/diff";
 
 export interface ArtifactDeps {
@@ -54,6 +58,14 @@ interface ApprovedArticleRow {
   total_score: number | null;
   content_type: string | null;
   evidence_tags: string | null;
+}
+
+interface ClaimRow {
+  id: number;
+  claim_text: string;
+  claim_type: string;
+  consensus_status: string;
+  reality_check?: string;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -117,11 +129,15 @@ export async function generateEventArtifacts(
   const deps = defaultDeps(env, overrides, commitNow);
 
   // 1. Atomic input snapshot: query event and its approved articles in a single batch
-  const [eventBatchResult, articleBatchResult, slotBatchResult] =
-    await deps.db.batch([
-      deps.db
-        .prepare(
-          `SELECT
+  const [
+    eventBatchResult,
+    articleBatchResult,
+    slotBatchResult,
+    claimBatchResult,
+  ] = await deps.db.batch([
+    deps.db
+      .prepare(
+        `SELECT
              e.id AS event_id,
              e.title AS event_title,
              e.revision AS event_revision,
@@ -134,11 +150,11 @@ export async function generateEventArtifacts(
            FROM events e
            JOIN industries i ON i.id = e.industry_id
            WHERE e.id = ?1`,
-        )
-        .bind(eventId),
-      deps.db
-        .prepare(
-          `SELECT
+      )
+      .bind(eventId),
+    deps.db
+      .prepare(
+        `SELECT
              a.id,
              COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
              COALESCE(NULLIF(a.summary_override, ''), NULLIF(an.summary_en, ''), a.summary) AS summary,
@@ -161,12 +177,23 @@ export async function generateEventArtifacts(
            )
            WHERE ea.event_id = ?1
            ORDER BY a.id ASC`,
-        )
-        .bind(eventId),
-      deps.db
-        .prepare("SELECT value FROM settings WHERE key = ?1")
-        .bind(SETTING_SLOTS),
-    ]);
+      )
+      .bind(eventId),
+    deps.db
+      .prepare("SELECT value FROM settings WHERE key = ?1")
+      .bind(SETTING_SLOTS),
+    deps.db
+      .prepare(
+        `SELECT id, claim_text, claim_type, consensus_status, reality_check
+           FROM claims
+           WHERE event_id = ?1
+             AND input_revision = (SELECT revision FROM events WHERE id = ?1)
+             AND status = 'published'
+             AND claim_text NOT LIKE '[%]'
+           ORDER BY id ASC`,
+      )
+      .bind(eventId),
+  ]);
 
   const event = (eventBatchResult.results?.[0] as EventRow | undefined) ?? null;
   if (!event) {
@@ -265,6 +292,16 @@ export async function generateEventArtifacts(
     }),
   );
 
+  const verifiedClaims: ArtifactVerifiedClaim[] = (
+    (claimBatchResult?.results as ClaimRow[] | undefined) ?? []
+  ).map((c) => ({
+    id: c.id,
+    claimText: c.claim_text,
+    claimType: c.claim_type,
+    consensusStatus: c.consensus_status,
+    realityCheck: c.reality_check,
+  }));
+
   const material: ArtifactEventMaterial = {
     eventId,
     eventTitle: articleMaterials[0]?.title || event.event_title,
@@ -272,6 +309,7 @@ export async function generateEventArtifacts(
     industrySlug: event.industry_slug,
     disclaimer: event.industry_disclaimer,
     articles: articleMaterials,
+    verifiedClaims,
   };
 
   // 4. Compute deterministic inputSha over all approved inputs
@@ -332,7 +370,7 @@ export async function generateEventArtifacts(
       }
 
       // Validate output schema
-      const parsed = def.parseOutput(res.text, aud);
+      const parsed = def.parseOutput(res.text, aud, material);
       if (!parsed) {
         console.error({
           error: "failed to parse artifact output against schema",

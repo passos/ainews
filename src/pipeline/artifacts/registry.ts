@@ -11,34 +11,40 @@ import {
   EDUCATION_EVIDENCE_PROMPT_VERSION,
   FINANCE_CONCEPT_PROMPT_VERSION,
   FINANCE_REALITY_CHECK_PROMPT_VERSION,
+  INDUSTRY_IMPACT_PROMPT_VERSION,
   LEARNING_MATERIAL_PROMPT_VERSION,
   POLICY_IMPACT_PROMPT_VERSION,
   REGULATION_WATCH_PROMPT_VERSION,
   RESEARCH_PAPER_DECODER_PROMPT_VERSION,
   SKILLS_CAREER_PROMPT_VERSION,
   STORY_BRIEF_PROMPT_VERSION,
+  SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION,
   buildAudienceExplainRequest,
   buildClassroomDiscussionBuilderRequest,
   buildEducationEvidenceCheckerRequest,
   buildFinanceConceptExplainerRequest,
   buildFinanceRealityCheckRequest,
+  buildIndustryImpactReportRequest,
   buildLearningMaterialRequest,
   buildPolicyImpactExplorerRequest,
   buildRegulationWatchRequest,
   buildResearchPaperDecoderRequest,
   buildSkillsCareerTrendsRequest,
   buildStoryBriefRequest,
+  buildSupplyChainRippleMapRequest,
   parseAudienceExplainOutput,
   parseClassroomDiscussionBuilderOutput,
   parseEducationEvidenceCheckerOutput,
   parseFinanceConceptExplainerOutput,
   parseFinanceRealityCheckOutput,
+  parseIndustryImpactReportOutput,
   parseLearningMaterialOutput,
   parsePolicyImpactExplorerOutput,
   parseRegulationWatchOutput,
   parseResearchPaperDecoderOutput,
   parseSkillsCareerTrendsOutput,
   parseStoryBriefOutput,
+  parseSupplyChainRippleMapOutput,
   type ArtifactEventMaterial,
 } from "./prompts";
 
@@ -67,7 +73,11 @@ export interface ArtifactDefinition {
     material: ArtifactEventMaterial,
     audience?: string,
   ) => TextRequest;
-  parseOutput: (rawText: string, audience?: string) => unknown | null;
+  parseOutput: (
+    rawText: string,
+    audience?: string,
+    material?: ArtifactEventMaterial,
+  ) => unknown | null;
 }
 
 export const ARTIFACT_REGISTRY: Record<
@@ -259,5 +269,56 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildSkillsCareerTrendsRequest(material),
     parseOutput: (rawText) => parseSkillsCareerTrendsOutput(rawText),
+  },
+
+  industry_impact_report: {
+    type: "industry_impact_report",
+    audiences: [""],
+    promptVersion: INDUSTRY_IMPACT_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      // Industry vertical deep intelligence, or cross-vertical breakthrough/macro moves
+      if (ctx.industrySlug === "industry") {
+        return true;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold &&
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "market_trend" ||
+            a.contentType === "company_move" ||
+            a.contentType === "industry_event" ||
+            a.contentType === "tool_or_product",
+        )
+      );
+    },
+    buildRequest: (material) => buildIndustryImpactReportRequest(material),
+    parseOutput: (rawText, _aud, material) =>
+      parseIndustryImpactReportOutput(rawText, material),
+  },
+
+  supply_chain_ripple_map: {
+    type: "supply_chain_ripple_map",
+    audiences: [""],
+    promptVersion: SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      // Newsren §3: Industry vertical exclusive feature
+      if (ctx.industrySlug !== "industry") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "market_trend" ||
+          a.contentType === "company_move" ||
+          a.contentType === "tool_or_product" ||
+          a.evidenceTags.includes("supply_chain") ||
+          a.evidenceTags.includes("hardware"),
+      );
+    },
+    buildRequest: (material) => buildSupplyChainRippleMapRequest(material),
+    parseOutput: (rawText) => parseSupplyChainRippleMapOutput(rawText),
   },
 };

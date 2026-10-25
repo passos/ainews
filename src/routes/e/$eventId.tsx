@@ -12,6 +12,8 @@ import { PolicyImpactCard } from "../../components/artifacts/PolicyImpactCard";
 import { RegulationWatchCard } from "../../components/artifacts/RegulationWatchCard";
 import { SkillsCareerTrendsCard } from "../../components/artifacts/SkillsCareerTrendsCard";
 import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
+import { IndustryImpactCard } from "../../components/artifacts/IndustryImpactCard";
+import { SupplyChainRippleCard } from "../../components/artifacts/SupplyChainRippleCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import { getEvent, getEventSources } from "../../server/publication/api";
@@ -151,6 +153,14 @@ function EventPage() {
 
       {artifacts?.skillsCareerTrends && (
         <SkillsCareerTrendsCard trends={artifacts.skillsCareerTrends} />
+      )}
+
+      {artifacts?.industryImpact && (
+        <IndustryImpactCard report={artifacts.industryImpact} />
+      )}
+
+      {artifacts?.supplyChainRipple && (
+        <SupplyChainRippleCard ripple={artifacts.supplyChainRipple} />
       )}
 
       {corrections.length > 0 && (

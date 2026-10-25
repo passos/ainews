@@ -91,6 +91,69 @@ function makeAllValidFakeTransport(): ModelTransport {
         trainingRecommendations: ["Train"],
       };
     }
+    if (
+      s.includes("cross-industry intelligence analyst") ||
+      s.includes("Industry Impact Report") ||
+      s.includes("affectedIndustries")
+    ) {
+      return {
+        summary: "Cross-industry transmission overview",
+        affectedIndustries: [
+          {
+            industry: "Semiconductors",
+            impact: "Lead time expansion",
+            transmissionPath: "Capacity shortage",
+            basis: "speculative",
+            citation: null,
+          },
+        ],
+        affectedOccupations: [
+          {
+            role: "Silicon Architect",
+            impact: "Toolchain updates",
+            timeframe: "short_term",
+            basis: "speculative",
+            citation: null,
+          },
+        ],
+        decisionImplications: [
+          {
+            decisionMaker: "Procurement",
+            recommendationOrTradeoff: "Dual source",
+            basis: "speculative",
+            citation: null,
+          },
+        ],
+      };
+    }
+    if (
+      s.includes("supply chain modeling specialist") ||
+      s.includes("Supply-Chain Ripple Map") ||
+      s.includes("upstreamRipples")
+    ) {
+      return {
+        focalNode: "Fab Expansion",
+        upstreamRipples: [
+          {
+            target: "Optics",
+            effect: "Lead times tighten",
+            transmissionChannel: "Order pull-forward",
+            isHypothesis: true,
+            confidence: "high",
+          },
+        ],
+        downstreamRipples: [
+          {
+            target: "Motherboard OEMs",
+            effect: "Component allocations",
+            transmissionChannel: "ASIC volume",
+            isHypothesis: true,
+            confidence: "medium",
+          },
+        ],
+        keyHypotheses: ["Supplier buffer inventory is adequate."],
+      };
+    }
     if (s.includes("Policy Impact Explorer") || s.includes("policyName")) {
       return {
         policyName: "Policy",
@@ -2756,5 +2819,426 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("story_brief");
     expect(types).not.toContain("policy_impact_explorer");
+  });
+
+  it("generates industry_impact_report and supply_chain_ripple_map for Industry vertical events (Issue #21)", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          market_trend: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["supply_chain"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('industry', 'Industrial Supply & Tech', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://industry.test/feed', 'industry.test', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://industry.test/fab-expansion', 'https://industry.test/fab-expansion', 'Foundry Expands Advanced Node Fab Capacity', 'Summary of fab expansion.', 'shaFabExp', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaFabExp', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'market_trend', '["supply_chain"]', 85, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Fab Expansion Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    // Insert a verified claim for this event and revision
+    const claim = await env.DB.prepare(
+      `INSERT INTO claims (event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at)
+       VALUES (?1, 'Foundry commits $12B to advanced packaging expansion.', 'fact', 'verified', 0, 'published', 1, 'claims-v1', 'mock-model', 1000)
+       RETURNING id`,
+    )
+      .bind(event!.id)
+      .first<{ id: number }>();
+
+    // Custom transport returning verified claim citation
+    const transport = makeFakeTransport((_model, input) => {
+      const s = JSON.stringify(input);
+      if (
+        s.includes("Industry Impact Report") ||
+        s.includes("affectedIndustries")
+      ) {
+        return {
+          summary: "Foundry expansion alters packaging landscape.",
+          affectedIndustries: [
+            {
+              industry: "Advanced Packaging",
+              impact: "Lead time buffer contracts.",
+              transmissionPath: "Capacity absorption.",
+              basis: "evidence_based",
+              citation: {
+                claimId: claim!.id,
+                quote: "Foundry commits $12B to advanced packaging expansion.",
+              },
+            },
+          ],
+          affectedOccupations: [
+            {
+              role: "Substrate Layout Specialist",
+              impact: "Toolchain updates required.",
+              timeframe: "immediate",
+              basis: "evidence_based",
+              citation: { claimId: claim!.id },
+            },
+          ],
+          decisionImplications: [
+            {
+              decisionMaker: "Procurement VP",
+              recommendationOrTradeoff: "Pre-book substrate volume.",
+              basis: "speculative",
+              citation: null,
+            },
+          ],
+        };
+      }
+      if (
+        s.includes("Supply-Chain Ripple Map") ||
+        s.includes("upstreamRipples")
+      ) {
+        return {
+          focalNode: "Foundry 3nm expansion",
+          upstreamRipples: [
+            {
+              target: "EUV Optics",
+              effect: "High-NA mirrors delivery accelerates.",
+              transmissionChannel: "Order pull-forward.",
+              isHypothesis: true,
+              confidence: "high",
+            },
+          ],
+          downstreamRipples: [
+            {
+              target: "Hyperscale Server Motherboards",
+              effect: "Component allocation constraints.",
+              transmissionChannel: "High ASIC run-rate.",
+              isHypothesis: true,
+              confidence: "medium",
+            },
+          ],
+          keyHypotheses: ["Supplier yield reaches 85% by Q3."],
+        };
+      }
+      return {
+        whatHappened: "Fab expansion happened.",
+        whatIsNew: "New fab node.",
+        whatEvidenceExists: "Evidence exists.",
+        whatToWatchNext: "Next milestones.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type, content FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string; content: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("industry_impact_report");
+    expect(types).toContain("supply_chain_ripple_map");
+
+    // Verify stored content
+    const impactRow = rows.results.find(
+      (r) => r.type === "industry_impact_report",
+    );
+    expect(impactRow).toBeDefined();
+    const parsedImpact = JSON.parse(impactRow!.content);
+    expect(parsedImpact.affectedIndustries[0].basis).toBe("evidence_based");
+    expect(parsedImpact.affectedIndustries[0].citation.claimId).toBe(claim!.id);
+
+    const rippleRow = rows.results.find(
+      (r) => r.type === "supply_chain_ripple_map",
+    );
+    expect(rippleRow).toBeDefined();
+    const parsedRipple = JSON.parse(rippleRow!.content);
+    expect(parsedRipple.upstreamRipples[0].isHypothesis).toBe(true);
+    expect(parsedRipple.downstreamRipples[0].isHypothesis).toBe(true);
+  });
+
+  it("M3 mutation test: isolates supply_chain_ripple_map to Industry vertical only", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          market_trend: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["supply_chain"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    // Technology vertical
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('technology', 'Technology', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech.test/feed', 'tech.test', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech.test/article', 'https://tech.test/article', 'Tech Fab Article', 'Summary.', 'shaTechFab', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechFab', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'market_trend', '["supply_chain"]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Tech Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    // supply_chain_ripple_map MUST NOT be generated for technology vertical
+    expect(types).not.toContain("supply_chain_ripple_map");
+    // Cross-vertical industry_impact_report IS generated for deep events (95 >= 90)
+    expect(types).toContain("industry_impact_report");
+  });
+
+  it("M4 mutation test: automatically downgrades phantom claim citations to speculative in pipeline", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          market_trend: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["supply_chain"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('industry', 'Industrial Supply & Tech', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://industry.test/feed2', 'industry.test', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://industry.test/art2', 'https://industry.test/art2', 'Industry News 2', 'Summary.', 'shaInd2', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaInd2', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'market_trend', '["supply_chain"]', 80, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Phantom Claim Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    // Transport outputs claimId: 88888 (phantom citation not in DB)
+    const transport = makeFakeTransport((_model, input) => {
+      const s = JSON.stringify(input);
+      if (
+        s.includes("Industry Impact Report") ||
+        s.includes("affectedIndustries")
+      ) {
+        return {
+          summary: "Phantom citation test.",
+          affectedIndustries: [
+            {
+              industry: "Advanced Packaging",
+              impact: "Lead time buffer contracts.",
+              transmissionPath: "Capacity absorption.",
+              basis: "evidence_based",
+              citation: {
+                claimId: 88888, // Phantom claimId!
+              },
+            },
+          ],
+          affectedOccupations: [
+            {
+              role: "Substrate Specialist",
+              impact: "Toolchain updates required.",
+              timeframe: "immediate",
+              basis: "evidence_based",
+              citation: { claimId: 88888 },
+            },
+          ],
+          decisionImplications: [
+            {
+              decisionMaker: "Procurement VP",
+              recommendationOrTradeoff: "Pre-book substrate volume.",
+              basis: "speculative",
+              citation: null,
+            },
+          ],
+        };
+      }
+      return {
+        whatHappened: "Event happened.",
+        whatIsNew: "Novelty.",
+        whatEvidenceExists: "Evidence exists.",
+        whatToWatchNext: "Next.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const row = await env.DB.prepare(
+      "SELECT content FROM event_artifacts WHERE event_id = ?1 AND type = 'industry_impact_report'",
+    )
+      .bind(event!.id)
+      .first<{ content: string }>();
+
+    expect(row).toBeDefined();
+    const stored = JSON.parse(row!.content);
+    // Phantom claim citations must be safely downgraded to speculative and citation cleared
+    expect(stored.affectedIndustries[0].basis).toBe("speculative");
+    expect(stored.affectedIndustries[0].citation).toBeNull();
+    expect(stored.affectedOccupations[0].basis).toBe("speculative");
+    expect(stored.affectedOccupations[0].citation).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import {
   educationEvidenceCheckerSchema,
   financeConceptExplainerSchema,
   financeRealityCheckSchema,
+  industryImpactReportSchema,
   learningMaterialSchema,
   policyImpactExplorerSchema,
   regulationWatchSchema,
@@ -15,6 +16,7 @@ import {
   revisionDiffSchema,
   skillsCareerTrendsSchema,
   storyBriefSchema,
+  supplyChainRippleMapSchema,
 } from "../../lib/artifacts/types";
 import type { EventEvidenceView } from "../../lib/evidence/types";
 import {
@@ -106,6 +108,8 @@ export async function getEvent(
     regulationWatch: null,
     financeConcept: null,
     skillsCareerTrends: null,
+    industryImpact: null,
+    supplyChainRipple: null,
   };
 
   for (const row of artifactRows) {
@@ -151,6 +155,12 @@ export async function getEvent(
       } else if (row.type === "skills_career_trends") {
         const res = skillsCareerTrendsSchema.safeParse(parsedJson);
         if (res.success) artifacts.skillsCareerTrends = res.data;
+      } else if (row.type === "industry_impact_report") {
+        const res = industryImpactReportSchema.safeParse(parsedJson);
+        if (res.success) artifacts.industryImpact = res.data;
+      } else if (row.type === "supply_chain_ripple_map") {
+        const res = supplyChainRippleMapSchema.safeParse(parsedJson);
+        if (res.success) artifacts.supplyChainRipple = res.data;
       }
     } catch {
       // ignore invalid json in publication layer

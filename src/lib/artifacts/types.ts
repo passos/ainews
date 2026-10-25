@@ -13,6 +13,8 @@ export const ARTIFACT_TYPES = [
   "regulation_watch",
   "finance_concept_explainer",
   "skills_career_trends",
+  "industry_impact_report",
+  "supply_chain_ripple_map",
 ] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
@@ -269,6 +271,114 @@ export const skillsCareerTrendsSchema = z.strictObject({
 export type SkillsCareerTrends = z.infer<typeof skillsCareerTrendsSchema>;
 
 // -----------------------------------------------------------------------------
+// Industry Impact Report Schema & Type (Newsren §2.4)
+// -----------------------------------------------------------------------------
+
+export const impactCitationSchema = z.strictObject({
+  claimId: z.number().int().positive().optional(),
+  articleId: z.number().int().positive().optional(),
+  sourceDomain: z.string().min(1).optional(),
+  quote: z.string().min(1).optional(),
+});
+export type ImpactCitation = z.infer<typeof impactCitationSchema>;
+
+export const industryImpactItemSchema = z
+  .strictObject({
+    industry: z.string().min(1),
+    impact: z.string().min(1),
+    transmissionPath: z.string().min(1),
+    basis: z.enum(["evidence_based", "speculative"]),
+    citation: impactCitationSchema.nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.basis === "evidence_based") {
+      if (!val.citation || (!val.citation.claimId && !val.citation.quote)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Evidence-based industry impact items must provide a citation with claimId or quote.",
+          path: ["citation"],
+        });
+      }
+    }
+  });
+export type IndustryImpactItem = z.infer<typeof industryImpactItemSchema>;
+
+export const occupationImpactItemSchema = z
+  .strictObject({
+    role: z.string().min(1),
+    impact: z.string().min(1),
+    timeframe: z.enum(["immediate", "short_term", "long_term"]),
+    basis: z.enum(["evidence_based", "speculative"]),
+    citation: impactCitationSchema.nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.basis === "evidence_based") {
+      if (!val.citation || (!val.citation.claimId && !val.citation.quote)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Evidence-based occupation impact items must provide a citation with claimId or quote.",
+          path: ["citation"],
+        });
+      }
+    }
+  });
+export type OccupationImpactItem = z.infer<typeof occupationImpactItemSchema>;
+
+export const decisionImplicationItemSchema = z
+  .strictObject({
+    decisionMaker: z.string().min(1),
+    recommendationOrTradeoff: z.string().min(1),
+    basis: z.enum(["evidence_based", "speculative"]),
+    citation: impactCitationSchema.nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.basis === "evidence_based") {
+      if (!val.citation || (!val.citation.claimId && !val.citation.quote)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Evidence-based decision implications must provide a citation with claimId or quote.",
+          path: ["citation"],
+        });
+      }
+    }
+  });
+export type DecisionImplicationItem = z.infer<
+  typeof decisionImplicationItemSchema
+>;
+
+export const industryImpactReportSchema = z.strictObject({
+  summary: z.string().min(1),
+  affectedIndustries: z.array(industryImpactItemSchema).min(1),
+  affectedOccupations: z.array(occupationImpactItemSchema).min(1),
+  decisionImplications: z.array(decisionImplicationItemSchema).min(1),
+});
+export type IndustryImpactReport = z.infer<typeof industryImpactReportSchema>;
+
+// -----------------------------------------------------------------------------
+// Supply-Chain Ripple Map Schema & Type (Newsren §3 Industry)
+// -----------------------------------------------------------------------------
+
+export const rippleEffectSchema = z.strictObject({
+  target: z.string().min(1),
+  effect: z.string().min(1),
+  transmissionChannel: z.string().min(1),
+  isHypothesis: z.literal(true),
+  confidence: z.enum(["high", "medium", "low"]).default("medium"),
+});
+export type RippleEffect = z.infer<typeof rippleEffectSchema>;
+
+export const supplyChainRippleMapSchema = z.strictObject({
+  focalNode: z.string().min(1),
+  upstreamRipples: z.array(rippleEffectSchema),
+  downstreamRipples: z.array(rippleEffectSchema),
+  keyHypotheses: z.array(z.string().min(1)).min(1),
+});
+export type SupplyChainRippleMap = z.infer<typeof supplyChainRippleMapSchema>;
+
+// -----------------------------------------------------------------------------
 // Aggregate view of published event artifacts
 // -----------------------------------------------------------------------------
 
@@ -285,4 +395,6 @@ export interface EventArtifactsView {
   regulationWatch?: RegulationWatch | null;
   financeConcept?: FinanceConceptExplainer | null;
   skillsCareerTrends?: SkillsCareerTrends | null;
+  industryImpact?: IndustryImpactReport | null;
+  supplyChainRipple?: SupplyChainRippleMap | null;
 }
