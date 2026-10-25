@@ -71,6 +71,13 @@ function AdminLayout() {
               Watches
             </Link>
             <Link
+              to="/admin/companies"
+              activeProps={{ className: "text-foreground font-semibold" }}
+              className="hover:text-foreground"
+            >
+              Companies
+            </Link>
+            <Link
               to="/admin/industries"
               activeProps={{ className: "text-foreground font-semibold" }}
               className="hover:text-foreground"

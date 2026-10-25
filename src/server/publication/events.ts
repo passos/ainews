@@ -6,6 +6,7 @@ import {
   audienceExplainSchema,
   classroomDiscussionBuilderSchema,
   educationEvidenceCheckerSchema,
+  earningsDecoderSchema,
   financeConceptExplainerSchema,
   financeRealityCheckSchema,
   industryImpactReportSchema,
@@ -110,6 +111,7 @@ export async function getEvent(
     skillsCareerTrends: null,
     industryImpact: null,
     supplyChainRipple: null,
+    earningsDecoder: null,
   };
 
   for (const row of artifactRows) {
@@ -161,6 +163,9 @@ export async function getEvent(
       } else if (row.type === "supply_chain_ripple_map") {
         const res = supplyChainRippleMapSchema.safeParse(parsedJson);
         if (res.success) artifacts.supplyChainRipple = res.data;
+      } else if (row.type === "earnings_decoder") {
+        const res = earningsDecoderSchema.safeParse(parsedJson);
+        if (res.success) artifacts.earningsDecoder = res.data;
       }
     } catch {
       // ignore invalid json in publication layer

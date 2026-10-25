@@ -15,6 +15,7 @@ export const ARTIFACT_TYPES = [
   "skills_career_trends",
   "industry_impact_report",
   "supply_chain_ripple_map",
+  "earnings_decoder",
 ] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
@@ -379,6 +380,65 @@ export const supplyChainRippleMapSchema = z.strictObject({
 export type SupplyChainRippleMap = z.infer<typeof supplyChainRippleMapSchema>;
 
 // -----------------------------------------------------------------------------
+// Earnings Decoder Schema & Type (Newsren §4 Finance, §103, §139)
+// -----------------------------------------------------------------------------
+
+export const factCitationSchema = z.strictObject({
+  factId: z.number().int().positive().optional(),
+  secUrl: z.string().url().optional(),
+  quote: z.string().optional(),
+  periodEnd: z.string().optional(),
+});
+export type FactCitation = z.infer<typeof factCitationSchema>;
+
+export const earningsMetricSchema = z.strictObject({
+  metricName: z.string().min(1),
+  concept: z.string().min(1),
+  unit: z.string().min(1),
+  reportedValue: z.string().min(1),
+  reportedCitation: factCitationSchema,
+  priorPeriodValue: z.string().optional(),
+  priorPeriodCitation: factCitationSchema.optional(),
+  priorYearValue: z.string().optional(),
+  priorYearCitation: factCitationSchema.optional(),
+  guidanceRange: z
+    .strictObject({
+      low: z.string().optional(),
+      high: z.string().optional(),
+      midpoint: z.string().optional(),
+      quote: z.string().optional(),
+      secUrl: z.string().url().optional(),
+    })
+    .optional(),
+  guidanceComparison: z.enum(["above", "within", "below", "not_provided"]),
+  deltaQoQPercent: z.string().optional(),
+  deltaYoYPercent: z.string().optional(),
+});
+export type EarningsMetric = z.infer<typeof earningsMetricSchema>;
+
+export const earningsDecoderSchema = z.strictObject({
+  company: z.strictObject({
+    ticker: z.string().min(1),
+    name: z.string().min(1),
+    cik: z.string().min(1),
+  }),
+  filing: z.strictObject({
+    form: z.string().min(1),
+    fiscalYear: z.number().int().optional(),
+    fiscalPeriod: z.string().min(1).optional(),
+    filingDate: z.string().min(1),
+    secUrl: z.string().url(),
+    accessionNumber: z.string().min(1),
+  }),
+  metrics: z.array(earningsMetricSchema).min(1),
+  executiveSummary: z.string().min(1),
+  keyDrivers: z.array(z.string().min(1)).min(1),
+  forwardGuidance: z.array(z.string().min(1)).optional(),
+  disclaimer: z.string().min(1),
+});
+export type EarningsDecoder = z.infer<typeof earningsDecoderSchema>;
+
+// -----------------------------------------------------------------------------
 // Aggregate view of published event artifacts
 // -----------------------------------------------------------------------------
 
@@ -397,4 +457,5 @@ export interface EventArtifactsView {
   skillsCareerTrends?: SkillsCareerTrends | null;
   industryImpact?: IndustryImpactReport | null;
   supplyChainRipple?: SupplyChainRippleMap | null;
+  earningsDecoder?: EarningsDecoder | null;
 }

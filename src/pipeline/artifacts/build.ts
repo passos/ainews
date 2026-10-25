@@ -15,8 +15,14 @@ import {
 import type {
   ArtifactArticleMaterial,
   ArtifactEventMaterial,
+  ArtifactFilingMaterial,
+  ArtifactFinancialFactMaterial,
   ArtifactVerifiedClaim,
 } from "./prompts";
+import {
+  compareFinancialMetrics,
+  type FactWithMetadata,
+} from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
 
 export interface ArtifactDeps {
@@ -208,8 +214,10 @@ export async function generateEventArtifacts(
 
   const inputRevision = event.event_revision;
 
-  // Resolve write slot model name from settings if configured
+  // Resolve write and reason slot model names from settings if configured
   let modelName = DEFAULT_SLOTS.write.model;
+  let reasonModelName =
+    DEFAULT_SLOTS.reason?.model || "google/gemini-3.8-flash";
   const slotVal = (
     slotBatchResult.results?.[0] as { value?: string } | undefined
   )?.value;
@@ -218,6 +226,9 @@ export async function generateEventArtifacts(
       const parsed = JSON.parse(slotVal);
       if (parsed?.write?.model) {
         modelName = parsed.write.model;
+      }
+      if (parsed?.reason?.model) {
+        reasonModelName = parsed.reason.model;
       }
     } catch {
       // ignore JSON parse error in settings
@@ -302,6 +313,266 @@ export async function generateEventArtifacts(
     realityCheck: c.reality_check,
   }));
 
+  // 3.1 For Finance events, fetch approved filing & associated XBRL financial facts
+  let filingMaterial: ArtifactFilingMaterial | undefined;
+  let financialFactsList: ArtifactFinancialFactMaterial[] = [];
+  let calculatedMetrics:
+    import("../../lib/artifacts/types").EarningsMetric[] | undefined;
+
+  if (event.industry_slug === FINANCE_SLUG && articleMaterials.length > 0) {
+    const articleIds = articleMaterials.map((a) => a.id);
+    const placeholders = articleIds.map(() => "?").join(",");
+    const filingRow = await deps.db
+      .prepare(
+        `SELECT f.*, c.ticker, c.name as company_name, c.cik as company_cik
+         FROM filings f
+         JOIN companies c ON c.id = f.company_id
+         WHERE f.article_id IN (${placeholders})
+         ORDER BY f.filing_date DESC LIMIT 1`,
+      )
+      .bind(...articleIds)
+      .first<{
+        id: number;
+        accession_number: string;
+        form: string;
+        filing_date: string;
+        report_date: string | null;
+        sec_url: string;
+        fiscal_year: number | null;
+        fiscal_period: string | null;
+        ticker: string;
+        company_name: string;
+        company_cik: string;
+        company_id: number;
+      }>();
+
+    if (filingRow) {
+      filingMaterial = {
+        id: filingRow.id,
+        accessionNumber: filingRow.accession_number,
+        form: filingRow.form,
+        filingDate: filingRow.filing_date,
+        reportDate: filingRow.report_date,
+        secUrl: filingRow.sec_url,
+        fiscalYear: filingRow.fiscal_year,
+        fiscalPeriod: filingRow.fiscal_period,
+        companyTicker: filingRow.ticker,
+        companyName: filingRow.company_name,
+        companyCik: filingRow.company_cik,
+      };
+
+      // Query active financial facts for this filing (superseded_by IS NULL)
+      const factsRows = await deps.db
+        .prepare(
+          `SELECT id, taxonomy, concept, unit, val, period_start, period_end, fiscal_year, fiscal_period, sec_url
+           FROM financial_facts
+           WHERE filing_id = ?1 AND superseded_by IS NULL
+           ORDER BY id ASC`,
+        )
+        .bind(filingRow.id)
+        .all<{
+          id: number;
+          taxonomy: string;
+          concept: string;
+          unit: string;
+          val: string;
+          period_start: string | null;
+          period_end: string;
+          fiscal_year: number | null;
+          fiscal_period: string | null;
+          sec_url: string;
+        }>();
+
+      financialFactsList = (factsRows.results || []).map((f) => ({
+        id: f.id,
+        taxonomy: f.taxonomy,
+        concept: f.concept,
+        unit: f.unit,
+        val: f.val,
+        periodStart: f.period_start,
+        periodEnd: f.period_end,
+        fiscalYear: f.fiscal_year,
+        fiscalPeriod: f.fiscal_period,
+        secUrl: f.sec_url,
+      }));
+
+      // Query historical approved facts for QoQ and YoY comparisons
+      const priorFactsRows = await deps.db
+        .prepare(
+          `SELECT ff.id, ff.taxonomy, ff.concept, ff.unit, ff.val, ff.period_start, ff.period_end, ff.fiscal_year, ff.fiscal_period, ff.sec_url
+           FROM financial_facts ff
+           JOIN filings fl ON fl.id = ff.filing_id
+           JOIN articles a ON a.id = fl.article_id
+           WHERE ff.company_id = ?1
+             AND fl.id != ?2
+             AND EXISTS (
+               SELECT 1 FROM reviews r
+               WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+             )
+           ORDER BY ff.period_end DESC, ff.id DESC`,
+        )
+        .bind(filingRow.company_id, filingRow.id)
+        .all<{
+          id: number;
+          taxonomy: string;
+          concept: string;
+          unit: string;
+          val: string;
+          period_start: string | null;
+          period_end: string;
+          fiscal_year: number | null;
+          fiscal_period: string | null;
+          sec_url: string;
+        }>();
+
+      const currentFactsForComp: FactWithMetadata[] = financialFactsList.map(
+        (f) => ({
+          taxonomy: f.taxonomy,
+          concept: f.concept,
+          label: f.concept,
+          unit: f.unit,
+          val: f.val,
+          periodStart: f.periodStart ?? undefined,
+          periodEnd: f.periodEnd,
+          fiscalYear: f.fiscalYear ?? undefined,
+          fiscalPeriod: f.fiscalPeriod ?? undefined,
+          filedDate: filingRow.filing_date,
+          accessionNumber: filingRow.accession_number,
+          factId: f.id,
+          secUrl: f.secUrl,
+        }),
+      );
+
+      const priorFactsMap = new Map<string, FactWithMetadata>();
+      const priorYearFactsMap = new Map<string, FactWithMetadata>();
+
+      const candidateRows = priorFactsRows.results || [];
+
+      for (const cur of currentFactsForComp) {
+        const matchingCandidates = candidateRows.filter(
+          (c) => c.concept === cur.concept && c.unit === cur.unit,
+        );
+        if (matchingCandidates.length === 0) continue;
+
+        const curEndMs = Date.parse(cur.periodEnd);
+        const curStartMs = cur.periodStart ? Date.parse(cur.periodStart) : NaN;
+        const curDurationDays =
+          !isNaN(curStartMs) && !isNaN(curEndMs)
+            ? (curEndMs - curStartMs) / (1000 * 3600 * 24)
+            : null;
+
+        // 1. Select YoY (same quarter / period of previous year)
+        let yoyCandidate: (typeof matchingCandidates)[0] | undefined;
+        if (cur.fiscalYear && cur.fiscalPeriod) {
+          yoyCandidate = matchingCandidates.find(
+            (c) =>
+              c.fiscal_year === cur.fiscalYear! - 1 &&
+              c.fiscal_period === cur.fiscalPeriod,
+          );
+        }
+        if (!yoyCandidate && !isNaN(curEndMs)) {
+          yoyCandidate = matchingCandidates.find((c) => {
+            const cEndMs = Date.parse(c.period_end);
+            if (isNaN(cEndMs)) return false;
+            const diffDays = (curEndMs - cEndMs) / (1000 * 3600 * 24);
+            if (diffDays < 300 || diffDays > 430) return false;
+            if (curDurationDays !== null && c.period_start) {
+              const cStartMs = Date.parse(c.period_start);
+              if (!isNaN(cStartMs)) {
+                const cDurationDays = (cEndMs - cStartMs) / (1000 * 3600 * 24);
+                if (Math.abs(cDurationDays - curDurationDays) > 35)
+                  return false;
+              }
+            }
+            return true;
+          });
+        }
+
+        if (yoyCandidate) {
+          priorYearFactsMap.set(cur.concept, {
+            taxonomy: yoyCandidate.taxonomy,
+            concept: yoyCandidate.concept,
+            label: yoyCandidate.concept,
+            unit: yoyCandidate.unit,
+            val: yoyCandidate.val,
+            periodStart: yoyCandidate.period_start ?? undefined,
+            periodEnd: yoyCandidate.period_end,
+            fiscalYear: yoyCandidate.fiscal_year ?? undefined,
+            fiscalPeriod: yoyCandidate.fiscal_period ?? undefined,
+            filedDate: "",
+            accessionNumber: "",
+            factId: yoyCandidate.id,
+            secUrl: yoyCandidate.sec_url,
+          });
+        }
+
+        // 2. Select QoQ (sequential previous quarter)
+        let qoqCandidate: (typeof matchingCandidates)[0] | undefined;
+        if (cur.fiscalYear && cur.fiscalPeriod) {
+          let targetQoqYear = cur.fiscalYear;
+          let targetQoqPeriod: string | undefined;
+          if (cur.fiscalPeriod === "Q2") targetQoqPeriod = "Q1";
+          else if (cur.fiscalPeriod === "Q3") targetQoqPeriod = "Q2";
+          else if (cur.fiscalPeriod === "Q4") targetQoqPeriod = "Q3";
+          else if (cur.fiscalPeriod === "Q1") {
+            targetQoqPeriod = "Q4";
+            targetQoqYear = cur.fiscalYear - 1;
+          }
+
+          if (targetQoqPeriod) {
+            qoqCandidate = matchingCandidates.find(
+              (c) =>
+                c.fiscal_year === targetQoqYear &&
+                c.fiscal_period === targetQoqPeriod,
+            );
+          }
+        }
+
+        if (!qoqCandidate && !isNaN(curEndMs)) {
+          qoqCandidate = matchingCandidates.find((c) => {
+            const cEndMs = Date.parse(c.period_end);
+            if (isNaN(cEndMs)) return false;
+            const diffDays = (curEndMs - cEndMs) / (1000 * 3600 * 24);
+            if (diffDays < 55 || diffDays > 125) return false;
+            if (curDurationDays !== null && c.period_start) {
+              const cStartMs = Date.parse(c.period_start);
+              if (!isNaN(cStartMs)) {
+                const cDurationDays = (cEndMs - cStartMs) / (1000 * 3600 * 24);
+                if (Math.abs(cDurationDays - curDurationDays) > 35)
+                  return false;
+              }
+            }
+            return true;
+          });
+        }
+
+        if (qoqCandidate) {
+          priorFactsMap.set(cur.concept, {
+            taxonomy: qoqCandidate.taxonomy,
+            concept: qoqCandidate.concept,
+            label: qoqCandidate.concept,
+            unit: qoqCandidate.unit,
+            val: qoqCandidate.val,
+            periodStart: qoqCandidate.period_start ?? undefined,
+            periodEnd: qoqCandidate.period_end,
+            fiscalYear: qoqCandidate.fiscal_year ?? undefined,
+            fiscalPeriod: qoqCandidate.fiscal_period ?? undefined,
+            filedDate: "",
+            accessionNumber: "",
+            factId: qoqCandidate.id,
+            secUrl: qoqCandidate.sec_url,
+          });
+        }
+      }
+
+      calculatedMetrics = compareFinancialMetrics(
+        currentFactsForComp,
+        priorFactsMap,
+        priorYearFactsMap,
+      );
+    }
+  }
+
   const material: ArtifactEventMaterial = {
     eventId,
     eventTitle: articleMaterials[0]?.title || event.event_title,
@@ -310,9 +581,12 @@ export async function generateEventArtifacts(
     disclaimer: event.industry_disclaimer,
     articles: articleMaterials,
     verifiedClaims,
+    filing: filingMaterial,
+    financialFacts: financialFactsList,
+    calculatedMetrics,
   };
 
-  // 4. Compute deterministic inputSha over all approved inputs (including verified claims)
+  // 4. Compute deterministic inputSha over all approved inputs (including verified claims & facts)
   const inputPayload = JSON.stringify({
     eventId,
     inputRevision,
@@ -326,6 +600,23 @@ export async function generateEventArtifacts(
       id: c.id,
       text: c.claimText,
       consensus: c.consensusStatus,
+    })),
+    financialFacts: financialFactsList.map((f) => ({
+      concept: f.concept,
+      val: f.val,
+      periodEnd: f.periodEnd,
+    })),
+    calculatedMetrics: (calculatedMetrics || []).map((m) => ({
+      concept: m.concept,
+      unit: m.unit,
+      reportedValue: m.reportedValue,
+      reportedCitation: m.reportedCitation,
+      priorPeriodValue: m.priorPeriodValue,
+      priorPeriodCitation: m.priorPeriodCitation,
+      priorYearValue: m.priorYearValue,
+      priorYearCitation: m.priorYearCitation,
+      deltaQoQPercent: m.deltaQoQPercent,
+      deltaYoYPercent: m.deltaYoYPercent,
     })),
     disclaimer: event.industry_disclaimer,
   });
@@ -361,7 +652,8 @@ export async function generateEventArtifacts(
       const req = def.buildRequest(material, aud);
       const logicalKey = `artifact:${eventId}:${def.type}:${aud || "default"}:${inputRevision}:${inputSha}:${def.promptVersion}`;
 
-      const res = await deps.models.generateText("write", logicalKey, req);
+      const slot = def.slot ?? "write";
+      const res = await deps.models.generateText(slot, logicalKey, req);
 
       // Verify completion reason
       if (res.finishReason !== "STOP") {
@@ -388,6 +680,7 @@ export async function generateEventArtifacts(
       }
 
       const contentJson = JSON.stringify(parsed);
+      const artifactModel = slot === "reason" ? reasonModelName : modelName;
 
       // Atomic conditional insert: only write if events.revision is still inputRevision
       const insertResult = await deps.db
@@ -405,7 +698,7 @@ export async function generateEventArtifacts(
           aud,
           inputRevision,
           def.promptVersion,
-          modelName,
+          artifactModel,
           contentJson,
           initialStatus,
           deps.now(),

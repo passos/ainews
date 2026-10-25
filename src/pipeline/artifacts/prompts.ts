@@ -12,9 +12,12 @@ import {
   type SkillsCareerTrends,
   type StoryBrief,
   type SupplyChainRippleMap,
+  type EarningsDecoder,
+  type EarningsMetric,
   audienceExplainSchema,
   classroomDiscussionBuilderSchema,
   educationEvidenceCheckerSchema,
+  earningsDecoderSchema,
   financeConceptExplainerSchema,
   financeRealityCheckSchema,
   industryImpactReportSchema,
@@ -42,6 +45,7 @@ export const FINANCE_CONCEPT_PROMPT_VERSION = "finance-concept-v1";
 export const SKILLS_CAREER_PROMPT_VERSION = "skills-career-v1";
 export const INDUSTRY_IMPACT_PROMPT_VERSION = "industry-impact-v1";
 export const SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION = "supply-chain-ripple-v1";
+export const EARNINGS_DECODER_PROMPT_VERSION = "earnings-decoder-v1";
 
 export const BRIEF_MAX_OUTPUT_TOKENS = 1500;
 export const EXPLAIN_MAX_OUTPUT_TOKENS = 2000;
@@ -67,6 +71,33 @@ export interface ArtifactVerifiedClaim {
   realityCheck?: string;
 }
 
+export interface ArtifactFinancialFactMaterial {
+  id: number;
+  taxonomy: string;
+  concept: string;
+  unit: string;
+  val: string;
+  periodStart?: string | null;
+  periodEnd: string;
+  fiscalYear?: number | null;
+  fiscalPeriod?: string | null;
+  secUrl: string;
+}
+
+export interface ArtifactFilingMaterial {
+  id: number;
+  accessionNumber: string;
+  form: string;
+  filingDate: string;
+  reportDate?: string | null;
+  secUrl: string;
+  fiscalYear?: number | null;
+  fiscalPeriod?: string | null;
+  companyTicker: string;
+  companyName: string;
+  companyCik: string;
+}
+
 export interface ArtifactEventMaterial {
   eventId: number;
   eventTitle: string;
@@ -75,6 +106,9 @@ export interface ArtifactEventMaterial {
   disclaimer?: string | null;
   articles: ArtifactArticleMaterial[];
   verifiedClaims?: ArtifactVerifiedClaim[];
+  financialFacts?: ArtifactFinancialFactMaterial[];
+  filing?: ArtifactFilingMaterial;
+  calculatedMetrics?: EarningsMetric[];
 }
 
 function formatArticlesContext(
@@ -1059,6 +1093,161 @@ export function parseSupplyChainRippleMapOutput(
     const jsonStr = extractJsonText(rawText);
     const parsed = JSON.parse(jsonStr);
     const res = supplyChainRippleMapSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Earnings Decoder (Newsren §4 Finance, §103, §139)
+// -----------------------------------------------------------------------------
+
+export function buildEarningsDecoderRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const filing = material.filing;
+  const company = filing
+    ? `${filing.companyName} (${filing.companyTicker}, CIK: ${filing.companyCik})`
+    : material.eventTitle;
+
+  const metricsTable = (material.calculatedMetrics ?? [])
+    .map((m) => {
+      const parts = [
+        `- ${m.metricName} (${m.concept}): Reported=${m.reportedValue} ${m.unit}`,
+      ];
+      if (m.priorPeriodValue) {
+        parts.push(
+          `PriorQuarter=${m.priorPeriodValue} (${m.deltaQoQPercent ?? "N/A"})`,
+        );
+      }
+      if (m.priorYearValue) {
+        parts.push(
+          `PriorYear=${m.priorYearValue} (${m.deltaYoYPercent ?? "N/A"})`,
+        );
+      }
+      if (m.guidanceComparison && m.guidanceComparison !== "not_provided") {
+        parts.push(`GuidanceComparison=${m.guidanceComparison}`);
+      }
+      return parts.join(" | ");
+    })
+    .join("\n");
+
+  const system = [
+    `You are an expert financial journalist and SEC filing analyst for Personal News (${material.industryName}).`,
+    `Your task is to write a comprehensive, evidence-grounded Earnings Decoder briefing for ${company}.`,
+    "FINANCE SECTION GUARDRAILS (Newsren §4, MANDATORY):",
+    "1. Education and factual reporting only: NO buy/sell/hold ratings, NO price targets, NO trade execution advice, and NO predictive stock assertions.",
+    "2. Every financial figure discussed in your analysis MUST be directly traceable to the verified XBRL facts and filing context provided.",
+    "3. Never invent, extrapolate, or hallucinate non-reported financial figures.",
+    "4. Highlight management operating context, revenue drivers, margin trends, and forward commentary.",
+    `Produce a JSON object matching this schema:
+{
+  "executiveSummary": "2-4 paragraphs summarizing overall performance, reported figures versus prior periods and guidance, and strategic significance.",
+  "keyDrivers": [
+    "Key driver 1 detailing segment performance or major business trend.",
+    "Key driver 2 detailing cost, margin, or operational dynamic."
+  ],
+  "forwardGuidance": [
+    "Optional bullet summarizing management forward outlook or stated expectations if present."
+  ]
+}`,
+    "- Output valid raw JSON only, without markdown code fences or conversational filler.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Company: ${company}`,
+    filing
+      ? `Filing: Form ${filing.form} (Accession: ${filing.accessionNumber}, Filed: ${filing.filingDate})`
+      : "",
+    "\nPre-computed Verified Financial Facts & Period Comparisons:",
+    metricsTable || "No pre-computed metrics provided.",
+    "\nFiling Document Context & Source Text:",
+    formatArticlesContext(material.articles),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseEarningsDecoderOutput(
+  rawText: string,
+  material?: ArtifactEventMaterial,
+): EarningsDecoder | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+
+    const filing = material?.filing;
+    const companyInfo = {
+      ticker: filing?.companyTicker || "N/A",
+      name: filing?.companyName || material?.eventTitle || "Company",
+      cik: filing?.companyCik || "0000000000",
+    };
+
+    let fy = filing?.fiscalYear;
+    if (!fy && material?.financialFacts?.[0]?.fiscalYear) {
+      fy = material.financialFacts[0].fiscalYear;
+    }
+    if (!fy && filing?.reportDate) {
+      const parsed = parseInt(filing.reportDate.slice(0, 4), 10);
+      if (!isNaN(parsed) && parsed > 1990 && parsed < 2100) fy = parsed;
+    }
+    if (!fy && filing?.filingDate) {
+      const parsed = parseInt(filing.filingDate.slice(0, 4), 10);
+      if (!isNaN(parsed) && parsed > 1990 && parsed < 2100) fy = parsed;
+    }
+
+    const filingInfo = {
+      form: filing?.form || "10-Q",
+      fiscalYear: fy,
+      fiscalPeriod:
+        filing?.fiscalPeriod ||
+        material?.financialFacts?.[0]?.fiscalPeriod ||
+        "N/A",
+      filingDate: filing?.filingDate || "N/A",
+      secUrl: filing?.secUrl || "https://www.sec.gov/edgar",
+      accessionNumber: filing?.accessionNumber || "0000000000-00-000000",
+    };
+
+    // In pipeline execution (when material is provided), strictly require deterministic pre-computed metrics
+    let metrics: EarningsMetric[] = [];
+    if (material) {
+      if (
+        !material.calculatedMetrics ||
+        material.calculatedMetrics.length === 0
+      ) {
+        return null;
+      }
+      metrics = material.calculatedMetrics;
+    } else if (Array.isArray(parsed.metrics) && parsed.metrics.length > 0) {
+      metrics = parsed.metrics;
+    }
+
+    if (metrics.length === 0) {
+      return null;
+    }
+
+    const payload = {
+      company: parsed.company || companyInfo,
+      filing: parsed.filing || filingInfo,
+      metrics,
+      executiveSummary: parsed.executiveSummary,
+      keyDrivers: parsed.keyDrivers,
+      forwardGuidance: parsed.forwardGuidance,
+      disclaimer:
+        "本简报仅供资讯与学习参考，基于公开 SEC 申报文件生成，不构成任何投资建议、买卖要约或金融决策依据。",
+    };
+
+    const res = earningsDecoderSchema.safeParse(payload);
     return res.success ? res.data : null;
   } catch {
     return null;

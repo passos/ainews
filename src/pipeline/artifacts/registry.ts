@@ -19,6 +19,7 @@ import {
   SKILLS_CAREER_PROMPT_VERSION,
   STORY_BRIEF_PROMPT_VERSION,
   SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION,
+  EARNINGS_DECODER_PROMPT_VERSION,
   buildAudienceExplainRequest,
   buildClassroomDiscussionBuilderRequest,
   buildEducationEvidenceCheckerRequest,
@@ -32,6 +33,7 @@ import {
   buildSkillsCareerTrendsRequest,
   buildStoryBriefRequest,
   buildSupplyChainRippleMapRequest,
+  buildEarningsDecoderRequest,
   parseAudienceExplainOutput,
   parseClassroomDiscussionBuilderOutput,
   parseEducationEvidenceCheckerOutput,
@@ -45,6 +47,7 @@ import {
   parseSkillsCareerTrendsOutput,
   parseStoryBriefOutput,
   parseSupplyChainRippleMapOutput,
+  parseEarningsDecoderOutput,
   type ArtifactEventMaterial,
 } from "./prompts";
 
@@ -66,6 +69,7 @@ export interface ArtifactEligibilityContext {
 
 export interface ArtifactDefinition {
   type: ArtifactType;
+  slot?: "write" | "reason";
   audiences: readonly (ArtifactAudience | "")[];
   promptVersion: string;
   isEligible: (ctx: ArtifactEligibilityContext) => boolean;
@@ -321,5 +325,27 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildSupplyChainRippleMapRequest(material),
     parseOutput: (rawText) => parseSupplyChainRippleMapOutput(rawText),
+  },
+
+  earnings_decoder: {
+    type: "earnings_decoder",
+    slot: "reason",
+    audiences: [""],
+    promptVersion: EARNINGS_DECODER_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      // Newsren §4 Finance vertical exclusive feature
+      if (ctx.industrySlug !== FINANCE_SLUG) return false;
+      return ctx.articles.some(
+        (a) =>
+          a.sourceDomain.includes("sec.gov") ||
+          a.contentType === "earnings_report" ||
+          a.contentType === "sec_filing" ||
+          a.evidenceTags.includes("sec_filing") ||
+          a.evidenceTags.includes("financial_results"),
+      );
+    },
+    buildRequest: (material) => buildEarningsDecoderRequest(material),
+    parseOutput: (rawText, _aud, material) =>
+      parseEarningsDecoderOutput(rawText, material),
   },
 };

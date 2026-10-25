@@ -68,6 +68,7 @@ export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {
   SITE_URL?: string;
   ADMIN_EMAIL?: string;
   EMAIL_FROM?: string;
+  SEC_USER_AGENT?: string;
   COLLECT_ENABLED?: string;
   MODEL_CALLS_ENABLED?: string;
   EMAIL_ENABLED?: string;
