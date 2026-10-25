@@ -18,6 +18,10 @@ import {
   getEvent as readEvent,
   getEventSources as readEventSources,
 } from "./events";
+import {
+  getWatchView as readWatchView,
+  getActiveWatchesView as readActiveWatches,
+} from "./watches";
 
 export const getHome = createServerFn({ method: "GET" }).handler(() =>
   readHome(getDb(env.DB)),
@@ -59,3 +63,13 @@ export const getDigest = createServerFn({ method: "GET" })
 export const getRecentDigests = createServerFn({ method: "GET" })
   .validator(sectionInput)
   .handler(({ data }) => readRecentDigests(getDb(env.DB), data.slug));
+
+const watchInput = z.object({ slug: z.string().min(1).max(64) });
+
+export const getWatch = createServerFn({ method: "GET" })
+  .validator(watchInput)
+  .handler(({ data }) => readWatchView(getDb(env.DB), data.slug));
+
+export const getPublicWatches = createServerFn({ method: "GET" }).handler(() =>
+  readActiveWatches(getDb(env.DB)),
+);

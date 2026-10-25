@@ -1414,3 +1414,213 @@ export async function createQuestion(
 
   return Number(res.meta.last_row_id);
 }
+
+export interface AdminWatchItem {
+  id: number;
+  slug: string;
+  question: string;
+  criteria: string;
+  keywords: string[];
+  industryId: number | null;
+  industryName: string | null;
+  status: "active" | "paused";
+  hitCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function listWatches(
+  database: D1Database,
+): Promise<AdminWatchItem[]> {
+  const { results } = await database
+    .prepare(
+      `SELECT
+        w.id,
+        w.slug,
+        w.question,
+        w.criteria,
+        w.keywords,
+        w.industry_id,
+        i.name AS industry_name,
+        w.status,
+        w.created_at,
+        w.updated_at,
+        (SELECT COUNT(*) FROM watch_hits wh WHERE wh.watch_id = w.id) AS hit_count
+      FROM watches w
+      LEFT JOIN industries i ON i.id = w.industry_id
+      ORDER BY w.created_at DESC`,
+    )
+    .all<{
+      id: number;
+      slug: string;
+      question: string;
+      criteria: string;
+      keywords: string;
+      industry_id: number | null;
+      industry_name: string | null;
+      status: "active" | "paused";
+      created_at: number;
+      updated_at: number;
+      hit_count: number;
+    }>();
+
+  if (!results) return [];
+
+  return results.map((r) => {
+    let keywords: string[] = [];
+    try {
+      const parsed = JSON.parse(r.keywords);
+      if (Array.isArray(parsed)) {
+        keywords = parsed.filter((k): k is string => typeof k === "string");
+      }
+    } catch {
+      keywords = r.keywords
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    return {
+      id: r.id,
+      slug: r.slug,
+      question: r.question,
+      criteria: r.criteria,
+      keywords,
+      industryId: r.industry_id,
+      industryName: r.industry_name,
+      status: r.status,
+      hitCount: Number(r.hit_count),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  });
+}
+
+export async function createWatch(
+  database: D1Database,
+  data: {
+    slug: string;
+    question: string;
+    criteria: string;
+    keywords: string[];
+    industryId?: number | null;
+    status?: "active" | "paused";
+  },
+  now = Date.now(),
+): Promise<number> {
+  const res = await database
+    .prepare(
+      `INSERT INTO watches (
+        slug, question, criteria, keywords, industry_id, status, created_at, updated_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+    )
+    .bind(
+      data.slug.trim(),
+      data.question.trim(),
+      data.criteria.trim(),
+      JSON.stringify(data.keywords),
+      data.industryId ?? null,
+      data.status ?? "active",
+      now,
+      now,
+    )
+    .run();
+
+  return Number(res.meta.last_row_id);
+}
+
+export async function updateWatch(
+  database: D1Database,
+  data: {
+    id: number;
+    question?: string;
+    criteria?: string;
+    keywords?: string[];
+    industryId?: number | null;
+    status?: "active" | "paused";
+  },
+  now = Date.now(),
+): Promise<void> {
+  const updates: string[] = ["updated_at = ?2"];
+  const values: unknown[] = [data.id, now];
+  let paramIndex = 3;
+
+  if (data.question !== undefined) {
+    updates.push(`question = ?${paramIndex++}`);
+    values.push(data.question.trim());
+  }
+  if (data.criteria !== undefined) {
+    updates.push(`criteria = ?${paramIndex++}`);
+    values.push(data.criteria.trim());
+  }
+  if (data.keywords !== undefined) {
+    updates.push(`keywords = ?${paramIndex++}`);
+    values.push(JSON.stringify(data.keywords));
+  }
+  if (data.industryId !== undefined) {
+    updates.push(`industry_id = ?${paramIndex++}`);
+    values.push(data.industryId);
+  }
+  if (data.status !== undefined) {
+    updates.push(`status = ?${paramIndex}`);
+    values.push(data.status);
+  }
+
+  await database
+    .prepare(`UPDATE watches SET ${updates.join(", ")} WHERE id = ?1`)
+    .bind(...values)
+    .run();
+}
+
+export async function listWatchHits(
+  database: D1Database,
+  watchId: number,
+): Promise<
+  {
+    id: number;
+    eventId: number;
+    eventTitle: string;
+    eventRevision: number;
+    hitAt: number;
+    summary: string;
+    rationale: string;
+  }[]
+> {
+  const { results } = await database
+    .prepare(
+      `SELECT
+        wh.id,
+        wh.event_id,
+        e.title AS event_title,
+        wh.event_revision,
+        wh.hit_at,
+        wh.summary,
+        wh.rationale
+      FROM watch_hits wh
+      JOIN events e ON e.id = wh.event_id
+      WHERE wh.watch_id = ?1
+      ORDER BY wh.hit_at DESC`,
+    )
+    .bind(watchId)
+    .all<{
+      id: number;
+      event_id: number;
+      event_title: string;
+      event_revision: number;
+      hit_at: number;
+      summary: string;
+      rationale: string;
+    }>();
+
+  if (!results) return [];
+
+  return results.map((r) => ({
+    id: r.id,
+    eventId: r.event_id,
+    eventTitle: r.event_title,
+    eventRevision: r.event_revision,
+    hitAt: r.hit_at,
+    summary: r.summary,
+    rationale: r.rationale,
+  }));
+}

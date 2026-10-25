@@ -17,3 +17,4 @@ export * from "./questions";
 export * from "./reviews";
 export * from "./settings";
 export * from "./sources";
+export * from "./watches";

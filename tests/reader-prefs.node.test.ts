@@ -3,6 +3,7 @@ import {
   parsePrefs,
   serializePrefs,
   toggleSection,
+  toggleWatch,
   withAudience,
   withTheme,
 } from "../src/lib/reader-prefs";
@@ -54,14 +55,27 @@ describe("parsePrefs", () => {
     expect(parsePrefs('{"sections":{"a":1}}')).toEqual({});
   });
 
-  it("preserves unknown fields (#17 adds watches)", () => {
-    const prefs = parsePrefs('{"audience":"student","watches":[{"id":1}]}');
-    expect(prefs).toEqual({ audience: "student", watches: [{ id: 1 }] });
+  it("drops watches that are not an array of strings", () => {
+    expect(parsePrefs('{"watches":"gpt-5"}')).toEqual({});
+    expect(parsePrefs('{"watches":["gpt-5",3]}')).toEqual({});
+    expect(parsePrefs('{"watches":{"a":1}}')).toEqual({});
+  });
+
+  it("keeps valid watches array of strings", () => {
+    expect(parsePrefs('{"watches":["gpt-5","claude-4"]}')).toEqual({
+      watches: ["gpt-5", "claude-4"],
+    });
+  });
+
+  it("preserves unknown fields", () => {
+    const prefs = parsePrefs('{"audience":"student","custom_flag":{"id":1}}');
+    expect(prefs).toEqual({ audience: "student", custom_flag: { id: 1 } });
   });
 });
 
 describe("updates", () => {
-  const raw = '{"audience":"student","watches":[1],"sections":["finance"]}';
+  const raw =
+    '{"audience":"student","custom":123,"sections":["finance"],"watches":["gpt-5"]}';
 
   it("withAudience keeps unknown fields", () => {
     const next = JSON.parse(
@@ -69,8 +83,9 @@ describe("updates", () => {
     );
     expect(next).toEqual({
       audience: "educator",
-      watches: [1],
+      custom: 123,
       sections: ["finance"],
+      watches: ["gpt-5"],
     });
   });
 
@@ -78,8 +93,9 @@ describe("updates", () => {
     const next = JSON.parse(serializePrefs(withTheme(parsePrefs(raw), "dark")));
     expect(next).toEqual({
       audience: "student",
-      watches: [1],
+      custom: 123,
       sections: ["finance"],
+      watches: ["gpt-5"],
       theme: "dark",
     });
   });
@@ -89,12 +105,26 @@ describe("updates", () => {
     expect(added.sections).toEqual(["finance", "education"]);
     const removed = toggleSection(added, "finance");
     expect(removed.sections).toEqual(["education"]);
-    expect(removed.watches).toEqual([1]);
+    expect(removed.watches).toEqual(["gpt-5"]);
   });
 
   it("toggleSection starts from no preference", () => {
     expect(toggleSection({}, "technology")).toEqual({
       sections: ["technology"],
+    });
+  });
+
+  it("toggleWatch adds and removes a watch slug, once", () => {
+    const added = toggleWatch(parsePrefs(raw), "gemini-benchmark");
+    expect(added.watches).toEqual(["gpt-5", "gemini-benchmark"]);
+    const removed = toggleWatch(added, "gpt-5");
+    expect(removed.watches).toEqual(["gemini-benchmark"]);
+    expect(removed.sections).toEqual(["finance"]);
+  });
+
+  it("toggleWatch starts from no preference", () => {
+    expect(toggleWatch({}, "gpt-5")).toEqual({
+      watches: ["gpt-5"],
     });
   });
 });

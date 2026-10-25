@@ -220,8 +220,15 @@ export interface HomeSection extends SectionInfo {
   articles: ArticleView[];
 }
 
+export interface HomeWatchItem {
+  slug: string;
+  question: string;
+}
+
 /** The newest approved articles of every section, for the home page. */
-export async function getHome(db: Db): Promise<{ sections: HomeSection[] }> {
+export async function getHome(
+  db: Db,
+): Promise<{ sections: HomeSection[]; watches: HomeWatchItem[] }> {
   const sections: HomeSection[] = [];
   // One query per section: each reads only its newest rows from the index.
   for (const s of await listSections(db)) {
@@ -232,7 +239,12 @@ export async function getHome(db: Db): Promise<{ sections: HomeSection[] }> {
       LIMIT ${HOME_PER_SECTION}`);
     sections.push({ ...s, articles: toViews(rows) });
   }
-  return { sections };
+
+  const watchRows = await db.all<HomeWatchItem>(sql`
+    SELECT slug, question FROM watches WHERE status = 'active' ORDER BY created_at DESC
+  `);
+
+  return { sections, watches: watchRows };
 }
 
 export interface PublicCorrection {

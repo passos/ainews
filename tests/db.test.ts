@@ -112,6 +112,8 @@ it("migrations create the core tables", async () => {
     "settings",
     "source_candidates",
     "sources",
+    "watch_hits",
+    "watches",
   ]);
 });
 

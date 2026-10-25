@@ -14,6 +14,8 @@ export interface ReaderPrefs {
   theme?: Theme;
   /** Section slugs the reader follows. */
   sections?: string[];
+  /** Topic watch slugs the reader follows. */
+  watches?: string[];
   [unknown: string]: unknown;
 }
 
@@ -48,6 +50,12 @@ export function parsePrefs(raw: string | null): ReaderPrefs {
   ) {
     delete prefs.sections;
   }
+  if (
+    !Array.isArray(prefs.watches) ||
+    !prefs.watches.every((s) => typeof s === "string")
+  ) {
+    delete prefs.watches;
+  }
   return prefs;
 }
 
@@ -69,6 +77,14 @@ export function toggleSection(prefs: ReaderPrefs, slug: string): ReaderPrefs {
     ? current.filter((s) => s !== slug)
     : [...current, slug];
   return { ...prefs, sections };
+}
+
+export function toggleWatch(prefs: ReaderPrefs, slug: string): ReaderPrefs {
+  const current = prefs.watches ?? [];
+  const watches = current.includes(slug)
+    ? current.filter((s) => s !== slug)
+    : [...current, slug];
+  return { ...prefs, watches };
 }
 
 // Browser side. Every access is guarded: private mode and blocked storage

@@ -4,6 +4,7 @@ import { enqueueDueDigests } from "./digest/schedule";
 import { enqueueDueEvidence } from "./evidence/schedule";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
+import { enqueueDueWatches } from "./watch/schedule";
 
 /** Cron, every 10 minutes (wrangler.jsonc). */
 export async function runScheduled(
@@ -17,6 +18,7 @@ export async function runScheduled(
   const digests = await enqueueDueDigests(env, now);
   const artifacts = await enqueueDueArtifacts(env, now);
   const evidence = await enqueueDueEvidence(env, now);
+  const watches = await enqueueDueWatches(env, now);
   console.log({
     cron: controller.cron,
     claimed: claimed.length,
@@ -24,5 +26,6 @@ export async function runScheduled(
     digests: digests.length,
     artifacts: artifacts.length,
     evidence: evidence.length,
+    watches: watches.length,
   });
 }
