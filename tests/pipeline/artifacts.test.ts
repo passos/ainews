@@ -790,8 +790,9 @@ describe("generateEventArtifacts", () => {
       .bind(event!.id)
       .first<{ type: string; status: string; content: string }>();
 
-    expect(decoderRow).toBeDefined();
+    expect(decoderRow).not.toBeNull();
     expect(decoderRow?.type).toBe("research_paper_decoder");
+    expect(decoderRow?.status).toBe("published");
   });
 
   it("protects against revision race conditions (stale revision does not insert)", async () => {
@@ -1642,8 +1643,9 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(event!.id)
       .first<{ type: string; status: string; content: string }>();
 
-    expect(policyRow).toBeDefined();
+    expect(policyRow).not.toBeNull();
     expect(policyRow?.type).toBe("policy_impact_explorer");
+    expect(policyRow?.status).toBe("published");
   });
 
   it("never generates Education editorial products in non-education sectors", async () => {
