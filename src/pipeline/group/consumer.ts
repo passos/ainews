@@ -98,6 +98,7 @@ export async function handleGroupBatch(
         }
         await sendGenerate(env, [
           { kind: "artifacts", eventId: result.eventId },
+          { kind: "evidence", eventId: result.eventId },
         ]);
       }
       msg.ack();

@@ -6,6 +6,7 @@ import {
   researchPaperDecoderSchema,
   storyBriefSchema,
 } from "../../lib/artifacts/types";
+import type { EventEvidenceView } from "../../lib/evidence/types";
 import {
   approvedArticleWhere,
   CARD_COLUMNS,
@@ -13,12 +14,10 @@ import {
   toViews,
   type ArticleView,
   type CardRow,
+  type Db,
   type SectionInfo,
 } from "./articles";
-
-type Db = {
-  all<T>(query: unknown): Promise<T[]>;
-};
+import { getEventEvidence } from "./evidence";
 
 export interface EventView {
   id: number;
@@ -27,6 +26,7 @@ export interface EventView {
   articles: ArticleView[];
   corrections: string[];
   artifacts: EventArtifactsView;
+  evidence: EventEvidenceView;
 }
 
 export interface EventSourceView {
@@ -104,6 +104,8 @@ export async function getEvent(
     }
   }
 
+  const evidence = await getEventEvidence(db, eventId);
+
   return {
     id: eventId,
     // Event public title: title of earliest approved article (refinement invariant 7)
@@ -112,6 +114,7 @@ export async function getEvent(
     articles,
     corrections: correctionRows.map((c) => c.body),
     artifacts,
+    evidence,
   };
 }
 

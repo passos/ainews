@@ -50,6 +50,13 @@ function AdminLayout() {
               Artifacts
             </Link>
             <Link
+              to="/admin/evidence"
+              activeProps={{ className: "text-foreground font-semibold" }}
+              className="hover:text-foreground"
+            >
+              Evidence
+            </Link>
+            <Link
               to="/admin/industries"
               activeProps={{ className: "text-foreground font-semibold" }}
               className="hover:text-foreground"
