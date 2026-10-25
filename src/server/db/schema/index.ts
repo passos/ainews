@@ -14,6 +14,7 @@ export * from "./events";
 export * from "./fetch-hosts";
 export * from "./filings";
 export * from "./financial-facts";
+export * from "./funding-rounds";
 export * from "./industries";
 export * from "./llm-calls";
 export * from "./questions";

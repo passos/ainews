@@ -3,6 +3,7 @@ import { scheduleDueSources } from "./collect/schedule";
 import { enqueueDueDigests } from "./digest/schedule";
 import { pollDueCompanies } from "./edgar/schedule";
 import { enqueueDueEvidence } from "./evidence/schedule";
+import { enqueueDueFunding } from "./funding/schedule";
 import { trackDuePrimarySources } from "./evidence/primary";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
@@ -23,6 +24,7 @@ export async function runScheduled(
   const evidence = await enqueueDueEvidence(env, now);
   const watches = await enqueueDueWatches(env, now);
   const edgar = await pollDueCompanies(env, now);
+  const funding = await enqueueDueFunding(env, now);
   console.log({
     cron: controller.cron,
     claimed: claimed.length,
@@ -33,5 +35,6 @@ export async function runScheduled(
     evidence: evidence.length,
     watches: watches.length,
     edgar: edgar.polledCount,
+    funding: funding.length,
   });
 }

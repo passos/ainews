@@ -6,6 +6,7 @@ import {
 import { generateEventArtifacts } from "../artifacts/build";
 import { answerQuestion } from "../ask/answer";
 import { buildDigest } from "../digest/build";
+import { extractFundingRounds } from "../funding/extract";
 import { generateEventEvidence } from "../evidence/build";
 import { runDiscovery, type DiscoverDeps } from "../discover/run";
 import { evaluateEventWatches, type WatchDeps } from "../watch/evaluate";
@@ -69,6 +70,9 @@ export async function handleGenerateBatch(
             Date.now(),
             overrides.watchDeps,
           );
+          break;
+        case "funding":
+          await extractFundingRounds(env, body.articleId, Date.now(), deps);
           break;
         default:
           console.error({

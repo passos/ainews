@@ -95,6 +95,14 @@ function SectionPage() {
               Weekly Digest
             </Link>
           )}
+          {section.slug === "finance" && (
+            <Link
+              to="/funding"
+              className="font-mono text-xs font-bold uppercase tracking-wider underline hover:text-sec-ink"
+            >
+              Funding Tracker
+            </Link>
+          )}
           <a
             href={`/rss/${section.slug}.xml`}
             className="font-mono text-xs font-bold uppercase tracking-wider underline"

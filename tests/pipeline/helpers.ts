@@ -69,6 +69,7 @@ export async function resetPipeline(): Promise<void> {
       "financial_facts",
       "filings",
       "companies",
+      "funding_rounds",
       "reviews",
       "analyses",
       "article_sightings",

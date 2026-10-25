@@ -1,6 +1,11 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
+import {
+  supersedeFundingRound,
+  type FundingRow,
+} from "../../pipeline/funding/extract";
+import { convertToMicroUsd } from "../../lib/funding/normalize";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -1730,4 +1735,196 @@ export async function toggleCompanyTracking(
     .prepare("UPDATE companies SET tracked = ?2, updated_at = ?3 WHERE id = ?1")
     .bind(companyId, tracked ? 1 : 0, now)
     .run();
+}
+
+// -----------------------------------------------------------------------------
+// Funding rounds (#23). Finance is always human-reviewed: extraction writes
+// `pending_review`; only these functions publish or reject.
+// -----------------------------------------------------------------------------
+
+export interface PendingFundingRoundView {
+  id: number;
+  companyName: string;
+  roundName: string;
+  stage: string;
+  sector: string;
+  amount: number | null;
+  currency: string;
+  valuation: number | null;
+  investors: string[];
+  leadInvestors: string[];
+  announcedDate: string | null;
+  sourceUrl: string;
+  sourceCount: number;
+  correctionReason: string | null;
+  /** The published version this one would replace, if any. */
+  previousId: number | null;
+  previousAmount: number | null;
+  previousCurrency: string | null;
+  createdAt: number;
+}
+
+function parseJsonArray(json: string): unknown[] {
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listPendingFundingRounds(
+  database: D1Database,
+): Promise<PendingFundingRoundView[]> {
+  const { results } = await database
+    .prepare(
+      `SELECT f.id, f.company_name, f.round_name, f.stage, f.sector, f.amount,
+              f.currency, f.valuation, f.investors, f.lead_investors,
+              f.announced_date, f.source_url, f.source_articles,
+              f.correction_reason, f.created_at,
+              p.id AS previous_id, p.amount AS previous_amount,
+              p.currency AS previous_currency
+       FROM funding_rounds f
+       LEFT JOIN funding_rounds p
+         ON p.id = (
+           WITH RECURSIVE ancestors(id, depth) AS (
+             SELECT id, 1 FROM funding_rounds WHERE superseded_by = f.id
+             UNION ALL SELECT p.id, a.depth + 1 FROM funding_rounds p JOIN ancestors a ON p.superseded_by = a.id
+           ) SELECT p.id FROM funding_rounds p JOIN ancestors a ON a.id = p.id
+             WHERE p.status = 'published' ORDER BY a.depth ASC LIMIT 1
+         )
+       WHERE f.status = 'pending_review' AND f.superseded_by IS NULL
+       ORDER BY f.created_at ASC, f.id ASC
+       LIMIT 200`,
+    )
+    .all<{
+      id: number;
+      company_name: string;
+      round_name: string;
+      stage: string;
+      sector: string;
+      amount: number | null;
+      currency: string;
+      valuation: number | null;
+      investors: string;
+      lead_investors: string;
+      announced_date: string | null;
+      source_url: string;
+      source_articles: string;
+      correction_reason: string | null;
+      created_at: number;
+      previous_id: number | null;
+      previous_amount: number | null;
+      previous_currency: string | null;
+    }>();
+  return (results ?? []).map((r) => ({
+    id: r.id,
+    companyName: r.company_name,
+    roundName: r.round_name,
+    stage: r.stage,
+    sector: r.sector,
+    amount: r.amount,
+    currency: r.currency,
+    valuation: r.valuation,
+    investors: parseJsonArray(r.investors).map(String),
+    leadInvestors: parseJsonArray(r.lead_investors).map(String),
+    announcedDate: r.announced_date,
+    sourceUrl: r.source_url,
+    sourceCount: parseJsonArray(r.source_articles).length,
+    correctionReason: r.correction_reason,
+    previousId: r.previous_id,
+    previousAmount: r.previous_amount,
+    previousCurrency: r.previous_currency,
+    createdAt: r.created_at,
+  }));
+}
+
+/** Publish once, or reject and atomically restore the last published ancestor. */
+export async function decideFundingRound(
+  database: D1Database,
+  roundId: number,
+  decision: "published" | "rejected",
+  now: number = Date.now(),
+): Promise<boolean> {
+  const [update] = await database.batch([
+    database
+      .prepare(
+        `UPDATE funding_rounds SET status = ?2, updated_at = ?3,
+      superseded_by = CASE WHEN ?2 = 'rejected' THEN (
+        WITH RECURSIVE ancestors(id, depth) AS (
+          SELECT id, 1 FROM funding_rounds WHERE superseded_by = ?1
+          UNION ALL SELECT p.id, a.depth + 1 FROM funding_rounds p JOIN ancestors a ON p.superseded_by = a.id
+        ) SELECT f.id FROM funding_rounds f JOIN ancestors a ON a.id = f.id
+          WHERE f.status IN ('published', 'pending_review')
+          ORDER BY CASE f.status WHEN 'published' THEN 0 ELSE 1 END, a.depth ASC LIMIT 1
+      ) ELSE superseded_by END
+      WHERE id = ?1 AND status = 'pending_review' AND superseded_by IS NULL`,
+      )
+      .bind(roundId, decision, now),
+    database
+      .prepare(
+        `UPDATE funding_rounds SET superseded_by = NULL, updated_at = ?3
+      WHERE id = (SELECT superseded_by FROM funding_rounds WHERE id = ?1)
+        AND status IN ('published', 'pending_review') AND ?2 = 'rejected' AND changes() = 1`,
+      )
+      .bind(roundId, decision, now),
+  ]);
+  return update.meta.changes === 1;
+}
+
+/**
+ * An administrator's fix to the amount of an active round. Same rule as an
+ * extracted revision: the old row is kept and points at a new pending
+ * version, which requires review. False when the round is
+ * missing, replaced already, or rejected.
+ */
+export async function correctFundingRound(
+  database: D1Database,
+  data: {
+    roundId: number;
+    amount: number | null;
+    currency: string;
+    reason: string;
+  },
+  now: number = Date.now(),
+): Promise<boolean> {
+  const { fundingCorrectionSchema } = await import("../../lib/funding/types");
+  data = fundingCorrectionSchema.parse(data);
+  const row = await database
+    .prepare(
+      `SELECT * FROM funding_rounds
+       WHERE id = ?1 AND superseded_by IS NULL AND status != 'rejected'`,
+    )
+    .bind(data.roundId)
+    .first<FundingRow>();
+  if (!row) return false;
+  const currency = data.currency.toUpperCase();
+  const amount = data.amount === null ? null : Math.round(data.amount);
+  return supersedeFundingRound(
+    database,
+    row.id,
+    {
+      companyName: row.company_name,
+      companyKey: row.company_key,
+      roundName: row.round_name,
+      roundKey: row.round_key,
+      amount,
+      currency: amount === null ? row.currency : currency,
+      amountMicros:
+        amount === null ? null : convertToMicroUsd(amount, currency),
+      valuation: row.valuation,
+      valuationMicros: row.valuation_micros,
+      sector: row.sector,
+      stage: row.stage,
+      investors: parseJsonArray(row.investors).map(String),
+      leadInvestors: parseJsonArray(row.lead_investors).map(String),
+      announcedDate: row.announced_date,
+      articleId: row.article_id,
+      sourceUrl: row.source_url,
+      sources: parseJsonArray(row.source_articles) as never,
+      correctionReason: data.reason.trim(),
+    },
+    now,
+    row,
+  );
 }

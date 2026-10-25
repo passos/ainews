@@ -19,6 +19,10 @@ import {
   getEventSources as readEventSources,
 } from "./events";
 import {
+  getFundingPage as readFundingPage,
+  getFundingRoundDetails as readFundingRoundDetails,
+} from "./funding";
+import {
   getWatchView as readWatchView,
   getActiveWatchesView as readActiveWatches,
 } from "./watches";
@@ -83,3 +87,18 @@ export const getWatch = createServerFn({ method: "GET" })
 export const getPublicWatches = createServerFn({ method: "GET" }).handler(() =>
   readActiveWatches(getDb(env.DB)),
 );
+
+const fundingInput = z.object({
+  sector: z.string().min(1).max(64).optional(),
+  stage: z.string().min(1).max(64).optional(),
+  investor: z.string().min(1).max(200).optional(),
+  page: z.number().int().min(1).max(10_000).optional(),
+});
+
+export const getFundingPage = createServerFn({ method: "GET" })
+  .validator(fundingInput)
+  .handler(({ data }) => readFundingPage(getDb(env.DB), data));
+
+export const getFundingRoundDetails = createServerFn({ method: "GET" })
+  .validator(z.object({ id: z.number().int().positive() }))
+  .handler(({ data }) => readFundingRoundDetails(getDb(env.DB), data.id));

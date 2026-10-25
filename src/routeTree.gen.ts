@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
+import { Route as FundingRouteImport } from './routes/funding'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminArtifactsRouteImport } from './routes/admin/artifacts'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
@@ -18,6 +19,7 @@ import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
 import { Route as AdminDigestsRouteImport } from './routes/admin/digests'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminEvidenceRouteImport } from './routes/admin/evidence'
+import { Route as AdminFundingRouteImport } from './routes/admin/funding'
 import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
 import { Route as AdminReviewRouteImport } from './routes/admin/review'
 import { Route as AdminWatchesRouteImport } from './routes/admin/watches'
@@ -42,6 +44,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRouteRoute = AdminRouteRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FundingRoute = FundingRouteImport.update({
+  id: '/funding',
+  path: '/funding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -77,6 +84,11 @@ const AdminDlqRoute = AdminDlqRouteImport.update({
 const AdminEvidenceRoute = AdminEvidenceRouteImport.update({
   id: '/evidence',
   path: '/evidence',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminFundingRoute = AdminFundingRouteImport.update({
+  id: '/funding',
+  path: '/funding',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminLedgerRoute = AdminLedgerRouteImport.update({
@@ -162,12 +174,14 @@ const RssWChar123watchChar125DotxmlRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/funding': typeof FundingRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
+  '/admin/funding': typeof AdminFundingRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
@@ -187,12 +201,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/funding': typeof FundingRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
+  '/admin/funding': typeof AdminFundingRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
@@ -214,12 +230,14 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/funding': typeof FundingRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
+  '/admin/funding': typeof AdminFundingRoute
   '/admin/ledger': typeof AdminLedgerRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
@@ -242,12 +260,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/funding'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
+    | '/admin/funding'
     | '/admin/ledger'
     | '/admin/review'
     | '/admin/watches'
@@ -267,12 +287,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/funding'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
+    | '/admin/funding'
     | '/admin/ledger'
     | '/admin/review'
     | '/admin/watches'
@@ -293,12 +315,14 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/funding'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
+    | '/admin/funding'
     | '/admin/ledger'
     | '/admin/review'
     | '/admin/watches'
@@ -320,6 +344,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRouteRoute: typeof AdminRouteRouteWithChildren
+  FundingRoute: typeof FundingRoute
   EEventIdRoute: typeof EEventIdRoute
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
@@ -343,6 +368,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/funding': {
+      id: '/funding'
+      path: '/funding'
+      fullPath: '/funding'
+      preLoaderRoute: typeof FundingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -392,6 +424,13 @@ declare module '@tanstack/react-router' {
       path: '/evidence'
       fullPath: '/admin/evidence'
       preLoaderRoute: typeof AdminEvidenceRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/funding': {
+      id: '/admin/funding'
+      path: '/funding'
+      fullPath: '/admin/funding'
+      preLoaderRoute: typeof AdminFundingRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/ledger': {
@@ -509,6 +548,7 @@ interface AdminRouteRouteChildren {
   AdminDigestsRoute: typeof AdminDigestsRoute
   AdminDlqRoute: typeof AdminDlqRoute
   AdminEvidenceRoute: typeof AdminEvidenceRoute
+  AdminFundingRoute: typeof AdminFundingRoute
   AdminLedgerRoute: typeof AdminLedgerRoute
   AdminReviewRoute: typeof AdminReviewRoute
   AdminWatchesRoute: typeof AdminWatchesRoute
@@ -527,6 +567,7 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminDigestsRoute: AdminDigestsRoute,
   AdminDlqRoute: AdminDlqRoute,
   AdminEvidenceRoute: AdminEvidenceRoute,
+  AdminFundingRoute: AdminFundingRoute,
   AdminLedgerRoute: AdminLedgerRoute,
   AdminReviewRoute: AdminReviewRoute,
   AdminWatchesRoute: AdminWatchesRoute,
@@ -545,6 +586,7 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRouteRoute: AdminRouteRouteWithChildren,
+  FundingRoute: FundingRoute,
   EEventIdRoute: EEventIdRoute,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,

@@ -108,6 +108,7 @@ it("migrations create the core tables", async () => {
     "fetch_hosts",
     "filings",
     "financial_facts",
+    "funding_rounds",
     "industries",
     "llm_calls",
     "questions",
