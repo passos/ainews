@@ -664,4 +664,179 @@ describe("pipeline: watch evaluation", () => {
     expect(res.evaluatedCount).toBe(0);
     expect(mockJudge).not.toHaveBeenCalled();
   });
+
+  it("correctly matches symbol keywords (C#, .NET, $TSLA) and word-bounded ASCII (AI vs chain)", async () => {
+    const eventRes = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (1, 'Microsoft Updates .NET 9 and C# 13 Runtime', 1, 1000, 1000)`,
+    ).run();
+    const eventId = Number(eventRes.meta.last_row_id);
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (1, ?1, 'https://example.com/art-dotnet', 'https://example.com/art-dotnet', 'New Features in .NET 9 and C# 13', 'Latest preview released', 'shaDotnet', 'grouped', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(sourceId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'shaDotnet', 'approved', 'admin', 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, 1000)`,
+    )
+      .bind(eventId, art!.id)
+      .run();
+
+    // 1. Symbol keyword "C#"
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('csharp-watch', 'C# Updates', 'Criteria', '["C#"]', 1, 'active', 1000, 1000)`,
+    ).run();
+
+    // 2. Symbol keyword ".NET"
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('dotnet-watch', '.NET Updates', 'Criteria', '[".NET"]', 1, 'active', 1000, 1000)`,
+    ).run();
+
+    // 3. Word-bounded "AI" should NOT match "chain"
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('ai-watch', 'AI Updates', 'Criteria', '["AI"]', 1, 'active', 1000, 1000)`,
+    ).run();
+
+    const mockJudge = vi.fn().mockResolvedValue({ progress: { noul: 0.1 } });
+    const mockModels = {
+      judge: mockJudge,
+      generateText: vi.fn(),
+    } as unknown as ModelClient;
+
+    const res = await evaluateEventWatches(env, eventId, 1000, {
+      models: mockModels,
+    });
+
+    // Both "C#" and ".NET" should match, while "AI" should not match
+    expect(res.evaluatedCount).toBe(2);
+    expect(mockJudge).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips evaluation when revision bump is caused by a retraction (no new approved articles)", async () => {
+    // Event at revision 2, updated at 20000, but only remaining article was approved at 10000
+    const eventRes = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (1, 'Retraction Event', 2, 10000, 20000)`,
+    ).run();
+    const eventId = Number(eventRes.meta.last_row_id);
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (1, ?1, 'https://example.com/art-old-approved', 'https://example.com/art-old-approved', 'Old Article', 'Old summary', 'shaOldApp', 'grouped', 10000, 10000)
+       RETURNING id`,
+    )
+      .bind(sourceId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'shaOldApp', 'approved', 'admin', 10000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, 10000)`,
+    )
+      .bind(eventId, art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('retract-watch', 'Question?', 'Criteria', '["Article"]', 1, 'active', 10000, 10000)`,
+    ).run();
+
+    const mockJudge = vi.fn();
+    const mockModels = {
+      judge: mockJudge,
+      generateText: vi.fn(),
+    } as unknown as ModelClient;
+
+    const res = await evaluateEventWatches(env, eventId, 20000, {
+      models: mockModels,
+    });
+    // Zero evaluations because it was a retraction revision
+    expect(res.evaluatedCount).toBe(0);
+    expect(mockJudge).not.toHaveBeenCalled();
+  });
+
+  it("unconditionally discards partial text and uses fallback when summary finishReason !== 'STOP'", async () => {
+    const eventRes = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (1, 'Truncated Summary Event', 1, 1000, 1000)`,
+    ).run();
+    const eventId = Number(eventRes.meta.last_row_id);
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (1, ?1, 'https://example.com/art-trunc', 'https://example.com/art-trunc', 'Benchmark Release Announcement', 'New benchmarks', 'shaTrunc', 'grouped', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(sourceId)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'shaTrunc', 'approved', 'admin', 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, 1000)`,
+    )
+      .bind(eventId, art!.id)
+      .run();
+
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('trunc-watch', 'Benchmark Results', 'Empirical numbers', '["Benchmark"]', 1, 'active', 1000, 1000)
+       RETURNING id`,
+    ).first<{ id: number }>();
+    const watchId = watchRes!.id;
+
+    const mockJudge = vi.fn().mockResolvedValue({ progress: { noul: 0.9 } });
+    // Returns partial sentence cut off by MAX_TOKENS
+    const mockGenerateText = vi.fn().mockResolvedValue({
+      text: "The new benchmark achieved a score of 95.4% which is a substantial increase over",
+      finishReason: "MAX_TOKENS",
+    });
+    const mockModels = {
+      judge: mockJudge,
+      generateText: mockGenerateText,
+    } as unknown as ModelClient;
+
+    const res = await evaluateEventWatches(env, eventId, 1000, {
+      models: mockModels,
+    });
+    expect(res.hitCount).toBe(1);
+
+    const hit = await env.DB.prepare(
+      `SELECT * FROM watch_hits WHERE watch_id = ?1 AND event_id = ?2`,
+    )
+      .bind(watchId, eventId)
+      .first<{ summary: string; rationale: string }>();
+
+    // Partial sentence discarded, fallback title used
+    expect(hit?.summary).toBe("Benchmark Release Announcement");
+    expect(hit?.summary).not.toContain("95.4%");
+    expect(hit?.rationale).toContain('"articleIds"');
+  });
 });

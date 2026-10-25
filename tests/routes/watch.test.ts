@@ -223,4 +223,93 @@ describe("tests/routes/watch.test.ts", () => {
     const rss = renderWatchFeed(view!, "https://news.ioenv.com");
     expect(rss).toContain(view!.watch.industryDisclaimer!);
   });
+
+  it("filters out hit when its specific supporting article was retracted, even if background articles remain", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('partial-retract-watch', 'Question?', 'Criteria', '["retract"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const watchId = watchRes!.id;
+
+    const eventId = await seedEvent(
+      tech.industryId,
+      "Event with Retracted Breakthrough",
+      2,
+    );
+
+    // Background article remains approved
+    const backgroundArt = await seedArticle({
+      ...tech,
+      title: "Background Context Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, backgroundArt, 1000);
+    await seedReview(backgroundArt, "approved");
+
+    // Breakthrough article was retracted
+    const breakthroughArt = await seedArticle({
+      ...tech,
+      title: "Breakthrough Claim Article",
+      publishedAt: 2000,
+    });
+    await seedEventArticle(eventId, breakthroughArt, 2000);
+    // breakthroughArt was rejected / not approved
+    await seedReview(breakthroughArt, "rejected");
+
+    // Hit was recorded based on breakthroughArt (id in rationale.articleIds)
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 2, 2000, 'Breakthrough claimed.', ?3)`,
+    )
+      .bind(
+        watchId,
+        eventId,
+        JSON.stringify({ noul: 0.9, articleIds: [breakthroughArt] }),
+      )
+      .run();
+
+    const view = await getWatchView(db(), "partial-retract-watch");
+    expect(view).not.toBeNull();
+    // Hit is filtered out because the article that provided evidence was retracted!
+    expect(view!.hits.length).toBe(0);
+  });
+
+  it("surfaces Finance disclaimer for global watch (industry_id = null) when it hits a Finance event", async () => {
+    // Global watch with industry_id = null
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('global-finance-watch', 'Interest Rates', 'Rate cuts or hikes', '["rates"]', NULL, 'active', 1000, 1000)
+       RETURNING id`,
+    ).first<{ id: number }>();
+    const watchId = watchRes!.id;
+
+    const eventId = await seedEvent(fin.industryId, "Global Fed Rate Event", 1);
+    const art = await seedArticle({
+      industryId: fin.industryId,
+      sourceId: fin.sourceId,
+      title: "Federal Reserve Adjusts Policy Rate",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 2000, 'Federal Reserve policy adjustment announced.', '{}')`,
+    )
+      .bind(watchId, eventId)
+      .run();
+
+    const view = await getWatchView(db(), "global-finance-watch");
+    expect(view).not.toBeNull();
+    // Watch itself had industry_id = null, but the hit came from Finance, so disclaimer is surfaced
+    expect(view!.watch.industryDisclaimer).toBeTruthy();
+    expect(view!.hits[0].disclaimer).toBeTruthy();
+
+    const rss = renderWatchFeed(view!, "https://news.ioenv.com");
+    expect(rss).toContain(view!.watch.industryDisclaimer!);
+  });
 });

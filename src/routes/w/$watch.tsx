@@ -1,6 +1,7 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { Disclaimer } from "../../components/Disclaimer";
 import { FollowButton } from "../../components/FollowButton";
+import { formatUtc } from "../../lib/time";
 import { getWatch } from "../../server/publication/api";
 
 export const Route = createFileRoute("/w/$watch")({
@@ -121,13 +122,9 @@ function WatchPage() {
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 text-xs font-mono text-muted-foreground">
                   <span className="font-semibold text-primary">
-                    {new Date(hit.hitAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    <time dateTime={new Date(hit.hitAt).toISOString()}>
+                      {formatUtc(hit.hitAt)}
+                    </time>
                   </span>
                   <span>Revision #{hit.eventRevision}</span>
                 </div>

@@ -13,6 +13,7 @@ export interface WatchHitItem {
   hitAt: number;
   summary: string;
   rationale: string;
+  disclaimer?: string | null;
   articles: {
     id: number;
     title: string;
@@ -80,11 +81,14 @@ export async function getWatchView(
       .filter(Boolean);
   }
 
-  // Fetch hits ordered newest first
+  // Fetch hits ordered newest first (capped at 50 to prevent unbounded query latency)
   const hitsQuery = await db.all<{
     id: number;
     event_id: number;
     event_title: string;
+    event_industry_id: number | null;
+    event_industry_name: string | null;
+    event_industry_disclaimer: string | null;
     event_revision: number;
     hit_at: number;
     summary: string;
@@ -94,14 +98,19 @@ export async function getWatchView(
       wh.id AS id,
       wh.event_id AS event_id,
       e.title AS event_title,
+      e.industry_id AS event_industry_id,
+      i.name AS event_industry_name,
+      i.disclaimer AS event_industry_disclaimer,
       wh.event_revision AS event_revision,
       wh.hit_at AS hit_at,
       wh.summary AS summary,
       wh.rationale AS rationale
     FROM watch_hits wh
     JOIN events e ON e.id = wh.event_id
+    LEFT JOIN industries i ON i.id = e.industry_id
     WHERE wh.watch_id = ${watchRow.id}
     ORDER BY wh.hit_at DESC
+    LIMIT 50
   `);
 
   const hitItems: WatchHitItem[] = [];
@@ -138,6 +147,30 @@ export async function getWatchView(
       continue;
     }
 
+    const approvedIds = new Set(articlesQuery.map((a) => a.id));
+
+    // Verify whether the supporting evidence that triggered this hit is still approved
+    let evidenceArticleIds: number[] = [];
+    try {
+      const parsed = JSON.parse(h.rationale);
+      if (Array.isArray(parsed.articleIds)) {
+        evidenceArticleIds = parsed.articleIds;
+      }
+    } catch {
+      // Ignore malformed rationale JSON
+    }
+
+    if (
+      evidenceArticleIds.length > 0 &&
+      !evidenceArticleIds.some((id) => approvedIds.has(id))
+    ) {
+      // The specific article(s) reporting this development were retracted; filter out hit
+      continue;
+    }
+
+    const hitDisclaimer =
+      h.event_industry_disclaimer || watchRow.industryDisclaimer;
+
     const eventTitle =
       articlesQuery[articlesQuery.length - 1]?.title || h.event_title;
 
@@ -149,6 +182,7 @@ export async function getWatchView(
       hitAt: h.hit_at,
       summary: h.summary,
       rationale: h.rationale,
+      disclaimer: hitDisclaimer,
       articles: articlesQuery.map((art) => ({
         id: art.id,
         title: art.title,
@@ -159,6 +193,13 @@ export async function getWatchView(
       })),
     });
   }
+
+  // If the watch has no section disclaimer, but hits include section disclaimers (e.g. a Finance event in a global watch),
+  // surface the section disclaimer to the watch page as well
+  const effectiveWatchDisclaimer =
+    watchRow.industryDisclaimer ||
+    hitItems.find((h) => h.disclaimer)?.disclaimer ||
+    null;
 
   return {
     watch: {
@@ -171,7 +212,7 @@ export async function getWatchView(
       industryId: watchRow.industryId,
       industryName: watchRow.industryName,
       industrySlug: watchRow.industrySlug,
-      industryDisclaimer: watchRow.industryDisclaimer,
+      industryDisclaimer: effectiveWatchDisclaimer,
       createdAt: watchRow.createdAt,
     },
     hits: hitItems,
@@ -216,7 +257,7 @@ export function renderWatchFeed(
         h.articles.length > 0
           ? `Sources: ${h.articles.map((a) => a.sourceName).join(", ")}`
           : null,
-        watch.industryDisclaimer,
+        h.disclaimer || watch.industryDisclaimer,
       ]
         .filter(Boolean)
         .join(" | ");

@@ -29,6 +29,7 @@ interface EventRow {
   title: string;
   revision: number;
   industry_id: number;
+  updated_at: number;
 }
 
 interface ApprovedArticleRow {
@@ -37,7 +38,7 @@ interface ApprovedArticleRow {
   summary: string | null;
   body_sha: string;
   published_at: number | null;
-  linked_at: number;
+  approved_at: number;
 }
 
 interface WatchRow {
@@ -63,11 +64,12 @@ async function sha256Hex(text: string): Promise<string> {
 function matchKeyword(text: string, keyword: string): boolean {
   const trimmed = keyword.trim();
   if (!trimmed) return false;
-  // Non-ASCII (e.g. Chinese), or phrases with whitespace/hyphens, or symbols like C++
-  if (/[\u0080-\uFFFF]/.test(trimmed) || /[+\-*_/\s]/.test(trimmed)) {
+  // If keyword contains non-word characters (C#, .NET, $TSLA, spaces, hyphens)
+  // or non-ASCII characters (e.g. Chinese), use substring search
+  if (!/^\w+$/.test(trimmed) || /[\u0080-\uFFFF]/.test(trimmed)) {
     return text.toLowerCase().includes(trimmed.toLowerCase());
   }
-  // Pure ASCII single word / acronym (e.g. "AI", "GPT"): word boundary regex
+  // Pure ASCII single word / acronym (e.g. "AI", "GPT"): word boundary regex to prevent "chain" matching "ai"
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`\\b${escaped}\\b`, "i");
   return regex.test(text);
@@ -102,7 +104,7 @@ export async function evaluateEventWatches(
   // 1. Fetch event
   const event = await db
     .prepare(
-      `SELECT id, title, revision, industry_id
+      `SELECT id, title, revision, industry_id, updated_at
        FROM events
        WHERE id = ?1`,
     )
@@ -116,17 +118,34 @@ export async function evaluateEventWatches(
   // 2. Fetch approved articles for this event (strictly approvedArticleWhere)
   const { results: articles } = await db
     .prepare(
-      `SELECT a.id, a.title, a.summary, a.body_sha, a.published_at, ea.created_at AS linked_at
+      `SELECT a.id, a.title, a.summary, a.body_sha, a.published_at, r.created_at AS approved_at
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
        JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
        WHERE ea.event_id = ?1
-       ORDER BY ea.created_at ASC, a.id ASC`,
+       ORDER BY r.created_at ASC, a.id ASC`,
     )
     .bind(eventId)
     .all<ApprovedArticleRow>();
 
   if (!articles || articles.length === 0) {
+    return {
+      eventId,
+      eventRevision: event.revision,
+      evaluatedCount: 0,
+      hitCount: 0,
+    };
+  }
+
+  // If revision > 1, verify if this revision bump was from a newly approved article.
+  // When an article is approved, r.created_at equals event.updated_at in the same batch.
+  // If an article was retracted, no article has approved_at == updated_at.
+  const maxApprovedAt = Math.max(...articles.map((a) => a.approved_at));
+  const isRetractionRevision =
+    event.revision > 1 && maxApprovedAt < event.updated_at;
+
+  if (isRetractionRevision) {
+    // Retraction of an article cannot constitute a new material development
     return {
       eventId,
       eventRevision: event.revision,
@@ -221,14 +240,24 @@ export async function evaluateEventWatches(
     evaluatedCount++;
 
     // Partition articles into new reporting (this revision) vs prior reporting
-    const maxLinkedAt = Math.max(...articles.map((a) => a.linked_at));
-    let newArticles = articles.filter((a) => a.linked_at === maxLinkedAt);
-    let priorArticles = articles.filter((a) => a.linked_at < maxLinkedAt);
+    let newArticles: ApprovedArticleRow[];
+    let priorArticles: ApprovedArticleRow[];
 
-    // If all articles were linked in the same timestamp (e.g. initial revision)
-    if (priorArticles.length === 0 && articles.length > 2) {
-      newArticles = articles.slice(-2);
-      priorArticles = articles.slice(0, -2);
+    if (event.revision === 1) {
+      if (articles.length > 2) {
+        newArticles = articles.slice(-2);
+        priorArticles = articles.slice(0, -2);
+      } else {
+        newArticles = articles;
+        priorArticles = [];
+      }
+    } else {
+      newArticles = articles.filter((a) => a.approved_at === maxApprovedAt);
+      priorArticles = articles.filter((a) => a.approved_at < maxApprovedAt);
+      if (newArticles.length === 0) {
+        newArticles = [articles[articles.length - 1]];
+        priorArticles = articles.slice(0, -1);
+      }
     }
 
     const watchSha = (
@@ -238,19 +267,25 @@ export async function evaluateEventWatches(
     // Ledger keys bound to watch configuration hash and content input SHA
     const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
 
+    const newReportingText = newArticles
+      .map((a) => `[New Article] ${a.title}\n${a.summary ?? ""}`)
+      .join("\n\n")
+      .slice(0, 2000);
+
     const bodySections: string[] = [
       "=== NEW REPORTING IN THIS UPDATE ===",
-      newArticles
-        .map((a) => `[New Article] ${a.title}\n${a.summary ?? ""}`)
-        .join("\n\n"),
+      newReportingText,
     ];
 
     if (priorArticles.length > 0) {
+      const priorReportingText = priorArticles
+        .map((a) => `[Prior Article] ${a.title}\n${a.summary ?? ""}`)
+        .join("\n\n")
+        .slice(0, 2000);
+
       bodySections.push(
         "=== PRIOR REPORTING (ALREADY KNOWN) ===",
-        priorArticles
-          .map((a) => `[Prior Article] ${a.title}\n${a.summary ?? ""}`)
-          .join("\n\n"),
+        priorReportingText,
       );
     }
 
@@ -259,8 +294,8 @@ export async function evaluateEventWatches(
       summary: newArticles
         .map((a) => a.summary ?? "")
         .join(" ")
-        .slice(0, 1500),
-      body: bodySections.join("\n\n").slice(0, 4000),
+        .slice(0, 1000),
+      body: bodySections.join("\n\n"),
     };
 
     const questions = buildWatchJudgeQuestion(watch.question, watch.criteria);
@@ -290,18 +325,16 @@ export async function evaluateEventWatches(
 
       let summaryText = summaryRes.text.trim().replace(/^["']|["']$/g, "");
 
-      // Guard: Check finishReason === 'STOP'
+      // Guard: Discard partial output on non-STOP finishReason and fallback cleanly
       if (summaryRes.finishReason !== "STOP") {
         console.warn({
           watchId: watch.id,
           eventId: event.id,
-          warning: `Watch summary generation truncated: ${summaryRes.finishReason}`,
+          warning: `Watch summary generation truncated (${summaryRes.finishReason}); discarding partial text and using fallback`,
         });
-        if (!summaryText) {
-          summaryText =
-            newArticles[0]?.title ||
-            "Material development confirmed by evaluation.";
-        }
+        summaryText =
+          newArticles[0]?.title ||
+          "Material development confirmed by evaluation.";
       }
 
       // Atomic insertion: only commit if event revision hasn't changed concurrently
@@ -321,6 +354,7 @@ export async function evaluateEventWatches(
           JSON.stringify({
             noul: noulVal,
             promptVersion: WATCH_PROMPT_VERSION,
+            articleIds: newArticles.map((a) => a.id),
           }),
         )
         .run();
