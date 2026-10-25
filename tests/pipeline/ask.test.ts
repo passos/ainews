@@ -6,6 +6,7 @@ import {
 } from "../../src/pipeline/ask/answer";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage } from "../../src/pipeline/messages";
+import { CallInProgressError } from "../../src/providers/models";
 import type { ModelTransport } from "../../src/providers/transport";
 
 class FakeVectors {
@@ -931,5 +932,101 @@ describe("Ask Newsren Pipeline", () => {
     expect(supplemental.length).toBe(2);
     expect(supplemental[0].status).toBe("blocked");
     expect(supplemental[1].status).toBe("blocked");
+  });
+
+  it("re-throws CallInProgressError to allow queue consumer to retry", async () => {
+    await seedTestCorpus();
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('Retryable question', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    const transport: ModelTransport = {
+      run: async () => {
+        throw new CallInProgressError("ask:reason:test:key");
+      },
+    };
+
+    let retried = false;
+    let acked = false;
+    const batch = {
+      queue: "ainews-generate",
+      messages: [
+        {
+          id: "msg_retry_1",
+          body: { kind: "ask", questionId } as GenerateMessage,
+          timestamp: new Date(),
+          ack: () => {
+            acked = true;
+          },
+          retry: () => {
+            retried = true;
+          },
+        },
+      ],
+    };
+
+    await handleGenerateBatch(
+      batch as unknown as MessageBatch<GenerateMessage>,
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      { transport },
+    );
+
+    // CallInProgressError must trigger retry, NOT ack!
+    expect(retried).toBe(true);
+    expect(acked).toBe(false);
+  });
+
+  it("fails and marks question failed when post-call total cost exceeds cap", async () => {
+    await seedTestCorpus();
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('Post-call budget exceeding question', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    const transport = makeFakeTransport(async () => {
+      // Record cost that breaches cap during the call
+      await env.DB.prepare(
+        `INSERT INTO llm_calls (logical_key, slot, model, channel, status, cost_micros, created_at, updated_at)
+         VALUES (?1, 'reason', 'google/gemini-3.8-flash', 'gateway', 'completed', ?2, 1000, 1000)`,
+      )
+        .bind(
+          `ask:reason:${questionId}:breach:key`,
+          ASK_QUESTION_MAX_COST_MICROS + 500,
+        )
+        .run();
+
+      return {
+        sufficient: false,
+        neededUrls: [],
+        answer: "Breached answer",
+        unverified: [],
+        citations: [],
+      };
+    });
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      { transport },
+    );
+
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.reason).toBe("Question budget exceeded");
+    }
+
+    const row = await env.DB.prepare(
+      `SELECT status, error_message FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ status: string; error_message: string }>();
+    expect(row?.status).toBe("failed");
+    expect(row?.error_message).toBe("Question budget exceeded");
   });
 });

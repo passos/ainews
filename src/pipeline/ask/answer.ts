@@ -1,7 +1,11 @@
 import { isEnabled } from "../../lib/flags";
 import { safeHttpUrl } from "../../lib/url";
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
-import { createModelClient, type ModelClient } from "../../providers/models";
+import {
+  CallInProgressError,
+  createModelClient,
+  type ModelClient,
+} from "../../providers/models";
 import { toMarkdown } from "../../providers/tomarkdown";
 import {
   bindingTransport,
@@ -455,11 +459,13 @@ export async function answerQuestion(
             continue;
           }
 
+          const fetchNow = deps.now();
+
           // robots.txt check
           const robots = await checkRobots(
             env,
             targetUrl,
-            commitNow,
+            fetchNow,
             deps.fetch,
             domainsList,
           );
@@ -477,7 +483,7 @@ export async function answerQuestion(
             env,
             parsedUrl.host,
             robots.crawlDelaySec ?? 0,
-            commitNow,
+            fetchNow,
           );
           if (!slot.claimed) {
             supplementalFetched.push({
@@ -492,7 +498,7 @@ export async function answerQuestion(
             const pageRes = await fetchPage(
               env,
               targetUrl,
-              commitNow,
+              fetchNow,
               domainsList,
               ladderDeps,
             );
@@ -652,6 +658,26 @@ export async function answerQuestion(
       // Ignored
     }
 
+    if (totalCostMicros > ASK_QUESTION_MAX_COST_MICROS) {
+      await deps.db
+        .prepare(
+          `UPDATE questions
+           SET status = 'failed',
+               error_message = 'Question budget exceeded',
+               cost_micros = ?2,
+               completed_at = ?3
+           WHERE id = ?1`,
+        )
+        .bind(questionId, totalCostMicros, deps.now())
+        .run();
+
+      return {
+        status: "failed",
+        questionId,
+        reason: "Question budget exceeded",
+      };
+    }
+
     // 13. Persist Question Result
     await deps.db
       .prepare(
@@ -691,6 +717,11 @@ export async function answerQuestion(
       costMicros: totalCostMicros,
     };
   } catch (err: unknown) {
+    if (err instanceof CallInProgressError) {
+      // Propagate retryable model call in progress error to queue consumer
+      throw err;
+    }
+
     const errorMsg = err instanceof Error ? err.message : String(err);
     await deps.db
       .prepare(
