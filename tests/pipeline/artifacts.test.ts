@@ -658,6 +658,142 @@ describe("generateEventArtifacts", () => {
     expect(dec.method).toContain("block-sparse");
   });
 
+  it("generates Research Paper Decoder solely based on preprint evidence tag when source is not arxiv and type is not research_paper", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          news_article: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["publication_status"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 60,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('tech-preprint-tag', 'Tech Preprint Tag', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://nature.com/feed', 'nature.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://nature.com/articles/bio-preprint', 'https://nature.com/articles/bio-preprint', 'Genomics Early Findings', 'Bio report', 'shaNaturePreprint', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaNaturePreprint', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // Source domain is nature.com (not arxiv), content_type is 'news_article' (not research_paper),
+    // and evidence_tags has publication_status: preprint
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'news_article', '{"publication_status":"preprint"}', 80, 0.95, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Genomics Preprint Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (inputStr.includes("Story Brief")) {
+        return {
+          whatHappened: "Early genomics preprint published.",
+          whatIsNew: "Novel gene editing pathway.",
+          whatEvidenceExists: "In-vitro assays.",
+          whatToWatchNext: "Animal trials.",
+        };
+      }
+      if (inputStr.includes("Research Paper Decoder")) {
+        return {
+          hypothesis: "Can base editing improve target specificity?",
+          method: "CRISPR-Cas guided base deaminase.",
+          findings: "Reduces off-target edits by 90%.",
+          limitations: "Tested only in cell culture.",
+          applications: "Monogenic disease therapies.",
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("learning materials") ||
+        inputStr.includes("conceptExplainer")
+      ) {
+        return {
+          audience: "student",
+          conceptExplainer: "Gene editing basics.",
+          glossary: [{ term: "CRISPR", definition: "Molecular scissors." }],
+          quiz: [
+            {
+              question: "What does it edit?",
+              options: ["DNA", "Sugar"],
+              answerIndex: 0,
+              explanation: "Edits genomic sequence.",
+            },
+          ],
+          discussionQuestions: ["Ethics of gene therapy."],
+          activities: ["Model base pairing."],
+        };
+      }
+      return {
+        audience: "student",
+        overview: "Overview.",
+        keyPoints: ["Point 1"],
+        implications: ["Implication 1"],
+        glossary: [{ term: "CRISPR", definition: "Molecular scissors." }],
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const decoderRow = await env.DB.prepare(
+      "SELECT type, status, content FROM event_artifacts WHERE event_id = ?1 AND type = 'research_paper_decoder'",
+    )
+      .bind(event!.id)
+      .first<{ type: string; status: string; content: string }>();
+
+    expect(decoderRow).toBeDefined();
+    expect(decoderRow?.type).toBe("research_paper_decoder");
+  });
+
   it("protects against revision race conditions (stale revision does not insert)", async () => {
     await ensureBudget();
     const config = JSON.stringify({
@@ -1373,6 +1509,141 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(types).toContain("policy_impact_explorer");
     expect(types).toContain("classroom_discussion_builder");
     expect(types).toContain("education_evidence_checker");
+  });
+
+  it("generates Policy Impact Explorer solely based on regulatory_finding tag for sub-deep event", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          curriculum_report: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["development_stage"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('education', 'Education', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ed/sub-deep', 'ed.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ed/art-reg-finding', 'https://ed/art-reg-finding', 'State Board Ruling on AI Assessment', 'A formal ruling on student data privacy.', 'shaRegRuling', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaRegRuling', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // Score is 65 (>= select 50, but < deepThreshold 90)
+    // content_type is 'curriculum_report' (not 'policy_change')
+    // evidence_tags contains regulatory_finding
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'curriculum_report', '{"development_stage":"regulatory_finding"}', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Assessment Board Ruling Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr.toLowerCase().includes("policy analysis") ||
+        inputStr.includes("affectedAudiences")
+      ) {
+        return {
+          policyName: "State AI Assessment Ruling",
+          summary: "Ruling limits third-party grading tools without consent.",
+          affectedAudiences: [
+            { group: "School Districts", impact: "Audit current contracts" },
+          ],
+          timeline: [{ phase: "Immediate", milestone: "Compliance review" }],
+          remainingUncertainties: ["Federal preemption questions"],
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("pedagogical facilitation") ||
+        inputStr.includes("classroomActivities")
+      ) {
+        return {
+          topic: "AI Assessment Governance",
+          gradeLevels: ["High School"],
+          discussionQuestions: [
+            {
+              theme: "Data Rights",
+              prompt: "Should students own test data?",
+            },
+          ],
+          classroomActivities: [
+            {
+              title: "Draft an Assessment Policy",
+              procedure: "Group mock debate.",
+            },
+          ],
+        };
+      }
+      return {
+        whatHappened: "Board issued ruling on assessment AI.",
+        whatIsNew: "Explicit consent requirements.",
+        whatEvidenceExists: "Official hearing transcript.",
+        whatToWatchNext: "District adoption timeline.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const policyRow = await env.DB.prepare(
+      "SELECT type, status, content FROM event_artifacts WHERE event_id = ?1 AND type = 'policy_impact_explorer'",
+    )
+      .bind(event!.id)
+      .first<{ type: string; status: string; content: string }>();
+
+    expect(policyRow).toBeDefined();
+    expect(policyRow?.type).toBe("policy_impact_explorer");
   });
 
   it("never generates Education editorial products in non-education sectors", async () => {
