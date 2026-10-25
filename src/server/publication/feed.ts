@@ -36,11 +36,15 @@ function digestItem(
   const parts = [d.intro, itemSummary, sectionDisclaimer]
     .filter(Boolean)
     .join(" ");
-  const link = `${base}/digest/${sectionSlug}/${d.periodStart}`;
+  const isWeekly = d.kind === "weekly";
+  const link = `${base}/digest/${sectionSlug}/${d.periodStart}${isWeekly ? "?kind=weekly" : ""}`;
+  const title = isWeekly
+    ? `Weekly Digest — ${d.periodStart}`
+    : `Daily Digest — ${d.periodStart}`;
 
   return [
     "<item>",
-    `<title>${x(`Daily Digest — ${d.periodStart}`)}</title>`,
+    `<title>${x(title)}</title>`,
     `<link>${x(link)}</link>`,
     `<guid isPermaLink="false">${d.id}</guid>`,
     `<pubDate>${new Date(d.publishedAt).toUTCString()}</pubDate>`,
@@ -53,7 +57,7 @@ export function renderDigestFeed(feed: DigestFeed, siteUrl: string): string {
   const { section, digests } = feed;
   const base = siteUrl.replace(/\/+$/, "");
   const description = [
-    `Daily intelligence digests for ${section.name} from Personal News.`,
+    `Intelligence digests for ${section.name} from Personal News.`,
     section.disclaimer,
   ]
     .filter(Boolean)
@@ -62,7 +66,7 @@ export function renderDigestFeed(feed: DigestFeed, siteUrl: string): string {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0"><channel>',
-    `<title>${x(`Personal News — ${section.name} Daily Digest`)}</title>`,
+    `<title>${x(`Personal News — ${section.name} Digests`)}</title>`,
     `<link>${x(`${base}/s/${section.slug}`)}</link>`,
     `<description>${x(description)}</description>`,
     ...digests.map((d) =>

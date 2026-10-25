@@ -76,6 +76,9 @@ function AdminDigestsPage() {
                     <span className="font-bold text-base">
                       {d.industryName}
                     </span>
+                    <span className="rounded bg-sec/10 text-sec-ink px-1.5 py-0.5 font-mono text-[0.7rem] uppercase font-bold">
+                      {d.kind}
+                    </span>
                     <span className="font-mono text-xs text-muted-foreground">
                       · {d.periodStart}
                     </span>
@@ -160,6 +163,7 @@ function AdminDigestsPage() {
               <thead className="bg-muted/50 font-mono text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="p-3">Section</th>
+                  <th className="p-3">Kind</th>
                   <th className="p-3">Date</th>
                   <th className="p-3">Items</th>
                   <th className="p-3">Published At</th>
@@ -171,6 +175,11 @@ function AdminDigestsPage() {
                   <tr key={d.id} className="hover:bg-muted/20">
                     <td className="p-3 font-semibold text-foreground">
                       {d.industryName}
+                    </td>
+                    <td className="p-3">
+                      <span className="rounded bg-sec/10 text-sec-ink px-1.5 py-0.5 font-mono text-[0.7rem] uppercase font-bold">
+                        {d.kind}
+                      </span>
                     </td>
                     <td className="p-3">{d.periodStart}</td>
                     <td className="p-3">{d.itemCount}</td>
@@ -186,6 +195,7 @@ function AdminDigestsPage() {
                           section: d.industrySlug,
                           date: d.periodStart,
                         }}
+                        search={{ kind: d.kind }}
                         className="text-primary underline hover:text-primary/80 font-sans text-xs"
                       >
                         View Public Page ↗

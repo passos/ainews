@@ -15,6 +15,7 @@ export interface DigestEmailData {
   industryId: number;
   industrySlug: string;
   industryName: string;
+  kind?: "daily" | "weekly";
   periodStart: string;
   publishedAt: number | null;
   intro: string;
@@ -37,17 +38,19 @@ export function formatDigestEmail(
   siteUrl: string,
 ): { subject: string; text: string; html: string } {
   const isUnpublished = digest.publishedAt === null;
+  const isWeekly = digest.kind === "weekly";
+  const kindLabel = isWeekly ? "weekly digest" : "daily digest";
   const reviewSuffix = isUnpublished ? " (needs review)" : "";
-  const subject = `[Personal News] ${digest.industryName} daily digest — ${digest.periodStart}${reviewSuffix}`;
+  const subject = `[Personal News] ${digest.industryName} ${kindLabel} — ${digest.periodStart}${reviewSuffix}`;
 
   const base = siteUrl.replace(/\/+$/, "");
-  const digestUrl = `${base}/digest/${digest.industrySlug}/${digest.periodStart}`;
+  const digestUrl = `${base}/digest/${digest.industrySlug}/${digest.periodStart}${isWeekly ? "?kind=weekly" : ""}`;
   const adminUrl = `${base}/admin/digests`;
 
   // Plain text version
   const textLines: string[] = [
-    `Personal News — ${digest.industryName} Daily Digest`,
-    `Date: ${digest.periodStart}`,
+    `Personal News — ${digest.industryName} ${isWeekly ? "Weekly Digest" : "Daily Digest"}`,
+    `${isWeekly ? "Week of: " : "Date: "}${digest.periodStart}`,
     isUnpublished
       ? `Status: Pending Review (Approve at ${adminUrl})`
       : `Status: Published (${digestUrl})`,
@@ -98,7 +101,7 @@ export function formatDigestEmail(
       Personal News — ${escapeHtml(digest.industryName)}
     </h1>
     <div style="font-size: 13px; color: #555; margin-top: 4px;">
-      Daily Digest · ${escapeHtml(digest.periodStart)}
+      ${isWeekly ? "Weekly Digest" : "Daily Digest"} · ${isWeekly ? "Week of " : ""}${escapeHtml(digest.periodStart)}
       ${isUnpublished ? '<span style="color: #c00; font-weight: bold; margin-left: 8px;">[NEEDS REVIEW]</span>' : ""}
     </div>
   </header>
@@ -157,7 +160,7 @@ export async function sendDigestEmail(
   try {
     // Read digest row and industry details
     const row = await env.DB.prepare(
-      `SELECT d.id, d.industry_id, d.period_start, d.published_at, d.intro, d.items_json,
+      `SELECT d.id, d.industry_id, d.kind, d.period_start, d.published_at, d.intro, d.items_json,
               i.slug AS industry_slug, i.name AS industry_name
        FROM digests d
        JOIN industries i ON i.id = d.industry_id
@@ -167,6 +170,7 @@ export async function sendDigestEmail(
       .first<{
         id: number;
         industry_id: number;
+        kind: "daily" | "weekly";
         period_start: string;
         published_at: number | null;
         intro: string;
@@ -190,6 +194,7 @@ export async function sendDigestEmail(
         industryId: row.industry_id,
         industrySlug: row.industry_slug,
         industryName: row.industry_name,
+        kind: row.kind,
         periodStart: row.period_start,
         publishedAt: row.published_at,
         intro: row.intro,

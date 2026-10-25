@@ -351,4 +351,125 @@ describe("tests/routes/digest.test.ts", () => {
       ),
     ).rejects.toSatisfy(isNotFound);
   });
+
+  it("weekly digest: unapproved throws notFound; after publish, loads with kind = 'weekly' and renders in RSS with ?kind=weekly", async () => {
+    const eventId = await seedEvent(tech.industryId, "Weekly Tech Event", 0);
+    const artId = await seedArticle({
+      ...tech,
+      title: "Weekly Tech Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, artId, 1000);
+    await seedReview(artId, "approved");
+
+    const itemsJson = JSON.stringify([
+      {
+        eventId,
+        title: "Weekly Tech Event",
+        oneLiner: "Key weekly technology trend.",
+        sourceName: "Tech Weekly",
+        articleCount: 1,
+      },
+    ]);
+
+    // Insert unpublished weekly digest
+    const insRes = await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'weekly', '2026-10-19', 'UTC', 'ready', 'Weekly overview narrative', ?2, 1000, NULL) RETURNING id`,
+    )
+      .bind(tech.industryId, itemsJson)
+      .first<{ id: number }>();
+
+    const digestId = insRes!.id;
+
+    // Unapproved weekly digest throws notFound
+    await expect(
+      loadDigest({ section: "technology", date: "2026-10-19" }, "weekly", {
+        getDigest: (slug, date, kind) => getDigest(db(), slug, date, kind),
+        getRecentDigests: (slug, kind) => getRecentDigests(db(), slug, 7, kind),
+      }),
+    ).rejects.toSatisfy(isNotFound);
+
+    // Publish weekly digest
+    await env.DB.prepare("UPDATE digests SET published_at = 2000 WHERE id = ?1")
+      .bind(digestId)
+      .run();
+
+    // Now loads successfully
+    const result = await loadDigest(
+      { section: "technology", date: "2026-10-19" },
+      "weekly",
+      {
+        getDigest: (slug, date, kind) => getDigest(db(), slug, date, kind),
+        getRecentDigests: (slug, kind) => getRecentDigests(db(), slug, 7, kind),
+      },
+    );
+
+    expect(result.data.kind).toBe("weekly");
+    expect(result.data.periodStart).toBe("2026-10-19");
+    expect(result.data.intro).toBe("Weekly overview narrative");
+    expect(result.data.items).toHaveLength(1);
+    expect(result.data.items[0].title).toBe("Weekly Tech Article");
+
+    // RSS includes weekly digest with title 'Weekly Digest — 2026-10-19' and link containing ?kind=weekly
+    const rssRes = await digestFeedResponse(
+      db(),
+      "https://news.ioenv.com",
+      "technology",
+    );
+    const rssXml = await rssRes.text();
+    expect(rssXml).toContain("<title>Weekly Digest — 2026-10-19</title>");
+    expect(rssXml).toContain(
+      "<link>https://news.ioenv.com/digest/technology/2026-10-19?kind=weekly</link>",
+    );
+    expect(rssXml).toContain("Weekly overview narrative");
+  });
+
+  it("finance weekly digest carries disclaimer on public page and in RSS feed", async () => {
+    const eventId = await seedEvent(finance.industryId, "Finance Event 1", 0);
+    const artId = await seedArticle({
+      ...finance,
+      title: "Finance Article 1",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, artId, 1000);
+    await seedReview(artId, "approved");
+
+    const itemsJson = JSON.stringify([
+      {
+        eventId,
+        title: "Finance Event 1",
+        oneLiner: "Financial markets shift.",
+        sourceName: "Finance Times",
+        articleCount: 1,
+      },
+    ]);
+
+    await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'weekly', '2026-10-19', 'UTC', 'ready', 'Finance weekly recap', ?2, 1000, 2000)`,
+    )
+      .bind(finance.industryId, itemsJson)
+      .run();
+
+    const result = await loadDigest(
+      { section: "finance", date: "2026-10-19" },
+      "weekly",
+      {
+        getDigest: (slug, date, kind) => getDigest(db(), slug, date, kind),
+        getRecentDigests: (slug, kind) => getRecentDigests(db(), slug, 7, kind),
+      },
+    );
+
+    expect(result.data.section.disclaimer).toBe(DISCLAIMER);
+
+    const rssRes = await digestFeedResponse(
+      db(),
+      "https://news.ioenv.com",
+      "finance",
+    );
+    const rssXml = await rssRes.text();
+    expect(rssXml).toContain("<title>Weekly Digest — 2026-10-19</title>");
+    expect(rssXml).toContain(DISCLAIMER);
+  });
 });

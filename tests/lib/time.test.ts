@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   dayBoundsUtc,
   formatUtc,
+  isWeeklyDigestDue,
   localDate,
   parseFeedDate,
+  weekBoundsUtc,
 } from "../../src/lib/time";
 
 const iso = (raw: string, offset = "+00:00") =>
@@ -209,5 +211,57 @@ describe("dayBoundsUtc", () => {
     expect(new Date(start).toISOString()).toBe("2026-10-21T00:00:00.000Z");
     expect(new Date(end).toISOString()).toBe("2026-10-22T00:00:00.000Z");
     expect(end - start).toBe(24 * 3600 * 1000);
+  });
+});
+
+describe("weekBoundsUtc", () => {
+  it("computes exact week bounds for UTC", () => {
+    const [start, end] = weekBoundsUtc("2026-10-19", "UTC");
+    expect(new Date(start).toISOString()).toBe("2026-10-19T00:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-10-26T00:00:00.000Z");
+    expect(end - start).toBe(7 * 24 * 3600 * 1000);
+  });
+
+  it("computes exact week bounds for Asia/Shanghai", () => {
+    const [start, end] = weekBoundsUtc("2026-10-19", "Asia/Shanghai");
+    expect(new Date(start).toISOString()).toBe("2026-10-18T16:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-10-25T16:00:00.000Z");
+    expect(end - start).toBe(7 * 24 * 3600 * 1000);
+  });
+
+  it("handles DST transition spanning a week in America/New_York", () => {
+    // 2026-03-02 (Mon) to 2026-03-09 (Mon), DST begins on 2026-03-08 (spring forward -1hr)
+    const [start, end] = weekBoundsUtc("2026-03-02", "America/New_York");
+    expect(new Date(start).toISOString()).toBe("2026-03-02T05:00:00.000Z");
+    expect(new Date(end).toISOString()).toBe("2026-03-09T04:00:00.000Z");
+    expect((end - start) / 3_600_000).toBe(167); // 7 * 24 - 1 = 167 hours
+  });
+});
+
+describe("isWeeklyDigestDue", () => {
+  it("returns due: true and preceding Monday on a Monday", () => {
+    // 2026-10-26 is a Monday
+    const mondayMs = Date.parse("2026-10-26T12:00:00.000Z");
+    const res = isWeeklyDigestDue(mondayMs, "UTC");
+    expect(res.due).toBe(true);
+    expect(res.periodStart).toBe("2026-10-19");
+  });
+
+  it("returns due: false on a Tuesday", () => {
+    // 2026-10-27 is a Tuesday
+    const tuesdayMs = Date.parse("2026-10-27T12:00:00.000Z");
+    const res = isWeeklyDigestDue(tuesdayMs, "UTC");
+    expect(res.due).toBe(false);
+    expect(res.periodStart).toBe("2026-10-19");
+  });
+
+  it("respects timezone for Monday determination", () => {
+    // Sunday 2026-10-25 18:00:00 UTC is Monday 2026-10-26 02:00:00 in Asia/Shanghai
+    const ms = Date.parse("2026-10-25T18:00:00.000Z");
+    expect(isWeeklyDigestDue(ms, "UTC").due).toBe(false);
+    expect(isWeeklyDigestDue(ms, "Asia/Shanghai").due).toBe(true);
+    expect(isWeeklyDigestDue(ms, "Asia/Shanghai").periodStart).toBe(
+      "2026-10-19",
+    );
   });
 });

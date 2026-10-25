@@ -82,6 +82,19 @@ function SectionPage() {
               Daily Digest
             </Link>
           )}
+          {section.latestWeeklyDigestDate && (
+            <Link
+              to="/digest/$section/$date"
+              params={{
+                section: section.slug,
+                date: section.latestWeeklyDigestDate,
+              }}
+              search={{ kind: "weekly" }}
+              className="font-mono text-xs font-bold uppercase tracking-wider underline hover:text-sec-ink"
+            >
+              Weekly Digest
+            </Link>
+          )}
           <a
             href={`/rss/${section.slug}.xml`}
             className="font-mono text-xs font-bold uppercase tracking-wider underline"

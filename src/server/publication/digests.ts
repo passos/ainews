@@ -12,6 +12,7 @@ export interface DigestItemView {
 
 export interface DigestView {
   id: number;
+  kind?: "daily" | "weekly";
   section: SectionInfo;
   periodStart: string;
   publishedAt: number;
@@ -26,6 +27,7 @@ export interface RecentDigestLink {
 
 interface RawDigestRow {
   id: number;
+  kind: "daily" | "weekly";
   section_slug: string;
   section_name: string;
   section_disclaimer: string | null;
@@ -136,6 +138,7 @@ export async function getDigest(
   db: Db,
   slug: string,
   dateStr: string,
+  kind: "daily" | "weekly" = "daily",
 ): Promise<DigestView | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     return null;
@@ -144,6 +147,7 @@ export async function getDigest(
   const rows = await db.all<RawDigestRow>(sql`
     SELECT
       d.id AS id,
+      d.kind AS kind,
       i.slug AS section_slug,
       i.name AS section_name,
       i.disclaimer AS section_disclaimer,
@@ -154,7 +158,7 @@ export async function getDigest(
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
-      AND d.kind = 'daily'
+      AND d.kind = ${kind}
       AND d.period_start = ${dateStr}
       AND d.status = 'ready'
       AND d.published_at IS NOT NULL
@@ -181,6 +185,7 @@ export async function getDigest(
 
   return {
     id: row.id,
+    kind: row.kind,
     section: {
       slug: row.section_slug,
       name: row.section_name,
@@ -197,6 +202,7 @@ export async function getRecentDigests(
   db: Db,
   slug: string,
   limit = 7,
+  kind: "daily" | "weekly" = "daily",
 ): Promise<RecentDigestLink[]> {
   const rows = await db.all<{
     date: string;
@@ -210,7 +216,7 @@ export async function getRecentDigests(
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
-      AND d.kind = 'daily'
+      AND d.kind = ${kind}
       AND d.status = 'ready'
       AND d.published_at IS NOT NULL
     ORDER BY d.period_start DESC
@@ -235,6 +241,7 @@ export async function getRecentDigests(
 
 export interface DigestFeedItem {
   id: number;
+  kind: "daily" | "weekly";
   periodStart: string;
   publishedAt: number;
   intro: string;
@@ -264,6 +271,7 @@ export async function getDigestFeed(
   const rows = await db.all<RawDigestRow>(sql`
     SELECT
       d.id AS id,
+      d.kind AS kind,
       i.slug AS section_slug,
       i.name AS section_name,
       i.disclaimer AS section_disclaimer,
@@ -274,10 +282,10 @@ export async function getDigestFeed(
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
-      AND d.kind = 'daily'
+      AND d.kind IN ('daily', 'weekly')
       AND d.status = 'ready'
       AND d.published_at IS NOT NULL
-    ORDER BY d.period_start DESC
+    ORDER BY d.period_start DESC, d.id DESC
     LIMIT ${limit}
   `);
 
@@ -293,6 +301,7 @@ export async function getDigestFeed(
       const intro = suppressIntro ? "" : r.intro;
       digests.push({
         id: r.id,
+        kind: r.kind,
         periodStart: r.period_start,
         publishedAt: r.published_at!,
         intro,

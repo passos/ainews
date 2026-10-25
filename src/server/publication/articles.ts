@@ -69,6 +69,7 @@ export interface SectionInfo {
   name: string;
   disclaimer: string | null;
   latestDigestDate?: string | null;
+  latestWeeklyDigestDate?: string | null;
 }
 
 export interface ArticleView {
@@ -167,7 +168,14 @@ async function findSection(db: Db, slug: string): Promise<SectionInfo | null> {
              AND d.status = 'ready'
              AND d.published_at IS NOT NULL
            ORDER BY d.period_start DESC
-           LIMIT 1) AS latestDigestDate
+           LIMIT 1) AS latestDigestDate,
+          (SELECT d.period_start FROM digests d
+           WHERE d.industry_id = i.id
+             AND d.kind = 'weekly'
+             AND d.status = 'ready'
+             AND d.published_at IS NOT NULL
+           ORDER BY d.period_start DESC
+           LIMIT 1) AS latestWeeklyDigestDate
         FROM industries i WHERE i.slug = ${slug}`,
   );
   return rows[0] ?? null;
