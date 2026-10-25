@@ -49,7 +49,7 @@ function makeFakeTransport(
 function makeAllValidFakeTransport(): ModelTransport {
   return makeFakeTransport((_model, input) => {
     const s = JSON.stringify(input);
-    if (s.includes("reality check") || s.includes("claimant")) {
+    if (s.includes("AI-in-Finance Reality Check") || s.includes("claimant")) {
       return {
         claimant: "Alpha Fund",
         claimSummary: "High alpha",
@@ -59,7 +59,7 @@ function makeAllValidFakeTransport(): ModelTransport {
         disclosedCautions: ["Hypothetical"],
       };
     }
-    if (s.includes("regulation") || s.includes("actionTitle")) {
+    if (s.includes("Regulation Watch") || s.includes("actionTitle")) {
       return {
         regulator: "SEC",
         actionTitle: "Inquiry",
@@ -71,7 +71,7 @@ function makeAllValidFakeTransport(): ModelTransport {
       };
     }
     if (
-      s.includes("financial concepts for learners") ||
+      s.includes("Finance Concepts for Learners") ||
       s.includes("plainEnglishDefinition")
     ) {
       return {
@@ -82,7 +82,7 @@ function makeAllValidFakeTransport(): ModelTransport {
         keyTakeaways: ["Takeaway"],
       };
     }
-    if (s.includes("emergingSkills") || s.includes("workforce")) {
+    if (s.includes("workforce intelligence") || s.includes("industryShift")) {
       return {
         industryShift: "Shift",
         emergingSkills: ["Skill 1"],
@@ -91,7 +91,7 @@ function makeAllValidFakeTransport(): ModelTransport {
         trainingRecommendations: ["Train"],
       };
     }
-    if (s.includes("policyName") || s.includes("policy analysis")) {
+    if (s.includes("Policy Impact Explorer") || s.includes("policyName")) {
       return {
         policyName: "Policy",
         summary: "Summary",
@@ -101,19 +101,29 @@ function makeAllValidFakeTransport(): ModelTransport {
       };
     }
     if (
-      s.includes("pedagogical facilitation") ||
-      s.includes("classroomActivities")
+      s.includes("Classroom Discussion Builder") ||
+      s.includes("pedagogical designer") ||
+      s.includes("gradeLevels") ||
+      s.includes("learningGoal")
     ) {
       return {
         topic: "Topic",
         gradeLevels: ["Grade 8"],
-        discussionQuestions: [{ question: "Q", learningGoal: "G" }],
-        classroomActivities: [{ activity: "A", instructions: "I" }],
+        discussionQuestions: [
+          {
+            question: "Discussion question?",
+            learningGoal: "Critical thinking.",
+          },
+        ],
+        classroomActivities: [
+          { activity: "Socratic Seminar", instructions: "Split into pairs." },
+        ],
       };
     }
     if (
-      s.includes("educationEvidence") ||
-      s.includes("empirical verification analyst")
+      s.includes("empirical education research evaluator") ||
+      s.includes("Education Evidence Checker") ||
+      s.includes("claimedOutcomes")
     ) {
       return {
         subject: "Subject",
@@ -138,11 +148,15 @@ function makeAllValidFakeTransport(): ModelTransport {
       };
     }
     if (
-      s.toLowerCase().includes("learning materials") ||
+      s.includes("interactive curriculum and learning materials designer") ||
       s.includes("conceptExplainer")
     ) {
       return {
-        audience: "student",
+        audience: s.includes("EDUCATOR")
+          ? "educator"
+          : s.includes("PROFESSIONAL")
+            ? "professional"
+            : "student",
         conceptExplainer: "Explainer",
         glossary: [{ term: "T", definition: "D" }],
         quiz: [
@@ -155,6 +169,23 @@ function makeAllValidFakeTransport(): ModelTransport {
         ],
         discussionQuestions: ["D"],
         activities: ["A"],
+      };
+    }
+    if (
+      s.includes("expert educational writer") ||
+      s.includes("keyPoints") ||
+      s.includes("overview")
+    ) {
+      return {
+        audience: s.includes("EDUCATOR")
+          ? "educator"
+          : s.includes("PROFESSIONAL")
+            ? "professional"
+            : "student",
+        overview: "Overview of the verified event.",
+        keyPoints: ["Key point 1."],
+        implications: ["Practical implication 1."],
+        glossary: [{ term: "T", definition: "D" }],
       };
     }
     return {
@@ -1768,7 +1799,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(policyRow?.status).toBe("published");
   });
 
-  it("never generates Education editorial products in non-education sectors", async () => {
+  it("never generates Education editorial products in non-education sectors even with matching keywords and evidence", async () => {
     await ensureBudget();
     const config = JSON.stringify({
       analysis: {
@@ -1808,8 +1839,8 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(ind!.id)
       .first<{ id: number }>();
 
-    // Contains education keywords but is in Technology sector
-    const art = await env.DB.prepare(
+    // Article 1: matches policy_impact_explorer and classroom_discussion_builder criteria
+    const art1 = await env.DB.prepare(
       `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
        VALUES (?1, ?2, 'https://tech/art-edu-words', 'https://tech/art-edu-words', 'Department of Education AI Policy Cloud Infrastructure', 'Cloud servers handling student classroom data.', 'shaTechEdu', 1000, 'grouped', 1000)
        RETURNING id`,
@@ -1820,14 +1851,36 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     await env.DB.prepare(
       "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechEdu', 'approved', 'auto', 1000)",
     )
-      .bind(art!.id)
+      .bind(art1!.id)
       .run();
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'research_study', '["policy", "research"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'policy_change', '["policy", "classroom"]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
-      .bind(art!.id)
+      .bind(art1!.id)
+      .run();
+
+    // Article 2: matches education_evidence_checker criteria
+    const art2 = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech/art-edu-study', 'https://tech/art-edu-study', 'Empirical Study on AI Tutor Outcomes', 'Randomized trial on math learning.', 'shaTechStudy', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechStudy', 'approved', 'auto', 1000)",
+    )
+      .bind(art2!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'research_study', '["peer_reviewed", "test_scores"]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art2!.id)
       .run();
 
     const event = await env.DB.prepare(
@@ -1839,7 +1892,13 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     await env.DB.prepare(
       "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
     )
-      .bind(event!.id, art!.id)
+      .bind(event!.id, art1!.id)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art2!.id)
       .run();
 
     const transport = makeAllValidFakeTransport();
@@ -1848,8 +1907,6 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       transport,
     });
     expect(res.status).toBe("generated");
-    // Story brief only, NO education artifacts!
-    expect(res.generatedCount).toBe(1);
 
     const rows = await env.DB.prepare(
       "SELECT type FROM event_artifacts WHERE event_id = ?1",
@@ -1858,7 +1915,8 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .all<{ type: string }>();
 
     const types = rows.results.map((r) => r.type);
-    expect(types).toEqual(["story_brief"]);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).not.toContain("policy_impact_explorer");
     expect(types).not.toContain("classroom_discussion_builder");
     expect(types).not.toContain("education_evidence_checker");
@@ -2189,7 +2247,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'ai_in_finance_claim', '["backtest", "regulatory_finding"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'backtest_result', '["backtest", "regulation", "sec"]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -2220,12 +2278,14 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .all<{ type: string }>();
 
     const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).not.toContain("finance_reality_check");
     expect(types).not.toContain("regulation_watch");
     expect(types).not.toContain("finance_concept_explainer");
   });
 
-  it("does not generate Finance reality check or regulation watch when content type and tags do not match", async () => {
+  it("does not generate Finance reality check or regulation watch when content type and tags do not match even if eventScore >= deepThreshold", async () => {
     await ensureBudget();
     const config = JSON.stringify({
       analysis: {
@@ -2278,10 +2338,10 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(art!.id)
       .run();
 
-    // General news, no backtest or regulatory finding
+    // General news, no backtest or regulatory finding, but high score >= deepThreshold
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'macro_commentary', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'macro_commentary', '[]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -2313,6 +2373,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).toContain("finance_concept_explainer");
     expect(types).not.toContain("finance_reality_check");
     expect(types).not.toContain("regulation_watch");
@@ -2373,7 +2434,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'market_trend', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'market_trend', '["workforce"]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -2404,10 +2465,12 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .all<{ type: string }>();
 
     const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).not.toContain("skills_career_trends");
   });
 
-  it("does not generate Skills and Career Trends in industry sector when content type is not market_trend or company_move", async () => {
+  it("does not generate Skills and Career Trends in industry sector when content type is not market_trend or company_move even if eventScore >= deepThreshold", async () => {
     await ensureBudget();
     const config = JSON.stringify({
       analysis: {
@@ -2462,7 +2525,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'tutorial_guide', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'tutorial_guide', '[]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -2494,10 +2557,11 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).not.toContain("skills_career_trends");
   });
 
-  it("does not generate Education policy or evidence products when content type and tags do not match", async () => {
+  it("does not generate Education policy or evidence products when content type and tags do not match even if eventScore >= deepThreshold", async () => {
     await ensureBudget();
     const config = JSON.stringify({
       analysis: {
@@ -2552,7 +2616,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'student_reflection', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'student_reflection', '[]', 95, 0.9, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
@@ -2584,6 +2648,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("story_brief");
+    expect(types).toContain("learning_material");
     expect(types).toContain("classroom_discussion_builder");
     expect(types).not.toContain("policy_impact_explorer");
     expect(types).not.toContain("education_evidence_checker");
