@@ -225,7 +225,10 @@ export async function trackEventPrimarySources(
         .bind(existing.id)
         .first();
 
-      if (isApproved && existing.stage === "grouped") {
+      if (
+        isApproved &&
+        (existing.stage === "grouped" || existing.stage === "analyzed")
+      ) {
         // Link to event and bump revision atomically, verifying approval in-batch
         const batchRes = await deps.db.batch([
           deps.db
@@ -246,6 +249,12 @@ export async function trackEventPrimarySources(
                WHERE id = ?2 AND revision = ?3 AND changes() = 1`,
             )
             .bind(now, eventId, event.revision),
+          deps.db
+            .prepare(
+              `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
+               WHERE id = ?2 AND stage = 'analyzed'`,
+            )
+            .bind(now, existing.id),
         ]);
 
         if (batchRes[0].meta.changes === 1) {
@@ -478,6 +487,24 @@ export async function trackEventPrimarySources(
           if (isFinance) {
             // Finance section articles require human review (AGENTS.md §4).
             // Left in stage 'analyzed' with no review record, waiting for human decision in /admin/review.
+            await deps.db
+              .prepare(
+                `INSERT INTO analyses (
+                   article_id, prompt_version, scores, content_type, evidence_tags, total_score,
+                   prefilter_pass, selected, created_at
+                 )
+                 VALUES (?1, 'primary_tracker', '{}', 'primary_source', ?2, 100, 1, 1, ?3)
+                 ON CONFLICT (article_id, prompt_version) DO NOTHING`,
+              )
+              .bind(
+                newArticleId,
+                JSON.stringify({
+                  kind: "primary_source",
+                  origin_event_id: eventId,
+                }),
+                now,
+              )
+              .run();
           } else {
             // In D1 batch: approve review, record analysis for evidence tags, add to event_articles, bump event revision
             await deps.db.batch([

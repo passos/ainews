@@ -146,12 +146,19 @@ export async function getEvent(
     WHERE ea.event_id = ${eventId}
       AND ea.type = 'revision_diff'
       AND ea.status = 'published'
-      AND EXISTS (
-        SELECT 1 FROM event_articles ea2
-        JOIN articles a ON a.id = ea2.article_id
-        WHERE ea2.event_id = ea.event_id
-          AND ea2.input_revision = ea.input_revision
-          AND ${approvedArticleWhere}
+      AND (
+        EXISTS (
+          SELECT 1 FROM event_articles ea2
+          JOIN articles a ON a.id = ea2.article_id
+          WHERE ea2.event_id = ea.event_id
+            AND ea2.input_revision = ea.input_revision
+            AND ${approvedArticleWhere}
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM event_articles ea3
+          WHERE ea3.event_id = ea.event_id
+            AND ea3.input_revision = ea.input_revision
+        )
       )
     ORDER BY ea.input_revision ASC
   `);
@@ -219,6 +226,9 @@ export async function getEvent(
   const revisionSet = new Set<number>();
   for (const a of articles) {
     revisionSet.add(a.inputRevision);
+  }
+  for (const d of diffRows) {
+    revisionSet.add(d.input_revision);
   }
   if (revisionSet.size === 0) revisionSet.add(1);
 

@@ -34,7 +34,7 @@ export const rawCitationSchema = z.strictObject({
   articleId: z.number().int().positive(),
   quote: z.string().min(15),
   stance: z.enum(EVIDENCE_STANCES),
-  sourceRole: z.enum(SOURCE_ROLES).default("independent"),
+  sourceRole: z.enum(SOURCE_ROLES).optional(),
 });
 
 export type RawCitation = z.infer<typeof rawCitationSchema>;

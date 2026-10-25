@@ -86,6 +86,90 @@ export async function groupArticle(
     return { status: "skipped", reason: `stage_is_${article.stage}` };
   }
 
+  // Check if article originated from an event (e.g. primary source tracker)
+  const originAnalysis = await deps.db
+    .prepare(
+      `SELECT evidence_tags FROM analyses WHERE article_id = ?1 ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(articleId)
+    .first<{ evidence_tags: string | null }>();
+
+  let originEventId: number | null = null;
+  if (originAnalysis?.evidence_tags) {
+    try {
+      const parsedTags = JSON.parse(originAnalysis.evidence_tags);
+      if (typeof parsedTags.origin_event_id === "number") {
+        originEventId = parsedTags.origin_event_id;
+      }
+    } catch {
+      // ignore json error
+    }
+  }
+
+  if (originEventId !== null) {
+    const originEvent = await deps.db
+      .prepare(
+        `SELECT id, revision FROM events WHERE id = ?1 AND industry_id = ?2`,
+      )
+      .bind(originEventId, article.industry_id)
+      .first<{ id: number; revision: number }>();
+
+    if (originEvent) {
+      const commitNow = deps.now();
+      try {
+        const results = await deps.db.batch([
+          deps.db
+            .prepare(
+              `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+               SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
+               WHERE (SELECT revision FROM events WHERE id = ?1) = ?4
+                 AND NOT EXISTS (SELECT 1 FROM event_articles WHERE article_id = ?2)`,
+            )
+            .bind(originEvent.id, articleId, commitNow, originEvent.revision),
+          deps.db
+            .prepare(
+              `UPDATE events SET revision = revision + 1, updated_at = ?1
+               WHERE id = ?2 AND revision = ?3
+                 AND changes() = 1
+                 AND EXISTS (
+                   SELECT 1 FROM reviews r
+                   JOIN articles a ON a.id = r.article_id
+                   WHERE a.id = ?4 AND r.body_sha = a.body_sha AND r.decision = 'approved'
+                 )`,
+            )
+            .bind(commitNow, originEvent.id, originEvent.revision, articleId),
+          deps.db
+            .prepare(
+              `UPDATE articles SET stage = 'grouped', stage_updated_at = ?1, requeue_count = 0
+               WHERE id = ?2 AND stage = 'analyzed' AND industry_id = ?3
+                 AND EXISTS (SELECT 1 FROM event_articles WHERE event_id = ?4 AND article_id = ?2)`,
+            )
+            .bind(commitNow, articleId, article.industry_id, originEvent.id),
+        ]);
+
+        if (results[0].meta.changes === 1) {
+          return { status: "grouped", eventId: originEvent.id, isNew: false };
+        }
+        const existing = await deps.db
+          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
+          .bind(articleId)
+          .first<{ event_id: number }>();
+        if (existing) {
+          return { status: "already_grouped", eventId: existing.event_id };
+        }
+      } catch (err) {
+        const existing = await deps.db
+          .prepare("SELECT event_id FROM event_articles WHERE article_id = ?1")
+          .bind(articleId)
+          .first<{ event_id: number }>();
+        if (existing) {
+          return { status: "already_grouped", eventId: existing.event_id };
+        }
+        throw err;
+      }
+    }
+  }
+
   // 2. Compute embedding
   const embedText = `${article.title}\n${article.summary ?? ""}`.trim();
   const textSha = await sha256Hex(embedText);

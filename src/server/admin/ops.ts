@@ -1093,7 +1093,7 @@ export async function listPendingArtifacts(
     JOIN events e ON e.id = ea.event_id
     JOIN industries i ON i.id = e.industry_id
     WHERE ea.status = 'pending_review'
-      AND ea.input_revision = e.revision
+      AND (ea.input_revision = e.revision OR (ea.type = 'revision_diff' AND ea.input_revision <= e.revision))
     ORDER BY ea.created_at DESC
   `);
   return rows;
@@ -1118,7 +1118,7 @@ export async function reviewArtifact(
          AND EXISTS (
            SELECT 1 FROM events e
            WHERE e.id = event_artifacts.event_id
-             AND e.revision = ?3
+             AND (e.revision = ?3 OR (event_artifacts.type = 'revision_diff' AND e.revision >= ?3))
          )`,
     )
     .bind(targetStatus, data.artifactId, data.expectedRevision)
