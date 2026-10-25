@@ -605,6 +605,9 @@ it("does not increment event revision if article stage changed before batch inse
 
   // Grouping skipped because article stage changed:
   expect(res.status).toBe("skipped");
+  if (res.status === "skipped") {
+    expect(res.reason).toBe("article_state_changed");
+  }
 
   // events.revision MUST NOT have incremented (must remain 1):
   const ev = await env.DB.prepare("SELECT revision FROM events WHERE id=?")
