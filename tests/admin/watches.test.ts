@@ -89,4 +89,38 @@ describe("Admin Watch Operations", () => {
     const listWithHits = await listWatches(env.DB);
     expect(listWithHits[0].hitCount).toBe(1);
   });
+
+  it("rejects watch creation and update with empty keywords", async () => {
+    await expect(
+      createWatch(env.DB, {
+        slug: "empty-kw",
+        question: "Question?",
+        criteria: "Criteria",
+        keywords: [],
+      }),
+    ).rejects.toThrow("Watch must have at least one keyword");
+
+    await expect(
+      createWatch(env.DB, {
+        slug: "whitespace-kw",
+        question: "Question?",
+        criteria: "Criteria",
+        keywords: ["   ", ""],
+      }),
+    ).rejects.toThrow("Watch must have at least one keyword");
+
+    const watchId = await createWatch(env.DB, {
+      slug: "valid-kw",
+      question: "Question?",
+      criteria: "Criteria",
+      keywords: ["valid"],
+    });
+
+    await expect(
+      updateWatch(env.DB, {
+        id: watchId,
+        keywords: [],
+      }),
+    ).rejects.toThrow("Watch must have at least one keyword");
+  });
 });

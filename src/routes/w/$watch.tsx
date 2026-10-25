@@ -1,4 +1,5 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { Disclaimer } from "../../components/Disclaimer";
 import { FollowButton } from "../../components/FollowButton";
 import { getWatch } from "../../server/publication/api";
 
@@ -90,6 +91,10 @@ function WatchPage() {
           </div>
         </div>
       </header>
+
+      {watch.industryDisclaimer && (
+        <Disclaimer text={watch.industryDisclaimer} />
+      )}
 
       {/* Material Developments Timeline */}
       <section className="flex flex-col gap-6">

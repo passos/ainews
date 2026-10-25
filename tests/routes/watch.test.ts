@@ -16,10 +16,11 @@ import {
 } from "../publication/helpers";
 
 let tech: { industryId: number; sourceId: number };
+let fin: { industryId: number; sourceId: number };
 
 beforeEach(async () => {
   await resetPublication();
-  ({ technology: tech } = await seedSections());
+  ({ technology: tech, finance: fin } = await seedSections());
 });
 
 describe("tests/routes/watch.test.ts", () => {
@@ -153,5 +154,73 @@ describe("tests/routes/watch.test.ts", () => {
     expect(xml).toContain(
       "OpenAI previews o3 with new ARC-AGI benchmark results.",
     );
+  });
+
+  it("filters out hits where all associated articles are unapproved", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('filter-unapproved-watch', 'Question?', 'Criteria', '["filter"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const watchId = watchRes!.id;
+
+    const eventId = await seedEvent(tech.industryId, "Retracted Event", 1);
+    const unapprovedArt = await seedArticle({
+      ...tech,
+      title: "Unapproved Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, unapprovedArt, 1000);
+    // Note: unapprovedArt has no approved review
+
+    // A hit row exists
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 1000, 'Summary of retracted info', '{}')`,
+    )
+      .bind(watchId, eventId)
+      .run();
+
+    const view = await getWatchView(db(), "filter-unapproved-watch");
+    expect(view).not.toBeNull();
+    // Hit is filtered out because it has 0 approved articles
+    expect(view!.hits.length).toBe(0);
+  });
+
+  it("includes industry disclaimer in WatchDetailView and RSS feed when industry has disclaimer", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('rate-cuts', 'Fed Rate Decisions', 'Interest rate changes', '["rates"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(fin.industryId)
+      .first<{ id: number }>();
+    const watchId = watchRes!.id;
+
+    const eventId = await seedEvent(fin.industryId, "Fed Rate Decision", 1);
+    const art = await seedArticle({
+      industryId: fin.industryId,
+      sourceId: fin.sourceId,
+      title: "Fed Cuts Rates by 25bps",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 2000, 'Fed lowers federal funds rate target.', '{}')`,
+    )
+      .bind(watchId, eventId)
+      .run();
+
+    const view = await getWatchView(db(), "rate-cuts");
+    expect(view).not.toBeNull();
+    expect(view!.watch.industryDisclaimer).toBeTruthy();
+
+    const rss = renderWatchFeed(view!, "https://news.ioenv.com");
+    expect(rss).toContain(view!.watch.industryDisclaimer!);
   });
 });

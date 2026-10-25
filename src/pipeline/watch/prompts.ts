@@ -8,15 +8,16 @@ export function buildWatchJudgeQuestion(question: string, criteria: string) {
     progress: {
       type: "noul" as const,
       instructions: [
-        "Assess whether the new reporting in this news event constitutes a material development answering the reader's topic question according to the criteria.",
-        "A repeated report, superficial commentary, or minor non-substantive mention does NOT qualify.",
+        "Assess whether the NEW reporting in this news event constitutes a material development answering the reader's topic question according to the criteria.",
+        "Compare the new reporting strictly against prior reporting.",
+        "A repeated report, opinion commentary, minor editorial mention, or reiteration of previously known facts does NOT qualify.",
         `Topic Question: "${question}"`,
         `Criteria for Material Development: "${criteria}"`,
       ].join("\n"),
       criteria: {
-        true: "The update reports new, substantive facts, benchmarks, releases, or actions satisfying the criteria.",
+        true: "The NEW reporting reports new substantive breakthroughs, benchmarks, releases, or verified facts satisfying the criteria.",
         false:
-          "The update only repeats existing claims, offers commentary, or lacks material progress according to the criteria.",
+          "The new reporting only repeats prior reporting, offers commentary, or lacks material progress according to the criteria.",
       },
     },
   };

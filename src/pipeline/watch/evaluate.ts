@@ -63,11 +63,11 @@ async function sha256Hex(text: string): Promise<string> {
 function matchKeyword(text: string, keyword: string): boolean {
   const trimmed = keyword.trim();
   if (!trimmed) return false;
-  // If keyword contains spaces or punctuation, substring search
-  if (/[\s\-_]/.test(trimmed)) {
+  // Non-ASCII (e.g. Chinese), or phrases with whitespace/hyphens, or symbols like C++
+  if (/[\u0080-\uFFFF]/.test(trimmed) || /[+\-*_/\s]/.test(trimmed)) {
     return text.toLowerCase().includes(trimmed.toLowerCase());
   }
-  // For single words / acronyms (like "AI"), use word boundary to avoid matching "chain"
+  // Pure ASCII single word / acronym (e.g. "AI", "GPT"): word boundary regex
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`\\b${escaped}\\b`, "i");
   return regex.test(text);
@@ -113,7 +113,7 @@ export async function evaluateEventWatches(
     return { eventId, eventRevision: 0, evaluatedCount: 0, hitCount: 0 };
   }
 
-  // 2. Fetch approved articles for this event
+  // 2. Fetch approved articles for this event (strictly approvedArticleWhere)
   const { results: articles } = await db
     .prepare(
       `SELECT a.id, a.title, a.summary, a.body_sha, a.published_at, ea.created_at AS linked_at
@@ -121,7 +121,7 @@ export async function evaluateEventWatches(
        JOIN articles a ON a.id = ea.article_id
        JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
        WHERE ea.event_id = ?1
-       ORDER BY a.published_at ASC, a.id ASC`,
+       ORDER BY ea.created_at ASC, a.id ASC`,
     )
     .bind(eventId)
     .all<ApprovedArticleRow>();
@@ -135,7 +135,10 @@ export async function evaluateEventWatches(
     };
   }
 
-  // 3. Compute deterministic input SHA for cache / logical key
+  // Event title derived from approved articles to prevent unverified titles leaking
+  const derivedTitle = articles[articles.length - 1]?.title || event.title;
+
+  // 3. Compute deterministic input SHA
   const inputSha = await sha256Hex(
     articles
       .map((a) => `${a.id}:${a.body_sha}`)
@@ -183,7 +186,7 @@ export async function evaluateEventWatches(
       continue;
     }
 
-    // Rule 3: Keywords filter
+    // Rule 3: Keywords filter (Must have at least one matching keyword; empty keywords are filtered out)
     let kwList: string[] = [];
     try {
       const parsed = JSON.parse(watch.keywords);
@@ -199,39 +202,65 @@ export async function evaluateEventWatches(
         .filter(Boolean);
     }
 
-    if (kwList.length > 0) {
-      const fullText =
-        event.title +
-        " " +
-        articles.map((a) => `${a.title} ${a.summary ?? ""}`).join(" ");
+    // A watch with no keywords never bypasses filtering to invoke models
+    if (kwList.length === 0) {
+      continue;
+    }
 
-      const matched = kwList.some((k) => matchKeyword(fullText, k));
-      if (!matched) {
-        // Deterministic filter eliminated this combination: zero model cost!
-        continue;
-      }
+    const fullText =
+      derivedTitle +
+      " " +
+      articles.map((a) => `${a.title} ${a.summary ?? ""}`).join(" ");
+
+    const matched = kwList.some((k) => matchKeyword(fullText, k));
+    if (!matched) {
+      // Deterministic filter eliminated this combination: zero model cost!
+      continue;
     }
 
     evaluatedCount++;
 
-    // Material contrast: newest 2 articles represent latest update
-    const sortedByRecency = [...articles].sort(
-      (a, b) => (b.published_at ?? 0) - (a.published_at ?? 0),
-    );
-    const newArticles = sortedByRecency.slice(0, 2);
+    // Partition articles into new reporting (this revision) vs prior reporting
+    const maxLinkedAt = Math.max(...articles.map((a) => a.linked_at));
+    let newArticles = articles.filter((a) => a.linked_at === maxLinkedAt);
+    let priorArticles = articles.filter((a) => a.linked_at < maxLinkedAt);
 
-    const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${WATCH_PROMPT_VERSION}`;
+    // If all articles were linked in the same timestamp (e.g. initial revision)
+    if (priorArticles.length === 0 && articles.length > 2) {
+      newArticles = articles.slice(-2);
+      priorArticles = articles.slice(0, -2);
+    }
+
+    const watchSha = (
+      await sha256Hex(`${watch.question}:${watch.criteria}`)
+    ).slice(0, 8);
+
+    // Ledger keys bound to watch configuration hash and content input SHA
+    const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
+
+    const bodySections: string[] = [
+      "=== NEW REPORTING IN THIS UPDATE ===",
+      newArticles
+        .map((a) => `[New Article] ${a.title}\n${a.summary ?? ""}`)
+        .join("\n\n"),
+    ];
+
+    if (priorArticles.length > 0) {
+      bodySections.push(
+        "=== PRIOR REPORTING (ALREADY KNOWN) ===",
+        priorArticles
+          .map((a) => `[Prior Article] ${a.title}\n${a.summary ?? ""}`)
+          .join("\n\n"),
+      );
+    }
 
     const state = {
-      title: event.title,
-      summary: articles
+      title: derivedTitle,
+      summary: newArticles
         .map((a) => a.summary ?? "")
         .join(" ")
         .slice(0, 1500),
-      body: articles
-        .map((a) => `[Article] ${a.title}\n${a.summary ?? ""}`)
-        .join("\n\n")
-        .slice(0, 4000),
+      body: bodySections.join("\n\n").slice(0, 4000),
     };
 
     const questions = buildWatchJudgeQuestion(watch.question, watch.criteria);
@@ -240,15 +269,16 @@ export async function evaluateEventWatches(
       { progress?: { noul: number } } | undefined;
 
     const noulVal = answers?.progress?.noul ?? 0;
-    const isHit = noulVal >= 1 ? noulVal >= 50 : noulVal >= 0.5;
+    // Strict > 1 for percentage scale, otherwise >= 0.5 (so noul = 1.0 is a hit)
+    const isHit = noulVal > 1 ? noulVal >= 50 : noulVal >= 0.5;
 
     if (isHit) {
       hitCount++;
-      const writeKey = `watch:summary:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${WATCH_PROMPT_VERSION}`;
+      const writeKey = `watch:summary:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
       const summaryReq = buildWatchSummaryPrompt(
         watch.question,
         watch.criteria,
-        event.title,
+        derivedTitle,
         newArticles,
       );
 
@@ -257,12 +287,29 @@ export async function evaluateEventWatches(
         writeKey,
         summaryReq,
       );
-      const summaryText = summaryRes.text.trim().replace(/^["']|["']$/g, "");
 
+      let summaryText = summaryRes.text.trim().replace(/^["']|["']$/g, "");
+
+      // Guard: Check finishReason === 'STOP'
+      if (summaryRes.finishReason !== "STOP") {
+        console.warn({
+          watchId: watch.id,
+          eventId: event.id,
+          warning: `Watch summary generation truncated: ${summaryRes.finishReason}`,
+        });
+        if (!summaryText) {
+          summaryText =
+            newArticles[0]?.title ||
+            "Material development confirmed by evaluation.";
+        }
+      }
+
+      // Atomic insertion: only commit if event revision hasn't changed concurrently
       await db
         .prepare(
           `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+           WHERE (SELECT revision FROM events WHERE id = ?2) = ?3
            ON CONFLICT (watch_id, event_id, event_revision) DO NOTHING`,
         )
         .bind(

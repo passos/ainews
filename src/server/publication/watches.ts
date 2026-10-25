@@ -34,6 +34,7 @@ export interface WatchDetailView {
     industryId: number | null;
     industryName: string | null;
     industrySlug: string | null;
+    industryDisclaimer: string | null;
     createdAt: number;
   };
   hits: WatchHitItem[];
@@ -54,6 +55,7 @@ export async function getWatchView(
       industryId: watches.industryId,
       industryName: industries.name,
       industrySlug: industries.slug,
+      industryDisclaimer: industries.disclaimer,
       createdAt: watches.createdAt,
     })
     .from(watches)
@@ -131,10 +133,18 @@ export async function getWatchView(
       ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
     `);
 
+    // Strictly exclude hits where no approved articles remain (e.g. all were rejected or retracted)
+    if (articlesQuery.length === 0) {
+      continue;
+    }
+
+    const eventTitle =
+      articlesQuery[articlesQuery.length - 1]?.title || h.event_title;
+
     hitItems.push({
       id: h.id,
       eventId: h.event_id,
-      eventTitle: h.event_title,
+      eventTitle,
       eventRevision: h.event_revision,
       hitAt: h.hit_at,
       summary: h.summary,
@@ -161,6 +171,7 @@ export async function getWatchView(
       industryId: watchRow.industryId,
       industryName: watchRow.industryName,
       industrySlug: watchRow.industrySlug,
+      industryDisclaimer: watchRow.industryDisclaimer,
       createdAt: watchRow.createdAt,
     },
     hits: hitItems,
@@ -193,7 +204,9 @@ export function renderWatchFeed(
   const { watch, hits } = detail;
   const base = siteUrl.replace(/\/+$/, "");
   const link = `${base}/w/${watch.slug}`;
-  const description = `Topic Watch: ${watch.question} — Criteria: ${watch.criteria}`;
+  const description = watch.industryDisclaimer
+    ? `Topic Watch: ${watch.question} — Criteria: ${watch.criteria} | ${watch.industryDisclaimer}`
+    : `Topic Watch: ${watch.question} — Criteria: ${watch.criteria}`;
 
   const itemsXml = hits
     .map((h) => {
@@ -203,6 +216,7 @@ export function renderWatchFeed(
         h.articles.length > 0
           ? `Sources: ${h.articles.map((a) => a.sourceName).join(", ")}`
           : null,
+        watch.industryDisclaimer,
       ]
         .filter(Boolean)
         .join(" | ");

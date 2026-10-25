@@ -2,8 +2,9 @@ import { sendGenerate, type PipelineEnv } from "../messages";
 
 export async function enqueueDueWatches(
   env: Pick<PipelineEnv, "DB" | "Q_GENERATE">,
-  _now: number,
+  now: number,
   limit = 20,
+  windowMs = 30 * 60 * 1000,
 ): Promise<number[]> {
   if (!env.Q_GENERATE || !env.DB) {
     return [];
@@ -18,11 +19,14 @@ export async function enqueueDueWatches(
     return [];
   }
 
-  // Find events with approved articles and revision > 0
+  const since = now - windowMs;
+
+  // Find events with approved articles and revision > 0 updated within the window
   const { results } = await env.DB.prepare(
     `SELECT e.id
      FROM events e
      WHERE e.revision > 0
+       AND e.updated_at >= ?1
        AND EXISTS (
          SELECT 1 FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
@@ -30,9 +34,9 @@ export async function enqueueDueWatches(
          WHERE ea.event_id = e.id
        )
      ORDER BY e.updated_at DESC
-     LIMIT ?1`,
+     LIMIT ?2`,
   )
-    .bind(limit)
+    .bind(since, limit)
     .all<{ id: number }>();
 
   if (!results || results.length === 0) {

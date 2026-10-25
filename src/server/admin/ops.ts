@@ -1508,6 +1508,13 @@ export async function createWatch(
   },
   now = Date.now(),
 ): Promise<number> {
+  const cleanedKeywords = (data.keywords || [])
+    .map((k) => k.trim())
+    .filter(Boolean);
+  if (cleanedKeywords.length === 0) {
+    throw new Error("Watch must have at least one keyword");
+  }
+
   const res = await database
     .prepare(
       `INSERT INTO watches (
@@ -1518,7 +1525,7 @@ export async function createWatch(
       data.slug.trim(),
       data.question.trim(),
       data.criteria.trim(),
-      JSON.stringify(data.keywords),
+      JSON.stringify(cleanedKeywords),
       data.industryId ?? null,
       data.status ?? "active",
       now,
@@ -1554,8 +1561,12 @@ export async function updateWatch(
     values.push(data.criteria.trim());
   }
   if (data.keywords !== undefined) {
+    const cleanedKeywords = data.keywords.map((k) => k.trim()).filter(Boolean);
+    if (cleanedKeywords.length === 0) {
+      throw new Error("Watch must have at least one keyword");
+    }
     updates.push(`keywords = ?${paramIndex++}`);
-    values.push(JSON.stringify(data.keywords));
+    values.push(JSON.stringify(cleanedKeywords));
   }
   if (data.industryId !== undefined) {
     updates.push(`industry_id = ?${paramIndex++}`);
