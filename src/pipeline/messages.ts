@@ -56,7 +56,6 @@ export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {
   Q_GENERATE?: Queue;
   V_EVENTS?: VectorizeIndex;
   V_CHUNKS?: VectorizeIndex;
-  WEBSEARCH?: WebSearch;
   AI?: Env["AI"];
   /** Model calls go through this AI Gateway (wrangler var). */
   AI_GATEWAY_ID?: string;

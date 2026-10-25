@@ -16,6 +16,7 @@ import {
   sourceCandidates,
   sources,
   industries,
+  llmCalls,
 } from "../../server/db/schema";
 import { parseAnalysisConfig, type AnalysisConfig } from "../analyze/config";
 import { FINANCE_SLUG } from "../analyze/analyze";
@@ -24,9 +25,51 @@ import { probeCandidate } from "./probe";
 import { evaluateCandidateSamples } from "./score";
 import type { ToMarkdown } from "../body/ladder";
 
+export interface WebSearchItem {
+  url: string;
+  title?: string;
+  snippet?: string;
+}
+
+export interface WebSearchResponse {
+  items: WebSearchItem[];
+}
+
+export interface WebSearchClient {
+  search(options: {
+    query: string;
+    limit?: number;
+  }): Promise<WebSearchResponse>;
+}
+
+export function createWebSearchClient(ai?: Env["AI"]): WebSearchClient | null {
+  if (
+    !ai ||
+    typeof (ai as unknown as { websearch?: unknown }).websearch !== "function"
+  ) {
+    return null;
+  }
+  return {
+    async search(options: { query: string; limit?: number }) {
+      const res = await (
+        ai as unknown as {
+          websearch: (req: unknown) => Promise<unknown>;
+        }
+      ).websearch({
+        query: options.query,
+        limit: options.limit ?? 10,
+      });
+      if (res && typeof (res as Response).json === "function") {
+        return (await (res as Response).json()) as WebSearchResponse;
+      }
+      return res as WebSearchResponse;
+    },
+  };
+}
+
 export interface DiscoverDeps {
   db?: D1Database;
-  webSearch?: WebSearch;
+  webSearch?: WebSearchClient;
   transport?: ModelTransport;
   models?: ModelClient;
   fetch?: typeof fetch;
@@ -107,13 +150,13 @@ export async function runDiscovery(
       now: nowFn,
     });
 
-  const webSearch = overrides.webSearch ?? env.WEBSEARCH;
+  const webSearch = overrides.webSearch ?? createWebSearchClient(env.AI);
   if (!webSearch) {
     await db
       .update(discoveryRuns)
       .set({
         status: "failed",
-        error: "WebSearch binding not available",
+        error: "WebSearch service not available",
         completedAt: nowFn(),
       })
       .where(eq(discoveryRuns.id, runId));
@@ -214,18 +257,26 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
     let candidatesAdded = 0;
     let candidatesAutoEnabled = 0;
 
-    // Check current active sources count for Invariant 2
-    const activeCountResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(sources)
-      .where(and(eq(sources.industryId, ind.id), eq(sources.status, "active")));
-    let currentActiveCount = Number(activeCountResult[0]?.count ?? 0);
-
     const isFinance = ind.slug.trim().toLowerCase() === FINANCE_SLUG;
 
     // 5. Probe candidates
     const probeTargets = candidateUrls.slice(0, MAX_CANDIDATES_TO_PROBE);
     for (const targetUrl of probeTargets) {
+      // Check discovery task budget limit ($0.05 = 50,000 micros)
+      const costRes = await db
+        .select({ totalCost: sql<number>`coalesce(sum(cost_micros), 0)` })
+        .from(llmCalls)
+        .where(
+          and(
+            sql`logical_key LIKE ${`discover_%`}`,
+            sql`created_at >= ${run.createdAt}`,
+          ),
+        );
+      const currentRunCost = Number(costRes[0]?.totalCost ?? 0);
+      if (currentRunCost >= 50_000) {
+        break;
+      }
+
       const probeRes = await probeCandidate(
         targetUrl,
         { DB: overrides.db ?? env.DB },
@@ -236,6 +287,11 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
         },
       );
 
+      // If feed already exists in sources for this industry, do NOT score or duplicate
+      if (existingFeeds.has(probeRes.feedUrl)) {
+        continue;
+      }
+
       let sampleScores: number[] = [];
       let avgScore: number | null = null;
       let candidateStatus:
@@ -245,6 +301,9 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       if (probeRes.requiresBrowser === 1) {
         candidateStatus = "rejected";
         rejectionReason = probeRes.rejectionReason || "requires_browser";
+      } else if (probeRes.kind !== "rss") {
+        candidateStatus = "rejected";
+        rejectionReason = "no_rss_feed";
       } else if (config) {
         const evalRes = await evaluateCandidateSamples(
           probeRes.sampleArticles,
@@ -262,13 +321,24 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
           // Invariant 3: Finance NEVER auto-enables
           candidateStatus = "pending";
           rejectionReason = "finance_requires_review";
-        } else if (currentActiveCount >= MAX_ACTIVE_SOURCES_PER_INDUSTRY) {
-          // Invariant 2: 50 active sources cap
-          candidateStatus = "pending";
-          rejectionReason = "active_cap_reached";
         } else {
-          // Eligible for auto-enable!
-          candidateStatus = "auto_enabled";
+          // Re-verify live active count from DB to prevent race conditions
+          const liveActiveRes = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(sources)
+            .where(
+              and(eq(sources.industryId, ind.id), eq(sources.status, "active")),
+            );
+          const liveActiveCount = Number(liveActiveRes[0]?.count ?? 0);
+
+          if (liveActiveCount >= MAX_ACTIVE_SOURCES_PER_INDUSTRY) {
+            // Invariant 2: 50 active sources cap
+            candidateStatus = "pending";
+            rejectionReason = "active_cap_reached";
+          } else {
+            // Eligible for auto-enable!
+            candidateStatus = "auto_enabled";
+          }
         }
       }
 
@@ -283,6 +353,15 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
             eq(sourceCandidates.feedUrl, probeRes.feedUrl),
           ),
         );
+
+      const wasDecidedByAdmin =
+        existingCandidate[0]?.status === "approved" ||
+        existingCandidate[0]?.rejectionReason === "rejected_by_admin";
+
+      if (wasDecidedByAdmin) {
+        candidateStatus = existingCandidate[0].status;
+        rejectionReason = existingCandidate[0].rejectionReason;
+      }
 
       if (existingCandidate.length > 0) {
         await db
@@ -321,8 +400,8 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
         candidatesAdded++;
       }
 
-      // Auto-enable into sources if passed
-      if (candidateStatus === "auto_enabled") {
+      // Auto-enable into sources if passed and not overridden by admin
+      if (candidateStatus === "auto_enabled" && !wasDecidedByAdmin) {
         await db
           .insert(sources)
           .values({
@@ -342,11 +421,22 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
           });
 
         candidatesAutoEnabled++;
-        currentActiveCount++;
+        existingFeeds.add(probeRes.feedUrl);
       }
     }
 
-    // 6. Complete run
+    // 6. Complete run & update cost_micros
+    const finalCostRes = await db
+      .select({ totalCost: sql<number>`coalesce(sum(cost_micros), 0)` })
+      .from(llmCalls)
+      .where(
+        and(
+          sql`logical_key LIKE ${`discover_%`}`,
+          sql`created_at >= ${run.createdAt}`,
+        ),
+      );
+    const finalCost = Number(finalCostRes[0]?.totalCost ?? 0);
+
     await db
       .update(discoveryRuns)
       .set({
@@ -354,6 +444,7 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
         candidatesFound,
         candidatesAdded,
         candidatesAutoEnabled,
+        costMicros: finalCost,
         completedAt: nowFn(),
       })
       .where(eq(discoveryRuns.id, runId));

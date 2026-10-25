@@ -491,9 +491,20 @@ function AdminSourcesPage() {
                           c.status !== "auto_enabled" && (
                             <button
                               type="button"
-                              disabled={actingId === c.id}
+                              disabled={
+                                actingId === c.id ||
+                                c.requiresBrowser === 1 ||
+                                c.kind !== "rss"
+                              }
+                              title={
+                                c.requiresBrowser === 1
+                                  ? "Cannot approve candidate requiring browser rendering"
+                                  : c.kind !== "rss"
+                                    ? "Cannot approve non-RSS candidate"
+                                    : undefined
+                              }
                               onClick={() => handleApproveCandidate(c.id)}
-                              className="rounded bg-emerald-600 px-2 py-0.5 text-[0.7rem] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                              className="rounded bg-emerald-600 px-2 py-0.5 text-[0.7rem] font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               Approve
                             </button>

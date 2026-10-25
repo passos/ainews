@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isEnabled } from "../../lib/flags";
 import { createModelClient, type ModelClient } from "../../providers/models";
 import {
   bindingTransport,
@@ -270,6 +271,10 @@ export async function draftIndustryConfig(
   deps: DraftDeps,
   input: DraftIndustryInput,
 ): Promise<DraftIndustryResult> {
+  if (!isEnabled(deps.env, "DISCOVERY_ENABLED")) {
+    throw new Error("DISCOVERY_ENABLED is disabled");
+  }
+
   const transport =
     deps.transport ??
     (deps.env.AI

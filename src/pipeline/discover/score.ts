@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ModelClient } from "../../providers/models";
+import { BudgetExceededError, type ModelClient } from "../../providers/models";
 import type { AnalysisConfig } from "../analyze/config";
 import type { SampleArticle } from "./probe";
 
@@ -29,7 +29,14 @@ export async function evaluateCandidateSamples(
   const sampleScores: number[] = [];
 
   for (const sample of samples) {
-    const key = `discover_score:${sha256(sample.url + ":" + sample.title)}`;
+    const inputPayload = JSON.stringify({
+      url: sample.url,
+      title: sample.title,
+      bodySha: sha256(sample.body),
+      industry: industryName,
+      editorialCriteria: industryConfig.prefilter.relevant,
+    });
+    const key = `discover_score:${sha256(inputPayload)}`;
     const state = {
       title: sample.title,
       summary: sample.summary ?? "",
@@ -83,8 +90,9 @@ export async function evaluateCandidateSamples(
 
       const clampedScore = Math.max(0, Math.min(100, score));
       sampleScores.push(clampedScore);
-    } catch {
-      // If scoring one sample fails, don't abort entire evaluation
+    } catch (err) {
+      if (err instanceof BudgetExceededError) throw err;
+      // If scoring one sample fails for non-budget reasons, don't abort entire evaluation
       sampleScores.push(0);
     }
   }

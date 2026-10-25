@@ -8,6 +8,7 @@ import {
   probeCandidate,
   isBrowserRequired,
 } from "../../src/pipeline/discover/probe";
+import { evaluateCandidateSamples } from "../../src/pipeline/discover/score";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import {
   discoveryRuns,
@@ -15,7 +16,10 @@ import {
   sources,
   industries,
 } from "../../src/server/db/schema";
-import { analysisConfigSchema } from "../../src/pipeline/analyze/config";
+import {
+  analysisConfigSchema,
+  type AnalysisConfig,
+} from "../../src/pipeline/analyze/config";
 import {
   BudgetExceededError,
   type ModelClient,
@@ -603,10 +607,24 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
       })) as unknown as ModelClient["generateText"],
     };
 
+    // Throws when DISCOVERY_ENABLED is disabled
+    await expect(
+      draftIndustryConfig(
+        {
+          db: env.DB,
+          env: { ...env, DISCOVERY_ENABLED: "false" },
+          models: fakeModels as unknown as ModelClient,
+        },
+        {
+          description: "Quantum tech",
+        },
+      ),
+    ).rejects.toThrow("DISCOVERY_ENABLED is disabled");
+
     const draft = await draftIndustryConfig(
       {
         db: env.DB,
-        env,
+        env: { ...env, DISCOVERY_ENABLED: "true" },
         models: fakeModels as unknown as ModelClient,
       },
       {
@@ -623,6 +641,59 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
     // Strictly test schema parse
     const parseResult = analysisConfigSchema.safeParse(draft.analysis);
     expect(parseResult.success).toBe(true);
+  });
+
+  it("isBrowserRequired accurately distinguishes GTM/analytics from JS challenge wall", () => {
+    // Normal page with script and GTM noscript
+    const gtmPage = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <script type="text/javascript" src="/analytics.js"></script>
+        </head>
+        <body>
+          <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-1234"></iframe></noscript>
+          <h1>Real Title</h1>
+          <p>Real content here...</p>
+        </body>
+      </html>
+    `;
+    expect(isBrowserRequired(gtmPage)).toBe(false);
+
+    // JS wall page with noscript asking to enable javascript
+    const wallPage = `
+      <noscript>Please enable JavaScript to view the full article.</noscript>
+    `;
+    expect(isBrowserRequired(wallPage)).toBe(true);
+
+    // Cloudflare challenge
+    const cfPage = `<div>Checking your browser before accessing site...</div>`;
+    expect(isBrowserRequired(cfPage)).toBe(true);
+  });
+
+  it("evaluateCandidateSamples rethrows BudgetExceededError", async () => {
+    const fakeModels = {
+      judge: vi
+        .fn()
+        .mockRejectedValue(
+          new BudgetExceededError("gateway", "2026-10-24", 50000),
+        ),
+    };
+
+    await expect(
+      evaluateCandidateSamples(
+        [
+          {
+            url: "https://foo.com/1",
+            title: "Sample 1",
+            body: "Lorem ipsum dolor sit amet article content...",
+          },
+        ],
+        "Biotech",
+        SAMPLE_ANALYSIS_CONFIG as unknown as AnalysisConfig,
+        { models: fakeModels as unknown as ModelClient },
+      ),
+    ).rejects.toThrow(BudgetExceededError);
   });
 
   it("consumer handles discover message properly", async () => {
@@ -681,5 +752,102 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
         .where(eq(discoveryRuns.id, run[0].id))
     )[0];
     expect(runAfter.status).toBe("skipped");
+  });
+
+  it("preserves admin rejected status when re-discovered and does not auto-enable", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "preserve-ind",
+        name: "Preserve Section",
+        publishMode: "review",
+        config: JSON.stringify(SAMPLE_ANALYSIS_CONFIG),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    // Existing candidate rejected by admin
+    await db.insert(sourceCandidates).values({
+      industryId: ind[0].id,
+      name: "Existing Cand",
+      feedUrl: "https://preserve.com/feed.xml",
+      siteDomain: "preserve.com",
+      kind: "rss",
+      fetchRung: 0,
+      status: "rejected",
+      rejectionReason: "rejected_by_admin",
+      createdAt: 1000,
+    });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        createdAt: 2000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const fakeWebSearch = {
+      search: vi.fn().mockResolvedValue({
+        items: [{ url: "https://preserve.com" }],
+        metadata: { query: "q", requestId: "r", latencyMs: 1 },
+      }),
+    };
+
+    const rssXml = `<?xml version="1.0"?>
+    <rss version="2.0">
+      <channel>
+        <title>Preserve Feed</title>
+        <link>https://preserve.com</link>
+        <item>
+          <title>Long enough article 1</title>
+          <link>https://preserve.com/art-1</link>
+          <description>${"A".repeat(250)}</description>
+        </item>
+      </channel>
+    </rss>`;
+
+    const fakeFetch = vi.fn().mockImplementation(async (urlStr: string) => {
+      const u = String(urlStr);
+      if (u.includes("robots.txt")) {
+        return new Response("User-agent: *\nAllow: /\n", { status: 200 });
+      }
+      return new Response(rssXml, {
+        status: 200,
+        headers: { "Content-Type": "application/rss+xml" },
+      });
+    });
+
+    const fakeModels = {
+      generateText: vi.fn().mockResolvedValue({ text: '["query"]' }),
+      judge: vi.fn().mockResolvedValue({
+        relevance: { score: 4, probabilities: { "4": 1 } },
+      }),
+    };
+
+    await runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 2000, {
+      webSearch: fakeWebSearch,
+      models: fakeModels as unknown as ModelClient,
+      fetch: fakeFetch,
+    });
+
+    // Check candidate: status should remain rejected and rejectionReason rejected_by_admin
+    const cand = (
+      await db
+        .select()
+        .from(sourceCandidates)
+        .where(eq(sourceCandidates.feedUrl, "https://preserve.com/feed.xml"))
+    )[0];
+    expect(cand.status).toBe("rejected");
+    expect(cand.rejectionReason).toBe("rejected_by_admin");
+
+    // sources must NOT have this feed activated
+    const src = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.feedUrl, "https://preserve.com/feed.xml"));
+    expect(src).toHaveLength(0);
   });
 });

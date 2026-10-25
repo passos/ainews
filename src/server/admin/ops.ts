@@ -372,6 +372,19 @@ export async function approveCandidate(
     throw new Response("Candidate not found", { status: 404 });
   }
 
+  if (candidate.requiresBrowser === 1) {
+    throw new Response("Cannot approve source requiring browser rendering", {
+      status: 400,
+    });
+  }
+
+  if (candidate.kind !== "rss") {
+    throw new Response(
+      "Cannot approve non-RSS candidate without list configuration",
+      { status: 400 },
+    );
+  }
+
   await database.batch([
     database
       .prepare(

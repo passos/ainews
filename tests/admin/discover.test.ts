@@ -145,6 +145,32 @@ describe("Admin Discover & Source Operations", () => {
       .first<{ status: string; rejection_reason: string }>();
     expect(c2Updated?.status).toBe("rejected");
     expect(c2Updated?.rejection_reason).toBe("low_relevance");
+
+    // 4. Cannot approve candidate requiring browser
+    const cBrowser = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+       VALUES (?1, 'Browser Candidate', 'https://browser.com/feed', 'browser.com', 'rss', 0, 1, 90, 'rejected', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await expect(
+      approveCandidate(env.DB, cBrowser!.id, 2000),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+
+    // 5. Cannot approve non-RSS candidate without list configuration
+    const cHtml = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+       VALUES (?1, 'HTML Candidate', 'https://html.com/articles', 'html.com', 'html', 0, 0, 90, 'pending', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await expect(approveCandidate(env.DB, cHtml!.id, 2000)).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
   });
 
   it("triggerDiscovery enqueues message, and fails when DISCOVERY_ENABLED is false", async () => {

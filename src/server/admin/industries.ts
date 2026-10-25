@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
+import { isEnabled } from "../../lib/flags";
 import { accessMiddleware } from "./fn";
 import * as ops from "./ops";
 import {
@@ -49,6 +50,11 @@ export const draftIndustryConfig = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
   .validator((data: { description: string; name?: string }) => data)
   .handler(async ({ data }) => {
+    if (!isEnabled(env, "DISCOVERY_ENABLED")) {
+      throw new Response("Discovery is disabled (DISCOVERY_ENABLED is false)", {
+        status: 400,
+      });
+    }
     return draftIndustryConfigPipeline(
       {
         db: env.DB,

@@ -39,7 +39,7 @@ export interface ProbeDeps {
 /** Check if text or HTML triggers anti-bot or JS challenge wall. */
 export function isBrowserRequired(html: string): boolean {
   const lower = html.toLowerCase();
-  return (
+  if (
     lower.includes("cf-turnstile") ||
     lower.includes("challenges.cloudflare.com") ||
     lower.includes("just a moment...") ||
@@ -49,10 +49,27 @@ export function isBrowserRequired(html: string): boolean {
     lower.includes("you need to enable javascript") ||
     lower.includes("checking your browser before accessing") ||
     lower.includes('id="challenge-running"') ||
-    lower.includes('id="cf-please-wait"') ||
-    (lower.includes("<noscript>") &&
-      (lower.includes("javascript") || lower.includes("enable js")))
-  );
+    lower.includes('id="cf-please-wait"')
+  ) {
+    return true;
+  }
+
+  // Check specifically within <noscript> blocks to avoid false positives on analytics/GTM
+  const noscriptRegex = /<noscript[^>]*>([\s\S]*?)<\/noscript>/gi;
+  let match;
+  while ((match = noscriptRegex.exec(html)) !== null) {
+    const inner = match[1].toLowerCase();
+    if (
+      inner.includes("javascript") ||
+      inner.includes("enable js") ||
+      inner.includes("turn on js") ||
+      inner.includes("requires js")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 const COMMON_FEED_PATHS = [
@@ -164,7 +181,7 @@ export async function probeCandidate(
     };
   }
 
-  let kind: "rss" | "html" = "rss";
+  const kind = "rss" as const;
   let feedUrl = url;
   let feedItems: FeedItem[];
 
@@ -231,64 +248,37 @@ export async function probeCandidate(
       }
     }
 
-    // If no RSS anywhere, fall back to HTML listing
+    // If no RSS anywhere, reject candidate
     if (feedItems.length === 0) {
-      kind = "html";
-      feedUrl = url;
-      // Extract links from HTML
-      const links = root.querySelectorAll("a[href]");
-      const seen = new Set<string>();
-      for (const a of links) {
-        const href = a.getAttribute("href");
-        if (!href) continue;
-        try {
-          const articleUrl = new URL(href, url);
-          if (
-            articleUrl.hostname === siteDomain &&
-            articleUrl.pathname.length > 3 &&
-            !articleUrl.pathname.endsWith(".css") &&
-            !articleUrl.pathname.endsWith(".js") &&
-            !seen.has(articleUrl.toString())
-          ) {
-            seen.add(articleUrl.toString());
-            const text = a.text.trim();
-            if (text.length > 10) {
-              feedItems.push({
-                url: articleUrl.toString(),
-                title: text,
-                summary: null,
-                contentHtml: null,
-                publishedRaw: null,
-                fields: {},
-              });
-            }
-          }
-        } catch {
-          // ignore invalid link
-        }
-        if (feedItems.length >= 10) break;
-      }
+      return {
+        kind: "rss",
+        feedUrl: url,
+        name: siteName,
+        siteDomain,
+        fetchRung: 0,
+        requiresBrowser: 1,
+        sampleArticles: [],
+        rejectionReason: "no_rss_feed",
+      };
     }
   }
 
-  if (feedItems.length === 0) {
-    return {
-      kind,
-      feedUrl,
-      name: siteName,
-      siteDomain,
-      fetchRung: 0,
-      requiresBrowser: 1,
-      sampleArticles: [],
-      rejectionReason: "no_articles_found",
-    };
-  }
-
   // 3. Collect up to 3-5 sample articles and check ladder rungs
+  const defaultToMarkdown: ToMarkdown = async (bytes, mime) => {
+    const decoded = new TextDecoder().decode(bytes);
+    if (mime.includes("html") || decoded.includes("<")) {
+      const root = parse(decoded);
+      for (const s of root.querySelectorAll("script, style, noscript")) {
+        s.remove();
+      }
+      return root.text.trim();
+    }
+    return decoded.trim();
+  };
+
   const ladderDeps: LadderDeps = {
     fetch: deps.fetch,
-    toMarkdown:
-      deps.toMarkdown ?? (async (bytes) => new TextDecoder().decode(bytes)),
+    toMarkdown: deps.toMarkdown ?? defaultToMarkdown,
   };
 
   const sampleArticles: SampleArticle[] = [];
@@ -297,18 +287,60 @@ export async function probeCandidate(
 
   for (const item of itemsToSample) {
     // Check if item has full content in feed (Rung 0)
-    if (
-      item.contentHtml &&
-      item.contentHtml.length >= MIN_BODY_CHARS &&
-      !isBrowserRequired(item.contentHtml)
-    ) {
+    let rung0Body: string | null = null;
+    if (item.contentHtml) {
+      const root = parse(item.contentHtml);
+      for (const s of root.querySelectorAll("script, style, noscript")) {
+        s.remove();
+      }
+      const cleanText = root.text.trim();
+      if (cleanText.length >= MIN_BODY_CHARS) {
+        rung0Body = cleanText;
+      }
+    }
+
+    if (rung0Body && isBody(rung0Body) && !isBrowserRequired(rung0Body)) {
       sampleArticles.push({
         url: item.url,
         title: item.title,
-        body: item.contentHtml,
+        body: rung0Body,
         summary: item.summary ?? undefined,
       });
       rungs.push(0);
+      continue;
+    }
+
+    let itemUrl: URL;
+    try {
+      itemUrl = new URL(item.url);
+    } catch {
+      continue;
+    }
+
+    const allowedDomains = [siteDomain, siteName, itemUrl.hostname].filter(
+      Boolean,
+    );
+
+    // Robots check for sample article hop
+    const robots = await checkRobots(
+      env,
+      item.url,
+      deps.now(),
+      deps.fetch,
+      allowedDomains,
+    );
+    if (!robots.allowed) {
+      continue;
+    }
+
+    // Rate limiting slot claim for sample article host
+    const slot = await claimHostSlot(
+      env,
+      itemUrl.host,
+      robots.crawlDelaySec ?? 0,
+      deps.now(),
+    );
+    if (!slot.claimed) {
       continue;
     }
 
@@ -317,7 +349,7 @@ export async function probeCandidate(
       env,
       item.url,
       deps.now(),
-      [siteDomain],
+      allowedDomains,
       ladderDeps,
     );
 
