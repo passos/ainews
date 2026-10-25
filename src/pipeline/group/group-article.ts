@@ -321,7 +321,7 @@ export async function groupArticle(
         deps.db
           .prepare(
             `UPDATE events SET revision = revision + 1, updated_at = ?1
-             WHERE id = ?2 AND EXISTS (
+             WHERE id = ?2 AND changes() = 1 AND EXISTS (
                SELECT 1 FROM reviews r
                JOIN articles a ON a.id = r.article_id
                WHERE a.id = ?3 AND r.body_sha = a.body_sha AND r.decision = 'approved'

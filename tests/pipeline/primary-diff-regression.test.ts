@@ -399,3 +399,146 @@ it("does not update article to grouped if event_articles insertion failed due to
     .first<{ stage: string }>();
   expect(artRow?.stage).toBe("analyzed");
 });
+
+it("attaches unapproved Finance primary document to originating event via groupArticle without model calls", async () => {
+  const { groupArticle } =
+    await import("../../src/pipeline/group/group-article");
+  const finance = (await env.DB.prepare(
+    "SELECT i.id AS industryId,s.id AS sourceId FROM industries i JOIN sources s ON s.industry_id=i.id WHERE i.slug='finance'",
+  ).first<{ industryId: number; sourceId: number }>())!;
+
+  const originEventId = await seedEvent(
+    finance.industryId,
+    "Finance Origin Event",
+    1,
+  );
+  const targetUrl = "https://sec.gov/filing-origin-route";
+  const filingArtId = await seedArticle({
+    industryId: finance.industryId,
+    sourceId: finance.sourceId,
+    title: "Finance SEC Filing",
+    url: targetUrl,
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(filingArtId)
+    .run();
+
+  // Insert analysis with prompt_version='primary_tracker' and origin_event_id
+  await env.DB.prepare(
+    `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_pass, selected, created_at)
+     VALUES (?1, 'primary_tracker', '{}', 'primary_source', ?2, 100, 1, 1, 1000)`,
+  )
+    .bind(
+      filingArtId,
+      JSON.stringify({
+        kind: "primary_source",
+        origin_event_id: originEventId,
+      }),
+    )
+    .run();
+
+  const mockEmbed = vi.fn();
+  const mockJudge = vi.fn();
+  const mockVectors = {
+    query: vi.fn(),
+    upsert: vi.fn(),
+  };
+
+  const res = await groupArticle(
+    {
+      db: env.DB,
+      now: () => 1000,
+      vectors: mockVectors,
+      models: { embed: mockEmbed, judge: mockJudge } as never,
+    },
+    filingArtId,
+  );
+
+  expect(res.status).toBe("grouped");
+  if (res.status === "grouped") {
+    expect(res.eventId).toBe(originEventId);
+  }
+
+  // Model calls must NOT have been called:
+  expect(mockEmbed).not.toHaveBeenCalled();
+  expect(mockJudge).not.toHaveBeenCalled();
+  expect(mockVectors.query).not.toHaveBeenCalled();
+
+  // In unapproved state: input_revision equals current revision (1), and event revision does NOT bump:
+  const ea = await env.DB.prepare(
+    "SELECT event_id, input_revision FROM event_articles WHERE article_id=?",
+  )
+    .bind(filingArtId)
+    .first<{ event_id: number; input_revision: number }>();
+  expect(ea).toEqual({ event_id: originEventId, input_revision: 1 });
+
+  const ev = await env.DB.prepare("SELECT revision FROM events WHERE id=?")
+    .bind(originEventId)
+    .first<{ revision: number }>();
+  expect(ev?.revision).toBe(1);
+
+  // Article stage is now 'grouped':
+  const art = await env.DB.prepare("SELECT stage FROM articles WHERE id=?")
+    .bind(filingArtId)
+    .first<{ stage: string }>();
+  expect(art?.stage).toBe("grouped");
+});
+
+it("falls back to standard grouping when origin_event_id belongs to a different industry", async () => {
+  const { groupArticle } =
+    await import("../../src/pipeline/group/group-article");
+  const finance = (await env.DB.prepare(
+    "SELECT i.id AS industryId,s.id AS sourceId FROM industries i JOIN sources s ON s.industry_id=i.id WHERE i.slug='finance'",
+  ).first<{ industryId: number; sourceId: number }>())!;
+
+  // Tech event in different industry:
+  const techEventId = await seedEvent(tech.industryId, "Tech Event", 1);
+
+  const filingArtId = await seedArticle({
+    industryId: finance.industryId,
+    sourceId: finance.sourceId,
+    title: "Finance SEC Filing Mismatched Industry",
+    url: "https://sec.gov/filing-mismatch",
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(filingArtId)
+    .run();
+
+  // origin_event_id points to tech event (mismatched industry)
+  await env.DB.prepare(
+    `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_pass, selected, created_at)
+     VALUES (?1, 'primary_tracker', '{}', 'primary_source', ?2, 100, 1, 1, 1000)`,
+  )
+    .bind(
+      filingArtId,
+      JSON.stringify({ kind: "primary_source", origin_event_id: techEventId }),
+    )
+    .run();
+
+  const mockEmbed = vi.fn(async () => [[0.1, 0.2]]);
+  const mockVectors = {
+    query: vi.fn(async () => ({ matches: [], count: 0 })),
+    upsert: vi.fn(async () => ({ mutationId: "1", ids: [], count: 1 })),
+  };
+
+  const res = await groupArticle(
+    {
+      db: env.DB,
+      now: () => 1000,
+      vectors: mockVectors,
+      models: { embed: mockEmbed } as never,
+    },
+    filingArtId,
+  );
+
+  // Fell back to normal grouping: embed was called, and created a new event in finance industry:
+  expect(mockEmbed).toHaveBeenCalled();
+  expect(res.status).toBe("grouped");
+  if (res.status === "grouped") {
+    expect(res.eventId).not.toBe(techEventId);
+    const ev = await env.DB.prepare("SELECT industry_id FROM events WHERE id=?")
+      .bind(res.eventId)
+      .first<{ industry_id: number }>();
+    expect(ev?.industry_id).toBe(finance.industryId);
+  }
+});
