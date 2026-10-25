@@ -1091,3 +1091,150 @@ export async function reviewClaim(
 
   return res.meta.changes === 1;
 }
+
+// -----------------------------------------------------------------------------
+// Ask Newsren (M2 #15)
+// -----------------------------------------------------------------------------
+
+export interface QuestionCitationItem {
+  articleId: number;
+  bodySha: string;
+  quote: string;
+  claim: string;
+  startOffset: number;
+  endOffset: number;
+  verified: boolean;
+  isPrimarySource: boolean;
+}
+
+export interface QuestionSupplementalFetchItem {
+  url: string;
+  rung: number | null;
+  status: "ok" | "blocked" | "failed";
+}
+
+export interface QuestionItem {
+  id: number;
+  question: string;
+  scopeType: "event" | "global";
+  eventId: number | null;
+  status: "pending" | "processing" | "completed" | "failed";
+  answer: string | null;
+  unverified: string[] | null;
+  citations: QuestionCitationItem[] | null;
+  refusal: boolean;
+  supplementalFetched: QuestionSupplementalFetchItem[] | null;
+  costMicros: number;
+  promptVersion: string;
+  model: string;
+  errorMessage: string | null;
+  createdAt: number;
+  completedAt: number | null;
+}
+
+export async function listQuestions(
+  database: D1Database,
+  limit = 50,
+): Promise<QuestionItem[]> {
+  const rows = await database
+    .prepare(`SELECT * FROM questions ORDER BY created_at DESC LIMIT ?1`)
+    .bind(limit)
+    .all<Record<string, unknown>>();
+
+  return (rows.results ?? []).map((r) => ({
+    id: Number(r.id),
+    question: String(r.question ?? ""),
+    scopeType: r.scope_type === "event" ? "event" : "global",
+    eventId:
+      r.event_id !== null && r.event_id !== undefined
+        ? Number(r.event_id)
+        : null,
+    status: (r.status as QuestionItem["status"]) ?? "pending",
+    answer:
+      r.answer !== null && r.answer !== undefined ? String(r.answer) : null,
+    unverified: r.unverified ? JSON.parse(String(r.unverified)) : null,
+    citations: r.citations ? JSON.parse(String(r.citations)) : null,
+    refusal: r.refusal === 1,
+    supplementalFetched: r.supplemental_fetched
+      ? JSON.parse(String(r.supplemental_fetched))
+      : null,
+    costMicros: Number(r.cost_micros ?? 0),
+    promptVersion: String(r.prompt_version ?? ""),
+    model: String(r.model ?? ""),
+    errorMessage:
+      r.error_message !== null && r.error_message !== undefined
+        ? String(r.error_message)
+        : null,
+    createdAt: Number(r.created_at),
+    completedAt:
+      r.completed_at !== null && r.completed_at !== undefined
+        ? Number(r.completed_at)
+        : null,
+  }));
+}
+
+export async function getQuestion(
+  database: D1Database,
+  id: number,
+): Promise<QuestionItem | null> {
+  const r = await database
+    .prepare(`SELECT * FROM questions WHERE id = ?1`)
+    .bind(id)
+    .first<Record<string, unknown>>();
+
+  if (!r) return null;
+
+  return {
+    id: Number(r.id),
+    question: String(r.question ?? ""),
+    scopeType: r.scope_type === "event" ? "event" : "global",
+    eventId:
+      r.event_id !== null && r.event_id !== undefined
+        ? Number(r.event_id)
+        : null,
+    status: (r.status as QuestionItem["status"]) ?? "pending",
+    answer:
+      r.answer !== null && r.answer !== undefined ? String(r.answer) : null,
+    unverified: r.unverified ? JSON.parse(String(r.unverified)) : null,
+    citations: r.citations ? JSON.parse(String(r.citations)) : null,
+    refusal: r.refusal === 1,
+    supplementalFetched: r.supplemental_fetched
+      ? JSON.parse(String(r.supplemental_fetched))
+      : null,
+    costMicros: Number(r.cost_micros ?? 0),
+    promptVersion: String(r.prompt_version ?? ""),
+    model: String(r.model ?? ""),
+    errorMessage:
+      r.error_message !== null && r.error_message !== undefined
+        ? String(r.error_message)
+        : null,
+    createdAt: Number(r.created_at),
+    completedAt:
+      r.completed_at !== null && r.completed_at !== undefined
+        ? Number(r.completed_at)
+        : null,
+  };
+}
+
+export async function createQuestion(
+  database: D1Database,
+  data: {
+    question: string;
+    scopeType?: "event" | "global";
+    eventId?: number;
+  },
+  now = Date.now(),
+): Promise<number> {
+  const scopeType = data.scopeType ?? "global";
+  const eventId = scopeType === "event" ? (data.eventId ?? null) : null;
+  const res = await database
+    .prepare(
+      `INSERT INTO questions (
+        question, scope_type, event_id, status, prompt_version, model, created_at
+      ) VALUES (?1, ?2, ?3, 'pending', 'ask:v1', 'default', ?4)`,
+    )
+    .bind(data.question.trim(), scopeType, eventId, now)
+    .run();
+
+  return Number(res.meta.last_row_id);
+}

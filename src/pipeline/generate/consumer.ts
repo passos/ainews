@@ -4,6 +4,7 @@ import {
   type ModelTransport,
 } from "../../providers/transport";
 import { generateEventArtifacts } from "../artifacts/build";
+import { answerQuestion } from "../ask/answer";
 import { buildDailyDigest } from "../digest/build";
 import { generateEventEvidence } from "../evidence/build";
 import type { GenerateMessage, PipelineEnv } from "../messages";
@@ -45,6 +46,9 @@ export async function handleGenerateBatch(
           break;
         case "evidence":
           await generateEventEvidence(env, body.eventId, Date.now(), deps);
+          break;
+        case "ask":
+          await answerQuestion(env, body.questionId, Date.now(), deps);
           break;
         default:
           console.error({

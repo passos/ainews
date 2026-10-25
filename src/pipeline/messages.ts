@@ -33,8 +33,13 @@ export type EvidenceMessage = {
   eventId: number;
 };
 
+export type AskMessage = {
+  kind: "ask";
+  questionId: number;
+};
+
 export type GenerateMessage =
-  DigestMessage | ArtifactsMessage | EvidenceMessage;
+  DigestMessage | ArtifactsMessage | EvidenceMessage | AskMessage;
 
 /** Bindings and flags the pipeline reads. `Env` satisfies it. */
 export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {

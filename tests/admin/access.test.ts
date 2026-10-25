@@ -10,7 +10,12 @@ const ENV: EdgeEnv = {
 
 describe("admin access guard", () => {
   it("returns 403 for /admin routes without access token", async () => {
-    for (const path of ["/admin", "/admin/review", "/admin/ledger"]) {
+    for (const path of [
+      "/admin",
+      "/admin/review",
+      "/admin/ledger",
+      "/admin/ask",
+    ]) {
       const req = new Request(`https://news.ioenv.com${path}`);
       const res = await handleFetch(req, ENV, {
         handler: async () => new Response("ok"),
