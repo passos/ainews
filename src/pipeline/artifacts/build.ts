@@ -15,8 +15,14 @@ import {
 import type {
   ArtifactArticleMaterial,
   ArtifactEventMaterial,
+  ArtifactFilingMaterial,
+  ArtifactFinancialFactMaterial,
   ArtifactVerifiedClaim,
 } from "./prompts";
+import {
+  compareFinancialMetrics,
+  type FactWithMetadata,
+} from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
 
 export interface ArtifactDeps {
@@ -302,6 +308,163 @@ export async function generateEventArtifacts(
     realityCheck: c.reality_check,
   }));
 
+  // 3.1 For Finance events, fetch approved filing & associated XBRL financial facts
+  let filingMaterial: ArtifactFilingMaterial | undefined;
+  let financialFactsList: ArtifactFinancialFactMaterial[] = [];
+  let calculatedMetrics:
+    import("../../lib/artifacts/types").EarningsMetric[] | undefined;
+
+  if (event.industry_slug === FINANCE_SLUG && articleMaterials.length > 0) {
+    const articleIds = articleMaterials.map((a) => a.id);
+    const placeholders = articleIds.map(() => "?").join(",");
+    const filingRow = await deps.db
+      .prepare(
+        `SELECT f.*, c.ticker, c.name as company_name, c.cik as company_cik
+         FROM filings f
+         JOIN companies c ON c.id = f.company_id
+         WHERE f.article_id IN (${placeholders})
+         ORDER BY f.filing_date DESC LIMIT 1`,
+      )
+      .bind(...articleIds)
+      .first<{
+        id: number;
+        accession_number: string;
+        form: string;
+        filing_date: string;
+        report_date: string | null;
+        sec_url: string;
+        fiscal_year: number | null;
+        fiscal_period: string | null;
+        ticker: string;
+        company_name: string;
+        company_cik: string;
+        company_id: number;
+      }>();
+
+    if (filingRow) {
+      filingMaterial = {
+        id: filingRow.id,
+        accessionNumber: filingRow.accession_number,
+        form: filingRow.form,
+        filingDate: filingRow.filing_date,
+        reportDate: filingRow.report_date,
+        secUrl: filingRow.sec_url,
+        fiscalYear: filingRow.fiscal_year,
+        fiscalPeriod: filingRow.fiscal_period,
+        companyTicker: filingRow.ticker,
+        companyName: filingRow.company_name,
+        companyCik: filingRow.company_cik,
+      };
+
+      // Query active financial facts for this filing (superseded_by IS NULL)
+      const factsRows = await deps.db
+        .prepare(
+          `SELECT id, taxonomy, concept, unit, val, period_start, period_end, fiscal_year, fiscal_period, sec_url
+           FROM financial_facts
+           WHERE filing_id = ?1 AND superseded_by IS NULL
+           ORDER BY id ASC`,
+        )
+        .bind(filingRow.id)
+        .all<{
+          id: number;
+          taxonomy: string;
+          concept: string;
+          unit: string;
+          val: string;
+          period_start: string | null;
+          period_end: string;
+          fiscal_year: number | null;
+          fiscal_period: string | null;
+          sec_url: string;
+        }>();
+
+      financialFactsList = (factsRows.results || []).map((f) => ({
+        id: f.id,
+        taxonomy: f.taxonomy,
+        concept: f.concept,
+        unit: f.unit,
+        val: f.val,
+        periodStart: f.period_start,
+        periodEnd: f.period_end,
+        fiscalYear: f.fiscal_year,
+        fiscalPeriod: f.fiscal_period,
+        secUrl: f.sec_url,
+      }));
+
+      // Query historical facts for QoQ and YoY comparisons
+      const priorFactsRows = await deps.db
+        .prepare(
+          `SELECT id, taxonomy, concept, unit, val, period_start, period_end, fiscal_year, fiscal_period, sec_url
+           FROM financial_facts
+           WHERE company_id = ?1 AND filing_id != ?2 AND superseded_by IS NULL
+           ORDER BY period_end DESC`,
+        )
+        .bind(filingRow.company_id, filingRow.id)
+        .all<{
+          id: number;
+          taxonomy: string;
+          concept: string;
+          unit: string;
+          val: string;
+          period_start: string | null;
+          period_end: string;
+          fiscal_year: number | null;
+          fiscal_period: string | null;
+          sec_url: string;
+        }>();
+
+      const currentFactsForComp: FactWithMetadata[] = financialFactsList.map(
+        (f) => ({
+          taxonomy: f.taxonomy,
+          concept: f.concept,
+          label: f.concept,
+          unit: f.unit,
+          val: f.val,
+          periodStart: f.periodStart ?? undefined,
+          periodEnd: f.periodEnd,
+          fiscalYear: f.fiscalYear ?? undefined,
+          fiscalPeriod: f.fiscalPeriod ?? undefined,
+          filedDate: filingRow.filing_date,
+          accessionNumber: filingRow.accession_number,
+          factId: f.id,
+          secUrl: f.secUrl,
+        }),
+      );
+
+      const priorFactsMap = new Map<string, FactWithMetadata>();
+      const priorYearFactsMap = new Map<string, FactWithMetadata>();
+
+      for (const pf of priorFactsRows.results || []) {
+        const item: FactWithMetadata = {
+          taxonomy: pf.taxonomy,
+          concept: pf.concept,
+          label: pf.concept,
+          unit: pf.unit,
+          val: pf.val,
+          periodStart: pf.period_start ?? undefined,
+          periodEnd: pf.period_end,
+          fiscalYear: pf.fiscal_year ?? undefined,
+          fiscalPeriod: pf.fiscal_period ?? undefined,
+          filedDate: "",
+          accessionNumber: "",
+          factId: pf.id,
+          secUrl: pf.sec_url,
+        };
+        if (!priorFactsMap.has(pf.concept)) {
+          priorFactsMap.set(pf.concept, item);
+        } else if (!priorYearFactsMap.has(pf.concept)) {
+          priorYearFactsMap.set(pf.concept, item);
+        }
+      }
+
+      calculatedMetrics = compareFinancialMetrics(
+        currentFactsForComp,
+        priorFactsMap,
+        priorYearFactsMap,
+      );
+    }
+  }
+
   const material: ArtifactEventMaterial = {
     eventId,
     eventTitle: articleMaterials[0]?.title || event.event_title,
@@ -310,9 +473,12 @@ export async function generateEventArtifacts(
     disclaimer: event.industry_disclaimer,
     articles: articleMaterials,
     verifiedClaims,
+    filing: filingMaterial,
+    financialFacts: financialFactsList,
+    calculatedMetrics,
   };
 
-  // 4. Compute deterministic inputSha over all approved inputs (including verified claims)
+  // 4. Compute deterministic inputSha over all approved inputs (including verified claims & facts)
   const inputPayload = JSON.stringify({
     eventId,
     inputRevision,
@@ -326,6 +492,11 @@ export async function generateEventArtifacts(
       id: c.id,
       text: c.claimText,
       consensus: c.consensusStatus,
+    })),
+    financialFacts: financialFactsList.map((f) => ({
+      concept: f.concept,
+      val: f.val,
+      periodEnd: f.periodEnd,
     })),
     disclaimer: event.industry_disclaimer,
   });
@@ -361,7 +532,8 @@ export async function generateEventArtifacts(
       const req = def.buildRequest(material, aud);
       const logicalKey = `artifact:${eventId}:${def.type}:${aud || "default"}:${inputRevision}:${inputSha}:${def.promptVersion}`;
 
-      const res = await deps.models.generateText("write", logicalKey, req);
+      const slot = def.slot ?? "write";
+      const res = await deps.models.generateText(slot, logicalKey, req);
 
       // Verify completion reason
       if (res.finishReason !== "STOP") {
@@ -388,6 +560,8 @@ export async function generateEventArtifacts(
       }
 
       const contentJson = JSON.stringify(parsed);
+      const artifactModel =
+        slot === "reason" ? "google/gemini-3.8-flash" : modelName;
 
       // Atomic conditional insert: only write if events.revision is still inputRevision
       const insertResult = await deps.db
@@ -405,7 +579,7 @@ export async function generateEventArtifacts(
           aud,
           inputRevision,
           def.promptVersion,
-          modelName,
+          artifactModel,
           contentJson,
           initialStatus,
           deps.now(),

@@ -14,6 +14,7 @@ import { SkillsCareerTrendsCard } from "../../components/artifacts/SkillsCareerT
 import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
 import { IndustryImpactCard } from "../../components/artifacts/IndustryImpactCard";
 import { SupplyChainRippleCard } from "../../components/artifacts/SupplyChainRippleCard";
+import { EarningsDecoderCard } from "../../components/artifacts/EarningsDecoderCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import { getEvent, getEventSources } from "../../server/publication/api";
@@ -161,6 +162,10 @@ function EventPage() {
 
       {artifacts?.supplyChainRipple && (
         <SupplyChainRippleCard ripple={artifacts.supplyChainRipple} />
+      )}
+
+      {artifacts?.earningsDecoder && (
+        <EarningsDecoderCard decoder={artifacts.earningsDecoder} />
       )}
 
       {corrections.length > 0 && (

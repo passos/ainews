@@ -10,6 +10,7 @@ import {
   analyses,
   articles,
   budgets,
+  companies,
   corrections,
   discoveryRuns,
   dlqMessages,
@@ -1683,4 +1684,50 @@ export async function listWatchHits(
     summary: r.summary,
     rationale: r.rationale,
   }));
+}
+
+// -----------------------------------------------------------------------------
+// Tracked Companies (EDGAR §4)
+// -----------------------------------------------------------------------------
+
+export async function listCompanies(database: D1Database) {
+  const d = getDb(database);
+  return d.select().from(companies).orderBy(companies.ticker);
+}
+
+export async function createCompany(
+  database: D1Database,
+  data: { cik: string; ticker: string; name: string },
+) {
+  const d = getDb(database);
+  const now = Date.now();
+  const digits = data.cik.replace(/\D/g, "");
+  const formattedCik = digits.padStart(10, "0");
+  const upperTicker = data.ticker.trim().toUpperCase();
+
+  const [created] = await d
+    .insert(companies)
+    .values({
+      cik: formattedCik,
+      ticker: upperTicker,
+      name: data.name.trim(),
+      tracked: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning({ id: companies.id });
+
+  return created.id;
+}
+
+export async function toggleCompanyTracking(
+  database: D1Database,
+  companyId: number,
+  tracked: number,
+) {
+  const now = Date.now();
+  await database
+    .prepare("UPDATE companies SET tracked = ?2, updated_at = ?3 WHERE id = ?1")
+    .bind(companyId, tracked ? 1 : 0, now)
+    .run();
 }

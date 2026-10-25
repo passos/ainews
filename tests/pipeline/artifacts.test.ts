@@ -154,6 +154,13 @@ function makeAllValidFakeTransport(): ModelTransport {
         keyHypotheses: ["Supplier buffer inventory is adequate."],
       };
     }
+    if (s.includes("Earnings Decoder") || s.includes("executiveSummary")) {
+      return {
+        executiveSummary: "Company reported quarterly revenue growth.",
+        keyDrivers: ["Services expansion", "Margin improvement"],
+        forwardGuidance: ["Positive outlook for next quarter"],
+      };
+    }
     if (s.includes("Policy Impact Explorer") || s.includes("policyName")) {
       return {
         policyName: "Policy",
@@ -3328,5 +3335,119 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
 
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("supply_chain_ripple_map");
+  });
+
+  it("generates earnings_decoder with pending_review status for finance SEC filing events (Issue #22)", async () => {
+    let ind = await env.DB.prepare(
+      "SELECT id FROM industries WHERE slug = 'finance'",
+    ).first<{ id: number }>();
+    if (!ind) {
+      ind = await env.DB.prepare(
+        "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('finance', 'Finance', 'review', 1000) RETURNING id",
+      ).first<{ id: number }>();
+    }
+
+    const comp = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0000320193', 'AAPL', 'Apple Inc.', 1, 1000, 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (?1, 'SEC', 'https://data.sec.gov/submissions/', 'sec.gov', 'html', 'active', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (
+        source_id, industry_id, canonical_url, url, title, summary,
+        published_at, fetched_at, stage, stage_updated_at, body_sha, body_kind
+      ) VALUES (
+        ?1, ?2, 'https://www.sec.gov/edgar/data/320193/aapl-10q', 'https://www.sec.gov/edgar/data/320193/aapl-10q',
+        'AAPL 10-Q: Apple Reports Financial Results', 'Apple reports quarterly results',
+        1000, 1000, 'grouped', 1000, 'shaAapl10Q', 'full'
+      ) RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.BODIES.put(
+      `bodies/${art!.id}/shaAapl10Q.md`,
+      "Apple Reports Net Sales of $85.78B for the Quarter Ended June 29, 2024.",
+    );
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaAapl10Q', 'approved', 'editor', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'sec_filing', '["sec_filing", "financial_results"]', 85, 0.95, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const filing = await env.DB.prepare(
+      `INSERT INTO filings (
+        company_id, accession_number, form, filing_date, report_date,
+        primary_document, sec_url, article_id, status, created_at
+      ) VALUES (
+        ?1, '0000320193-24-000001', '10-Q', '2024-08-02', '2024-06-29',
+        'aapl-20240629.htm', 'https://www.sec.gov/edgar/data/320193/aapl-10q', ?2, 'processed', 1000
+      ) RETURNING id`,
+    )
+      .bind(comp!.id, art!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO financial_facts (
+        company_id, filing_id, accession_number, taxonomy, concept,
+        unit, val, period_end, filed_date, sec_url, created_at
+      ) VALUES (
+        ?1, ?2, '0000320193-24-000001', 'us-gaap', 'Revenues',
+        'USD', '85777000000', '2024-06-29', '2024-08-02', 'https://sec.gov/fact/1', 1000
+      )`,
+    )
+      .bind(comp!.id, filing!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Apple Q3 Financial Results', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type, status, content FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string; status: string; content: string }>();
+
+    const decoderArtifact = rows.results.find(
+      (r) => r.type === "earnings_decoder",
+    );
+    expect(decoderArtifact).toBeDefined();
+    // Finance artifacts must strictly start in pending_review
+    expect(decoderArtifact?.status).toBe("pending_review");
+
+    const parsed = JSON.parse(decoderArtifact!.content);
+    expect(parsed.company.ticker).toBe("AAPL");
+    expect(parsed.metrics.length).toBeGreaterThan(0);
+    expect(parsed.metrics[0].concept).toBe("Revenues");
+    expect(parsed.metrics[0].reportedValue).toBe("85777000000");
+    expect(parsed.disclaimer).toContain("不构成任何投资建议");
   });
 });

@@ -10,6 +10,7 @@ import {
   parseSkillsCareerTrendsOutput,
   parseIndustryImpactReportOutput,
   parseSupplyChainRippleMapOutput,
+  parseEarningsDecoderOutput,
   type ArtifactEventMaterial,
 } from "../../src/pipeline/artifacts/prompts";
 
@@ -768,6 +769,129 @@ describe("Artifact Output Parsers (Issue #20)", () => {
       expect(
         parseSupplyChainRippleMapOutput(JSON.stringify(invalidOmitted)),
       ).toBeNull();
+    });
+  });
+
+  describe("parseEarningsDecoderOutput (Issue #22)", () => {
+    const validMetric = {
+      metricName: "Total Revenue",
+      concept: "Revenues",
+      unit: "USD",
+      reportedValue: "94930000000",
+      reportedCitation: {
+        factId: 101,
+        secUrl: "https://www.sec.gov/edgar/data/320193/fact101",
+        quote: "Total net sales were $94,930 million",
+        periodEnd: "2024-09-28",
+      },
+      priorPeriodValue: "85777000000",
+      priorPeriodCitation: {
+        factId: 90,
+        secUrl: "https://www.sec.gov/edgar/data/320193/fact90",
+        periodEnd: "2024-06-29",
+      },
+      deltaQoQPercent: "+10.7%",
+      priorYearValue: "89498000000",
+      priorYearCitation: {
+        factId: 50,
+        secUrl: "https://www.sec.gov/edgar/data/320193/fact50",
+        periodEnd: "2023-09-30",
+      },
+      deltaYoYPercent: "+6.1%",
+      guidanceComparison: "above" as const,
+    };
+
+    const validPayload = {
+      company: {
+        ticker: "AAPL",
+        name: "Apple Inc.",
+        cik: "0000320193",
+      },
+      filing: {
+        form: "10-K",
+        fiscalYear: 2024,
+        fiscalPeriod: "Q4",
+        filingDate: "2024-11-01",
+        secUrl:
+          "https://www.sec.gov/Archives/edgar/data/320193/000032019324000106/aapl-20240928.htm",
+        accessionNumber: "0000320193-24-000106",
+      },
+      metrics: [validMetric],
+      executiveSummary:
+        "Apple reported strong fourth quarter results driven by iPhone and Services expansion.",
+      keyDrivers: [
+        "Services revenue reached an all-time high.",
+        "Gross margin expanded to 46.2%.",
+      ],
+      forwardGuidance: [
+        "Management expects low-to-mid single digit revenue growth next quarter.",
+      ],
+      disclaimer:
+        "本简报仅供资讯与学习参考，基于公开 SEC 申报文件生成，不构成任何投资建议、买卖要约或金融决策依据。",
+    };
+
+    it("parses valid JSON with metrics and citations successfully", () => {
+      const res = parseEarningsDecoderOutput(JSON.stringify(validPayload));
+      expect(res).not.toBeNull();
+      expect(res?.company.ticker).toBe("AAPL");
+      expect(res?.metrics[0].reportedValue).toBe("94930000000");
+      expect(res?.metrics[0].deltaQoQPercent).toBe("+10.7%");
+      expect(res?.disclaimer).toContain("不构成任何投资建议");
+    });
+
+    it("parses markdown code-fenced JSON successfully", () => {
+      const fenced = "```json\n" + JSON.stringify(validPayload) + "\n```";
+      const res = parseEarningsDecoderOutput(fenced);
+      expect(res).not.toBeNull();
+      expect(res?.company.ticker).toBe("AAPL");
+    });
+
+    it("uses pre-computed calculatedMetrics from material if provided", () => {
+      const mockMaterial = {
+        eventId: 1,
+        eventTitle: "Apple Q4 Earnings",
+        industryName: "Finance",
+        industrySlug: "finance",
+        articles: [],
+        calculatedMetrics: [validMetric],
+        filing: {
+          id: 1,
+          accessionNumber: "0000320193-24-000106",
+          form: "10-K",
+          filingDate: "2024-11-01",
+          secUrl: "https://sec.gov/filing/1",
+          companyTicker: "AAPL",
+          companyName: "Apple Inc.",
+          companyCik: "0000320193",
+        },
+      };
+
+      const rawLlmOutput = JSON.stringify({
+        executiveSummary: "LLM summarized Q4 earnings.",
+        keyDrivers: ["Growth in Cloud and Hardware."],
+      });
+
+      const res = parseEarningsDecoderOutput(
+        rawLlmOutput,
+        mockMaterial as unknown as ArtifactEventMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.metrics.length).toBe(1);
+      expect(res?.metrics[0].reportedValue).toBe("94930000000");
+      expect(res?.executiveSummary).toBe("LLM summarized Q4 earnings.");
+    });
+
+    it("returns null on malformed JSON or empty string", () => {
+      expect(parseEarningsDecoderOutput("")).toBeNull();
+      expect(parseEarningsDecoderOutput("not valid json")).toBeNull();
+    });
+
+    it("returns null when metrics array is empty and no material metrics exist", () => {
+      const noMetrics = {
+        ...validPayload,
+        metrics: [],
+      };
+      expect(parseEarningsDecoderOutput(JSON.stringify(noMetrics))).toBeNull();
     });
   });
 });

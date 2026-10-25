@@ -14,6 +14,7 @@ import { Route as AdminRouteRouteImport } from './routes/admin/route'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminArtifactsRouteImport } from './routes/admin/artifacts'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
+import { Route as AdminCompaniesRouteImport } from './routes/admin/companies'
 import { Route as AdminDigestsRouteImport } from './routes/admin/digests'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminEvidenceRouteImport } from './routes/admin/evidence'
@@ -56,6 +57,11 @@ const AdminArtifactsRoute = AdminArtifactsRouteImport.update({
 const AdminAskRoute = AdminAskRouteImport.update({
   id: '/ask',
   path: '/ask',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminCompaniesRoute = AdminCompaniesRouteImport.update({
+  id: '/companies',
+  path: '/companies',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminDigestsRoute = AdminDigestsRouteImport.update({
@@ -158,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteRouteWithChildren
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
+  '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
@@ -182,6 +189,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
+  '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteRouteWithChildren
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
+  '/admin/companies': typeof AdminCompaniesRoute
   '/admin/digests': typeof AdminDigestsRoute
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
@@ -235,6 +244,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/admin/artifacts'
     | '/admin/ask'
+    | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
@@ -259,6 +269,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin/artifacts'
     | '/admin/ask'
+    | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
@@ -284,6 +295,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/admin/artifacts'
     | '/admin/ask'
+    | '/admin/companies'
     | '/admin/digests'
     | '/admin/dlq'
     | '/admin/evidence'
@@ -352,6 +364,13 @@ declare module '@tanstack/react-router' {
       path: '/ask'
       fullPath: '/admin/ask'
       preLoaderRoute: typeof AdminAskRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/companies': {
+      id: '/admin/companies'
+      path: '/companies'
+      fullPath: '/admin/companies'
+      preLoaderRoute: typeof AdminCompaniesRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/digests': {
@@ -486,6 +505,7 @@ declare module '@tanstack/react-router' {
 interface AdminRouteRouteChildren {
   AdminArtifactsRoute: typeof AdminArtifactsRoute
   AdminAskRoute: typeof AdminAskRoute
+  AdminCompaniesRoute: typeof AdminCompaniesRoute
   AdminDigestsRoute: typeof AdminDigestsRoute
   AdminDlqRoute: typeof AdminDlqRoute
   AdminEvidenceRoute: typeof AdminEvidenceRoute
@@ -503,6 +523,7 @@ interface AdminRouteRouteChildren {
 const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminArtifactsRoute: AdminArtifactsRoute,
   AdminAskRoute: AdminAskRoute,
+  AdminCompaniesRoute: AdminCompaniesRoute,
   AdminDigestsRoute: AdminDigestsRoute,
   AdminDlqRoute: AdminDlqRoute,
   AdminEvidenceRoute: AdminEvidenceRoute,
