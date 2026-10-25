@@ -94,6 +94,18 @@ export async function trackEventPrimarySources(
   }
 
   if (effectivePrimaryDomains.length === 0) {
+    // Record scan so it yields to other events if ever invoked
+    await deps.db
+      .prepare(
+        `INSERT INTO event_artifacts (
+           event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
+         )
+         VALUES (?1, 'primary_tracked', '', ?2, 'v1', 'tracker', '{}', 'published', ?3)
+         ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
+         DO UPDATE SET created_at = excluded.created_at`,
+      )
+      .bind(eventId, event.revision, now)
+      .run();
     return { trackedCount: 0 };
   }
 
@@ -535,6 +547,7 @@ export async function trackDuePrimarySources(
   const { results } = await env.DB.prepare(
     `SELECT e.id
      FROM events e
+     JOIN industries i ON i.id = e.industry_id
      JOIN event_articles ea ON ea.event_id = e.id
      JOIN articles a ON a.id = ea.article_id
      JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
@@ -544,6 +557,8 @@ export async function trackDuePrimarySources(
        WHERE type = 'primary_tracked'
        GROUP BY event_id
      ) pt ON pt.event_id = e.id
+     WHERE json_valid(i.primary_domains) = 1
+       AND json_array_length(i.primary_domains) > 0
      GROUP BY e.id
      ORDER BY COALESCE(MAX(pt.last_scanned_at), 0) ASC, e.updated_at DESC
      LIMIT ?1`,

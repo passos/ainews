@@ -501,5 +501,58 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       );
       expect(processed).toEqual([]);
     });
+
+    it("events without a primary whitelist do not starve configured events", async () => {
+      const { seedEvent, seedArticle, seedEventArticle, seedReview } =
+        await import("../publication/helpers");
+      await env.DB.prepare(
+        "UPDATE industries SET primary_domains='[\"arxiv.org\"]' WHERE id=1",
+      ).run();
+      await env.DB.prepare(
+        "INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at) VALUES (2, 'finance', 'Finance', 'review', '[]', '{}', 1, 1000) ON CONFLICT(id) DO UPDATE SET primary_domains='[]'",
+      ).run();
+      const src2 = await env.DB.prepare(
+        "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (2, 'Finance Wire', 'https://finance.example/feed', 'finance.example', 'rss', 'active', 1000) RETURNING id",
+      ).first<{ id: number }>();
+
+      const eligible = await seedEvent(1, "Eligible older event", 1);
+      const eligibleArticle = await seedArticle({
+        industryId: 1,
+        sourceId,
+        title: "Eligible report",
+      });
+      await seedEventArticle(eligible, eligibleArticle, 0, 1);
+      await seedReview(eligibleArticle, "approved");
+
+      for (let i = 1; i <= 10; i++) {
+        const event = await seedEvent(2, `No whitelist ${i}`, 1);
+        await env.DB.prepare("UPDATE events SET updated_at=? WHERE id=?")
+          .bind(i, event)
+          .run();
+        const article = await seedArticle({
+          industryId: 2,
+          sourceId: src2!.id,
+          title: `Report ${i}`,
+        });
+        await seedEventArticle(event, article, i, 1);
+        await seedReview(article, "approved");
+      }
+
+      const scanned: string[] = [];
+      const get = vi.fn(async (key: string) => {
+        scanned.push(key);
+        return null;
+      });
+      const scheduled = {
+        ...env,
+        COLLECT_ENABLED: "true",
+        BODIES: { get },
+      } as unknown as PipelineEnv;
+
+      for (let i = 0; i < 3; i++)
+        await trackDuePrimarySources(scheduled, 1000 + i * 600000);
+
+      expect(scanned).toContain(`bodies/${eligibleArticle}/sha-current.md`);
+    });
   });
 });

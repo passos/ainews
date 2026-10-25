@@ -169,22 +169,25 @@ export async function getEvent(
   }
 
   function sanitizeRevisionDiff(diff: RevisionDiff, rev: number): RevisionDiff {
+    const extractBaseClaim = (c: string): string => {
+      const lastParen = c.lastIndexOf(" (");
+      return lastParen !== -1 && c.endsWith(")") ? c.slice(0, lastParen) : c;
+    };
+
     const hasWithdrawn =
       diff.newClaims.some((c) => withdrawnClaimsSet.has(c)) ||
-      diff.changedClaims.some((c) => {
-        const base = c.includes(" (") ? c.slice(0, c.indexOf(" (")) : c;
-        return withdrawnClaimsSet.has(base);
-      });
+      diff.changedClaims.some((c) =>
+        withdrawnClaimsSet.has(extractBaseClaim(c)),
+      );
 
     if (!hasWithdrawn) {
       return diff;
     }
 
     const newClaims = diff.newClaims.filter((c) => !withdrawnClaimsSet.has(c));
-    const changedClaims = diff.changedClaims.filter((c) => {
-      const base = c.includes(" (") ? c.slice(0, c.indexOf(" (")) : c;
-      return !withdrawnClaimsSet.has(base);
-    });
+    const changedClaims = diff.changedClaims.filter(
+      (c) => !withdrawnClaimsSet.has(extractBaseClaim(c)),
+    );
 
     let summary: string;
     if (rev <= 1) {
