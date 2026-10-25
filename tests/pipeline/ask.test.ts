@@ -631,4 +631,305 @@ describe("Ask Newsren Pipeline", () => {
     expect(row?.status).toBe("failed");
     expect(row?.error_message).toBe("Question budget exceeded");
   });
+
+  it("refuses and rejects answer when any proposed citation is tampered even if another is valid", async () => {
+    await seedTestCorpus();
+
+    const bodyText1 =
+      "The solar telescope recorded a massive coronal mass ejection.";
+    const bodySha1 = "sha_solar_cme";
+    const artId1 = 410;
+
+    const bodyText2 =
+      "Preliminary assessments indicate no direct impact on terrestrial power grids.";
+    const bodySha2 = "sha_solar_grid";
+    const artId2 = 411;
+
+    const r2 = new FakeR2();
+
+    for (const [id, sha, text] of [
+      [artId1, bodySha1, bodyText1],
+      [artId2, bodySha2, bodyText2],
+    ] as const) {
+      r2.put(`bodies/${id}/${sha}.md`, text);
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO articles (id, industry_id, source_id, title, url, canonical_url, body_sha, body_kind, stage, stage_updated_at, published_at, fetched_at)
+         VALUES (?1, 101, 201, 'Solar Event', ?2, ?2, ?3, 'full', 'grouped', 1000, 1000, 1000)`,
+      )
+        .bind(id, `https://arxiv.org/abs/solar_${id}`, sha)
+        .run();
+
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO reviews (id, article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, ?2, ?3, 'approved', 'admin@example.com', 1000)`,
+      )
+        .bind(510 + id, id, sha)
+        .run();
+    }
+
+    const vectors = new FakeVectors();
+    vectors.records.push(
+      {
+        id: `c_${artId1}_0`,
+        values: [0.1, 0.2, 0.3],
+        metadata: { article_id: artId1, body_sha: bodySha1 },
+      },
+      {
+        id: `c_${artId2}_0`,
+        values: [0.1, 0.2, 0.3],
+        metadata: { article_id: artId2, body_sha: bodySha2 },
+      },
+    );
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('What happened in the solar event?', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    // Citations: #1 is valid, #2 is tampered ("direct impact" instead of "no direct impact")
+    const transport = makeFakeTransport((_model, _input) => {
+      return {
+        sufficient: true,
+        neededUrls: [],
+        answer:
+          "A coronal mass ejection occurred and caused direct impact on power grids.",
+        unverified: [],
+        citations: [
+          {
+            articleId: artId1,
+            quote:
+              "The solar telescope recorded a massive coronal mass ejection.",
+            claim: "Massive CME recorded",
+          },
+          {
+            articleId: artId2,
+            quote:
+              "Preliminary assessments indicate direct impact on terrestrial power grids.",
+            claim: "Direct impact on power grids",
+          },
+        ],
+      };
+    });
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      {
+        bodies: r2 as unknown as R2Bucket,
+        vectors: vectors as unknown as Pick<VectorizeIndex, "query">,
+        transport,
+      },
+    );
+
+    expect(result.status).toBe("completed");
+    if (result.status === "completed") {
+      // Must refuse due to presence of tampered/unverified citation!
+      expect(result.refusal).toBe(true);
+      expect(result.citationsCount).toBe(1);
+    }
+
+    const row = await env.DB.prepare(
+      `SELECT refusal, answer, unverified FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ refusal: number; answer: string; unverified: string }>();
+
+    expect(row?.refusal).toBe(1);
+    expect(row?.answer).toContain(
+      "Refusing to answer to prevent hallucination",
+    );
+    const unverifiedList = JSON.parse(row?.unverified ?? "[]");
+    expect(unverifiedList[0]).toContain(
+      'Unverified quote for "Direct impact on power grids"',
+    );
+  });
+
+  it("does not fall back to summary when body markdown is missing in R2", async () => {
+    await seedTestCorpus();
+
+    const bodySha = "sha_missing_in_r2";
+    const artId = 420;
+
+    // Article with summary in D1, but NO body in R2!
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO articles (id, industry_id, source_id, title, summary, url, canonical_url, body_sha, body_kind, stage, stage_updated_at, published_at, fetched_at)
+       VALUES (?1, 101, 201, 'Quantum Paper', 'Summary mentions 1000 qubits achievement.', 'https://arxiv.org/abs/quantum', 'https://arxiv.org/abs/quantum', ?2, 'full', 'grouped', 1000, 1000, 1000)`,
+    )
+      .bind(artId, bodySha)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO reviews (id, article_id, body_sha, decision, reviewer, created_at)
+       VALUES (520, ?1, ?2, 'approved', 'admin@example.com', 1000)`,
+    )
+      .bind(artId, bodySha)
+      .run();
+
+    const r2 = new FakeR2(); // empty R2!
+    const vectors = new FakeVectors();
+    vectors.records.push({
+      id: `c_${artId}_0`,
+      values: [0.1, 0.2, 0.3],
+      metadata: { article_id: artId, body_sha: bodySha },
+    });
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('How many qubits were achieved?', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    let promptContent = "";
+    const transport = makeFakeTransport((_model, input) => {
+      promptContent = JSON.stringify(input);
+      return {
+        sufficient: false,
+        neededUrls: [],
+        answer: "Cannot verify without source body.",
+        unverified: ["Qubit count"],
+        citations: [],
+      };
+    });
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      {
+        bodies: r2 as unknown as R2Bucket,
+        vectors: vectors as unknown as Pick<VectorizeIndex, "query">,
+        transport,
+      },
+    );
+
+    // Prompt MUST NOT contain the summary as fake body!
+    expect(promptContent).not.toContain(
+      "Summary mentions 1000 qubits achievement",
+    );
+    expect(result.status).toBe("completed");
+    if (result.status === "completed") {
+      expect(result.refusal).toBe(true);
+    }
+  });
+
+  it("preserves completed status when MODEL_CALLS_ENABLED is turned off during redelivery", async () => {
+    await seedTestCorpus();
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, answer, refusal, prompt_version, model, created_at, completed_at)
+       VALUES ('Previously answered question', 'global', NULL, 'completed', 'Existing verified answer', 0, 'ask:v1', 'default', 1000, 2000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    // Call with MODEL_CALLS_ENABLED = false
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "false" },
+      questionId,
+      3000,
+    );
+
+    expect(result.status).toBe("skipped");
+    if (result.status === "skipped") {
+      expect(result.reason).toBe("already completed");
+    }
+
+    const row = await env.DB.prepare(
+      `SELECT status, answer FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ status: string; answer: string }>();
+    expect(row?.status).toBe("completed");
+    expect(row?.answer).toBe("Existing verified answer");
+  });
+
+  it("handles uncaught model errors gracefully and marks status as failed", async () => {
+    await seedTestCorpus();
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('Error throwing question', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    const transport: ModelTransport = {
+      run: async () => {
+        throw new Error("AI Gateway upstream 503 Service Unavailable");
+      },
+    };
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      { transport },
+    );
+
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.reason).toContain("503 Service Unavailable");
+    }
+
+    const row = await env.DB.prepare(
+      `SELECT status, error_message FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ status: string; error_message: string }>();
+    expect(row?.status).toBe("failed");
+    expect(row?.error_message).toContain("503 Service Unavailable");
+  });
+
+  it("only allows active sources in supplemental whitelist and respects robots.txt", async () => {
+    await seedTestCorpus();
+
+    // Insert paused and candidate sources
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO sources (id, industry_id, name, site_domain, feed_url, kind, status, config, created_at)
+       VALUES (202, 101, 'Paused Source', 'paused-domain.org', 'https://paused-domain.org/feed', 'rss', 'paused', '{}', 1000)`,
+    ).run();
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO sources (id, industry_id, name, site_domain, feed_url, kind, status, config, created_at)
+       VALUES (203, 101, 'Candidate Source', 'candidate-domain.org', 'https://candidate-domain.org/feed', 'rss', 'candidate', '{}', 1000)`,
+    ).run();
+
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('Check paused and candidate domains', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    const transport = makeFakeTransport((_model, _input) => {
+      return {
+        sufficient: false,
+        neededUrls: [
+          "https://paused-domain.org/article1",
+          "https://candidate-domain.org/article2",
+        ],
+        answer: "Cannot answer",
+        unverified: ["Paused/candidate test"],
+        citations: [],
+      };
+    });
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      { transport },
+    );
+
+    expect(result.status).toBe("completed");
+    const row = await env.DB.prepare(
+      `SELECT supplemental_fetched FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ supplemental_fetched: string }>();
+    const supplemental = JSON.parse(row?.supplemental_fetched ?? "[]");
+
+    // Both paused and candidate domains must be blocked by the whitelist!
+    expect(supplemental.length).toBe(2);
+    expect(supplemental[0].status).toBe("blocked");
+    expect(supplemental[1].status).toBe("blocked");
+  });
 });

@@ -2,13 +2,14 @@ import { isEnabled } from "../../lib/flags";
 import { safeHttpUrl } from "../../lib/url";
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import { createModelClient, type ModelClient } from "../../providers/models";
+import { toMarkdown } from "../../providers/tomarkdown";
 import {
   bindingTransport,
   type ModelTransport,
 } from "../../providers/transport";
 import type { PipelineEnv } from "../messages";
 import { fetchPage, type LadderDeps, type ToMarkdown } from "../body/ladder";
-import { hostAllowed } from "../body/robots";
+import { checkRobots, claimHostSlot, hostAllowed } from "../body/robots";
 import { sha256Hex } from "../evidence/chunks";
 import { isPrimarySourceDomain, verifyQuoteInBody } from "../evidence/verify";
 import {
@@ -97,6 +98,25 @@ function extractUrlsFromText(text: string): string[] {
   return valid;
 }
 
+async function ensureBudgetRemaining(
+  db: D1Database,
+  questionId: number,
+): Promise<number> {
+  const costRow = await db
+    .prepare(
+      `SELECT COALESCE(SUM(cost_micros), 0) AS total_cost
+       FROM llm_calls
+       WHERE logical_key LIKE ?1`,
+    )
+    .bind(`ask:%:${questionId}:%`)
+    .first<{ total_cost: number }>();
+  const total = costRow?.total_cost ?? 0;
+  if (total >= ASK_QUESTION_MAX_COST_MICROS) {
+    throw new Error("Question budget exceeded");
+  }
+  return total;
+}
+
 function createDefaultDeps(
   env: PipelineEnv,
   overrides: Partial<AskDeps> = {},
@@ -118,6 +138,11 @@ function createDefaultDeps(
       env,
       now,
     });
+  const toMarkdownFn =
+    overrides.toMarkdown ??
+    (env.AI
+      ? (bytes, mime, baseUrl) => toMarkdown(env.AI!, bytes, mime, baseUrl)
+      : undefined);
 
   return {
     db: overrides.db ?? env.DB,
@@ -126,7 +151,7 @@ function createDefaultDeps(
     models,
     transport,
     fetch: fetchFn,
-    toMarkdown: overrides.toMarkdown,
+    toMarkdown: toMarkdownFn,
     now,
   };
 }
@@ -139,24 +164,7 @@ export async function answerQuestion(
 ): Promise<AnswerQuestionResult> {
   const deps = createDefaultDeps(env, overrides);
 
-  // 1. Safety flag check
-  if (!isEnabled(env, "MODEL_CALLS_ENABLED")) {
-    await deps.db
-      .prepare(
-        `UPDATE questions
-         SET status = 'failed', error_message = 'MODEL_CALLS_ENABLED is off', completed_at = ?2
-         WHERE id = ?1`,
-      )
-      .bind(questionId, commitNow)
-      .run();
-    return {
-      status: "failed",
-      questionId,
-      reason: "MODEL_CALLS_ENABLED is off",
-    };
-  }
-
-  // 2. Fetch question
+  // 1. Fetch question record
   interface QuestionRow {
     id: number;
     question: string;
@@ -184,6 +192,24 @@ export async function answerQuestion(
     };
   }
 
+  // 2. Safety flag check: only update if not already completed
+  if (!isEnabled(env, "MODEL_CALLS_ENABLED")) {
+    await deps.db
+      .prepare(
+        `UPDATE questions
+         SET status = 'failed', error_message = 'MODEL_CALLS_ENABLED is off', completed_at = ?2
+         WHERE id = ?1 AND status != 'completed'`,
+      )
+      .bind(questionId, commitNow)
+      .run();
+    return {
+      status: "failed",
+      questionId,
+      reason: "MODEL_CALLS_ENABLED is off",
+    };
+  }
+
+  // 3. Mark as processing
   await deps.db
     .prepare(
       `UPDATE questions SET status = 'processing' WHERE id = ?1 AND status = 'pending'`,
@@ -191,415 +217,494 @@ export async function answerQuestion(
     .bind(questionId)
     .run();
 
-  // 3. Resolve Reason slot model name
-  let reasonModel = DEFAULT_SLOTS.reason.model;
   try {
-    const settingRow = await deps.db
-      .prepare(`SELECT value_json FROM settings WHERE key = ?1`)
-      .bind(SETTING_SLOTS)
-      .first<{ value_json: string }>();
-    if (settingRow?.value_json) {
-      const slots = JSON.parse(settingRow.value_json);
-      if (slots.reason?.model) {
-        reasonModel = slots.reason.model;
-      }
-    }
-  } catch {
-    // Keep fallback
-  }
+    // Check pre-call budget
+    await ensureBudgetRemaining(deps.db, questionId);
 
-  // 4. Vector Embedding & Retrieval from V_CHUNKS
-  const qSha = (await sha256Hex(qRow.question)).slice(0, 16);
-  const embedKey = `ask:embed:${questionId}:${qSha}`;
-  const candidateArticleIds: number[] = [];
-
-  try {
-    const [qVector] = await deps.models.embed(embedKey, [qRow.question]);
-    if (deps.vectors && qVector && qVector.length > 0) {
-      const searchRes = await deps.vectors.query(qVector, {
-        topK: 20,
-        returnMetadata: "all",
-      });
-      for (const match of searchRes.matches ?? []) {
-        const artId = Number(match.metadata?.article_id);
-        if (artId && !candidateArticleIds.includes(artId)) {
-          candidateArticleIds.push(artId);
+    // 4. Resolve Reason slot model name
+    let reasonModel = DEFAULT_SLOTS.reason.model;
+    try {
+      const settingRow = await deps.db
+        .prepare(`SELECT value_json FROM settings WHERE key = ?1`)
+        .bind(SETTING_SLOTS)
+        .first<{ value_json: string }>();
+      if (settingRow?.value_json) {
+        const slots = JSON.parse(settingRow.value_json);
+        if (slots.reason?.model) {
+          reasonModel = slots.reason.model;
         }
       }
+    } catch {
+      // Keep fallback
     }
-  } catch (err) {
-    console.warn({ questionId, warn: "ask embed/vector query error", err });
-  }
 
-  // If scoped to a specific event, include event articles
-  if (qRow.scope_type === "event" && qRow.event_id) {
-    const eventArtRows = await deps.db
-      .prepare(`SELECT article_id FROM event_articles WHERE event_id = ?1`)
-      .bind(qRow.event_id)
-      .all<{ article_id: number }>();
-    for (const r of eventArtRows.results ?? []) {
-      if (!candidateArticleIds.includes(r.article_id)) {
-        candidateArticleIds.push(r.article_id);
+    // 5. Vector Embedding & Retrieval from V_CHUNKS
+    const qSha = (await sha256Hex(qRow.question)).slice(0, 16);
+    const embedKey = `ask:embed:${questionId}:${qSha}`;
+    const candidateArticleIds: number[] = [];
+
+    try {
+      const [qVector] = await deps.models.embed(embedKey, [qRow.question]);
+      if (deps.vectors && qVector && qVector.length > 0) {
+        const searchRes = await deps.vectors.query(qVector, {
+          topK: 20,
+          returnMetadata: "all",
+        });
+        for (const match of searchRes.matches ?? []) {
+          const artId = Number(match.metadata?.article_id);
+          if (artId && !candidateArticleIds.includes(artId)) {
+            candidateArticleIds.push(artId);
+          }
+        }
       }
+    } catch (err) {
+      console.warn({ questionId, warn: "ask embed/vector query error", err });
     }
-  }
 
-  // 5. Query D1 for Approved Articles ONLY
-  interface ApprovedRow {
-    id: number;
-    title: string;
-    summary: string | null;
-    body_sha: string;
-    source_name: string | null;
-    site_domain: string | null;
-    industry_id: number;
-    industry_name: string;
-    primary_domains: string | null;
-  }
-
-  const approvedArticles: ApprovedRow[] = [];
-  if (candidateArticleIds.length > 0) {
-    const placeholders = candidateArticleIds.map(() => "?").join(", ");
-    let sql = `
-      SELECT a.id, a.title, a.summary, a.body_sha,
-             s.name AS source_name, s.site_domain,
-             i.id AS industry_id, i.name AS industry_name, i.primary_domains
-      FROM articles a
-      JOIN sources s ON s.id = a.source_id
-      JOIN industries i ON i.id = a.industry_id
-      WHERE a.id IN (${placeholders})
-        AND EXISTS (
-          SELECT 1 FROM reviews r
-          WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-        )
-    `;
-
-    const bindings: (number | string)[] = [...candidateArticleIds];
+    // If scoped to a specific event, include event articles
     if (qRow.scope_type === "event" && qRow.event_id) {
-      sql += ` AND EXISTS (
-        SELECT 1 FROM event_articles ea
-        WHERE ea.article_id = a.id AND ea.event_id = ?
-      )`;
-      bindings.push(qRow.event_id);
+      const eventArtRows = await deps.db
+        .prepare(`SELECT article_id FROM event_articles WHERE event_id = ?1`)
+        .bind(qRow.event_id)
+        .all<{ article_id: number }>();
+      for (const r of eventArtRows.results ?? []) {
+        if (!candidateArticleIds.includes(r.article_id)) {
+          candidateArticleIds.push(r.article_id);
+        }
+      }
     }
 
-    const rows = await deps.db
-      .prepare(sql)
-      .bind(...bindings)
-      .all<ApprovedRow>();
-    approvedArticles.push(...(rows.results ?? []));
-  }
+    // 6. Query D1 for Approved Articles ONLY
+    interface ApprovedRow {
+      id: number;
+      title: string;
+      summary: string | null;
+      body_sha: string;
+      source_name: string | null;
+      site_domain: string | null;
+      industry_id: number;
+      industry_name: string;
+      primary_domains: string | null;
+    }
 
-  // 6. Load article bodies
-  const articlesContext: ArticleAskContext[] = [];
-  for (const art of approvedArticles) {
-    let bodyText = "";
-    if (deps.bodies && art.body_sha) {
-      try {
-        const obj = await deps.bodies.get(
-          `bodies/${art.id}/${art.body_sha}.md`,
-        );
-        if (obj) {
-          bodyText = await obj.text();
+    const approvedArticles: ApprovedRow[] = [];
+    if (candidateArticleIds.length > 0) {
+      const placeholders = candidateArticleIds.map(() => "?").join(", ");
+      let sql = `
+        SELECT a.id, a.title, a.summary, a.body_sha,
+               s.name AS source_name, s.site_domain,
+               i.id AS industry_id, i.name AS industry_name, i.primary_domains
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        JOIN industries i ON i.id = a.industry_id
+        WHERE a.id IN (${placeholders})
+          AND EXISTS (
+            SELECT 1 FROM reviews r
+            WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+          )
+      `;
+
+      const bindings: (number | string)[] = [...candidateArticleIds];
+      if (qRow.scope_type === "event" && qRow.event_id) {
+        sql += ` AND EXISTS (
+          SELECT 1 FROM event_articles ea
+          WHERE ea.article_id = a.id AND ea.event_id = ?
+        )`;
+        bindings.push(qRow.event_id);
+      }
+
+      const rows = await deps.db
+        .prepare(sql)
+        .bind(...bindings)
+        .all<ApprovedRow>();
+      approvedArticles.push(...(rows.results ?? []));
+    }
+
+    // 7. Load article bodies - DO NOT fall back to summary!
+    const articlesContext: ArticleAskContext[] = [];
+    for (const art of approvedArticles) {
+      let bodyText = "";
+      if (deps.bodies && art.body_sha) {
+        try {
+          const obj = await deps.bodies.get(
+            `bodies/${art.id}/${art.body_sha}.md`,
+          );
+          if (obj) {
+            bodyText = await obj.text();
+          }
+        } catch (err) {
+          console.warn({
+            articleId: art.id,
+            warn: "failed to load body from R2",
+            err,
+          });
         }
-      } catch (err) {
-        console.warn({
-          articleId: art.id,
-          warn: "failed to load body from R2",
-          err,
+      }
+      // Only include if actual markdown body is present
+      if (bodyText) {
+        const primaryDomains = parsePrimaryDomains(art.primary_domains);
+        articlesContext.push({
+          id: art.id,
+          title: art.title,
+          sourceName: art.source_name || art.site_domain || "Source",
+          sourceDomain: art.site_domain || "",
+          isPrimarySource: isPrimarySourceDomain(
+            art.site_domain || "",
+            primaryDomains,
+          ),
+          bodySha: art.body_sha,
+          bodyText,
         });
       }
     }
-    if (!bodyText && art.summary) {
-      bodyText = art.summary;
-    }
-    if (bodyText) {
-      const primaryDomains = parsePrimaryDomains(art.primary_domains);
-      articlesContext.push({
-        id: art.id,
-        title: art.title,
-        sourceName: art.source_name || art.site_domain || "Source",
-        sourceDomain: art.site_domain || "",
-        isPrimarySource: isPrimarySourceDomain(
-          art.site_domain || "",
-          primaryDomains,
-        ),
-        bodySha: art.body_sha,
-        bodyText,
-      });
-    }
-  }
 
-  // 7. Initial Reason slot model call
-  const scopeDesc =
-    qRow.scope_type === "event" ? `Event #${qRow.event_id}` : undefined;
-  const req1 = buildAskRequest({
-    question: qRow.question,
-    scopeDescription: scopeDesc,
-    articles: articlesContext,
-  });
+    // 8. Initial Reason slot model call
+    await ensureBudgetRemaining(deps.db, questionId);
 
-  const p1Sha = (await sha256Hex(req1.prompt)).slice(0, 16);
-  const callKey1 = `ask:reason:${questionId}:r1:${p1Sha}`;
-  const res1 = await deps.models.generateText("reason", callKey1, req1);
-  let parsedOutput = parseAskOutput(res1.text);
+    const scopeDesc =
+      qRow.scope_type === "event" ? `Event #${qRow.event_id}` : undefined;
+    const req1 = buildAskRequest({
+      question: qRow.question,
+      scopeDescription: scopeDesc,
+      articles: articlesContext,
+    });
 
-  // 8. Supplementary fetch in whitelist if evidence is insufficient
-  const supplementalFetched: SupplementalFetchLog[] = [];
-  if (
-    parsedOutput &&
-    !parsedOutput.sufficient &&
-    (parsedOutput.neededUrls.length > 0 ||
-      extractUrlsFromText(qRow.question).length > 0)
-  ) {
-    // Gather candidate URLs (up to 2)
-    const rawCandidates = [
-      ...parsedOutput.neededUrls,
-      ...extractUrlsFromText(qRow.question),
-    ];
-    const candidateUrls: string[] = [];
-    for (const u of rawCandidates) {
-      const safe = safeHttpUrl(u);
-      if (safe && !candidateUrls.includes(safe)) {
-        candidateUrls.push(safe);
-        if (candidateUrls.length >= 2) break;
-      }
-    }
+    const p1Sha = (await sha256Hex(req1.prompt)).slice(0, 16);
+    const callKey1 = `ask:reason:${questionId}:r1:${p1Sha}`;
+    const res1 = await deps.models.generateText("reason", callKey1, req1);
+    let parsedOutput = parseAskOutput(res1.text);
 
-    if (candidateUrls.length > 0) {
-      // Gather allowed domains from all sources and industries
-      const sourceRows = await deps.db
-        .prepare(`SELECT site_domain FROM sources WHERE status != 'disabled'`)
-        .all<{ site_domain: string | null }>();
-      const industryRows = await deps.db
-        .prepare(`SELECT primary_domains FROM industries`)
-        .all<{ primary_domains: string | null }>();
-
-      const allowedDomains = new Set<string>();
-      for (const s of sourceRows.results ?? []) {
-        if (s.site_domain?.trim())
-          allowedDomains.add(s.site_domain.trim().toLowerCase());
-      }
-      for (const ind of industryRows.results ?? []) {
-        for (const d of parsePrimaryDomains(ind.primary_domains)) {
-          if (d.trim()) allowedDomains.add(d.trim().toLowerCase());
+    // 9. Supplementary fetch in whitelist if evidence is insufficient
+    const supplementalFetched: SupplementalFetchLog[] = [];
+    if (
+      parsedOutput &&
+      !parsedOutput.sufficient &&
+      (parsedOutput.neededUrls.length > 0 ||
+        extractUrlsFromText(qRow.question).length > 0)
+    ) {
+      // Gather candidate URLs (up to 2)
+      const rawCandidates = [
+        ...parsedOutput.neededUrls,
+        ...extractUrlsFromText(qRow.question),
+      ];
+      const candidateUrls: string[] = [];
+      for (const raw of rawCandidates) {
+        const s = safeHttpUrl(raw);
+        if (s && !candidateUrls.includes(s)) {
+          candidateUrls.push(s);
+          if (candidateUrls.length >= 2) break;
         }
       }
-      const domainsList = Array.from(allowedDomains);
 
-      const ladderDeps: LadderDeps = {
-        fetch: deps.fetch,
-        toMarkdown: deps.toMarkdown ?? (async () => null),
-      };
+      if (candidateUrls.length > 0) {
+        // Gather allowed domains ONLY from active sources and industries
+        const sourceRows = await deps.db
+          .prepare(`SELECT site_domain FROM sources WHERE status = 'active'`)
+          .all<{ site_domain: string | null }>();
+        const industryRows = await deps.db
+          .prepare(`SELECT primary_domains FROM industries`)
+          .all<{ primary_domains: string | null }>();
 
-      let anyFetched = false;
-      for (const targetUrl of candidateUrls) {
-        let parsedUrl: URL;
-        try {
-          parsedUrl = new URL(targetUrl);
-        } catch {
-          supplementalFetched.push({
-            url: targetUrl,
-            rung: null,
-            status: "blocked",
-          });
-          continue;
+        const allowedDomains = new Set<string>();
+        for (const s of sourceRows.results ?? []) {
+          if (s.site_domain?.trim())
+            allowedDomains.add(s.site_domain.trim().toLowerCase());
         }
-
-        if (!hostAllowed(parsedUrl.hostname, domainsList)) {
-          supplementalFetched.push({
-            url: targetUrl,
-            rung: null,
-            status: "blocked",
-          });
-          continue;
+        for (const ind of industryRows.results ?? []) {
+          for (const d of parsePrimaryDomains(ind.primary_domains)) {
+            if (d.trim()) allowedDomains.add(d.trim().toLowerCase());
+          }
         }
+        const domainsList = Array.from(allowedDomains);
 
-        try {
-          const pageRes = await fetchPage(
-            env,
-            targetUrl,
-            commitNow,
-            domainsList,
-            ladderDeps,
-          );
-          if (pageRes.kind === "body") {
-            supplementalFetched.push({
-              url: targetUrl,
-              rung: pageRes.body.rung,
-              status: "ok",
-            });
-            anyFetched = true;
-            // Append as supplemental article context
-            const suppSha = (await sha256Hex(pageRes.body.markdown)).slice(
-              0,
-              16,
-            );
-            articlesContext.push({
-              id: 900000 + supplementalFetched.length,
-              title: `Supplemental: ${parsedUrl.hostname}`,
-              sourceName: parsedUrl.hostname,
-              sourceDomain: parsedUrl.hostname,
-              isPrimarySource: false,
-              bodySha: suppSha,
-              bodyText: pageRes.body.markdown,
-            });
-          } else {
+        const supplementalDeadline = deps.now() + 15_000;
+        const ladderDeps: LadderDeps = {
+          fetch: deps.fetch,
+          toMarkdown: deps.toMarkdown ?? (async () => null),
+        };
+
+        let anyFetched = false;
+        for (const targetUrl of candidateUrls) {
+          if (deps.now() >= supplementalDeadline) {
             supplementalFetched.push({
               url: targetUrl,
               rung: null,
-              status: pageRes.kind === "blocked" ? "blocked" : "failed",
+              status: "blocked",
+            });
+            break;
+          }
+
+          let parsedUrl: URL;
+          try {
+            parsedUrl = new URL(targetUrl);
+          } catch {
+            supplementalFetched.push({
+              url: targetUrl,
+              rung: null,
+              status: "blocked",
+            });
+            continue;
+          }
+
+          if (!hostAllowed(parsedUrl.hostname, domainsList)) {
+            supplementalFetched.push({
+              url: targetUrl,
+              rung: null,
+              status: "blocked",
+            });
+            continue;
+          }
+
+          // robots.txt check
+          const robots = await checkRobots(
+            env,
+            targetUrl,
+            commitNow,
+            deps.fetch,
+            domainsList,
+          );
+          if (!robots.allowed) {
+            supplementalFetched.push({
+              url: targetUrl,
+              rung: null,
+              status: "blocked",
+            });
+            continue;
+          }
+
+          // host slot crawl-delay claim
+          const slot = await claimHostSlot(
+            env,
+            parsedUrl.host,
+            robots.crawlDelaySec ?? 0,
+            commitNow,
+          );
+          if (!slot.claimed) {
+            supplementalFetched.push({
+              url: targetUrl,
+              rung: null,
+              status: "blocked",
+            });
+            continue;
+          }
+
+          try {
+            const pageRes = await fetchPage(
+              env,
+              targetUrl,
+              commitNow,
+              domainsList,
+              ladderDeps,
+            );
+            if (pageRes.kind === "body") {
+              supplementalFetched.push({
+                url: targetUrl,
+                rung: pageRes.body.rung,
+                status: "ok",
+              });
+              anyFetched = true;
+              const suppSha = (await sha256Hex(pageRes.body.markdown)).slice(
+                0,
+                16,
+              );
+
+              // Persist supplemental body in R2
+              if (deps.bodies) {
+                await deps.bodies.put(
+                  `bodies/supplemental/${suppSha}.md`,
+                  pageRes.body.markdown,
+                  {
+                    customMetadata: {
+                      url: targetUrl,
+                      fetchedAt: String(commitNow),
+                    },
+                  },
+                );
+              }
+
+              articlesContext.push({
+                id: 900000 + supplementalFetched.length,
+                title: `Supplemental: ${parsedUrl.hostname}`,
+                sourceName: parsedUrl.hostname,
+                sourceDomain: parsedUrl.hostname,
+                isPrimarySource: false,
+                bodySha: suppSha,
+                bodyText: pageRes.body.markdown,
+              });
+            } else {
+              supplementalFetched.push({
+                url: targetUrl,
+                rung: null,
+                status: pageRes.kind === "blocked" ? "blocked" : "failed",
+              });
+            }
+          } catch {
+            supplementalFetched.push({
+              url: targetUrl,
+              rung: null,
+              status: "failed",
             });
           }
-        } catch {
-          supplementalFetched.push({
-            url: targetUrl,
-            rung: null,
-            status: "failed",
+        }
+
+        // If new text was fetched, run round 2 reasoning
+        if (anyFetched) {
+          await ensureBudgetRemaining(deps.db, questionId);
+
+          const req2 = buildAskRequest({
+            question: qRow.question,
+            scopeDescription: scopeDesc,
+            articles: articlesContext,
           });
-        }
-      }
-
-      // If new text was fetched, run round 2 reasoning
-      if (anyFetched) {
-        const req2 = buildAskRequest({
-          question: qRow.question,
-          scopeDescription: scopeDesc,
-          articles: articlesContext,
-        });
-        const p2Sha = (await sha256Hex(req2.prompt)).slice(0, 16);
-        const callKey2 = `ask:reason:${questionId}:r2:${p2Sha}`;
-        const res2 = await deps.models.generateText("reason", callKey2, req2);
-        const parsed2 = parseAskOutput(res2.text);
-        if (parsed2) {
-          parsedOutput = parsed2;
+          const p2Sha = (await sha256Hex(req2.prompt)).slice(0, 16);
+          const callKey2 = `ask:reason:${questionId}:r2:${p2Sha}`;
+          const res2 = await deps.models.generateText("reason", callKey2, req2);
+          const parsed2 = parseAskOutput(res2.text);
+          if (parsed2) {
+            parsedOutput = parsed2;
+          }
         }
       }
     }
-  }
 
-  // 9. Citation Verification using verifyQuoteInBody
-  const validCitations: VerifiedCitation[] = [];
-  const unverifiedNotes: string[] = [...(parsedOutput?.unverified ?? [])];
+    // 10. Citation Verification using verifyQuoteInBody
+    const validCitations: VerifiedCitation[] = [];
+    const unverifiedNotes: string[] = [...(parsedOutput?.unverified ?? [])];
 
-  if (parsedOutput?.citations) {
-    for (const cit of parsedOutput.citations) {
-      const art = articlesContext.find((a) => a.id === cit.articleId);
-      if (!art) {
-        unverifiedNotes.push(
-          `Citation referenced unknown article #${cit.articleId}`,
-        );
-        continue;
+    let hasTamperedOrMissingQuote = false;
+
+    if (parsedOutput?.citations && parsedOutput.citations.length > 0) {
+      for (const cit of parsedOutput.citations) {
+        const art = articlesContext.find((a) => a.id === cit.articleId);
+        if (!art) {
+          hasTamperedOrMissingQuote = true;
+          unverifiedNotes.push(
+            `Unverified quote for "${cit.claim}": article #${cit.articleId} not in context`,
+          );
+          continue;
+        }
+
+        const v = verifyQuoteInBody(art.bodyText, cit.quote);
+        if (v.verified) {
+          validCitations.push({
+            articleId: art.id,
+            bodySha: art.bodySha,
+            quote: cit.quote,
+            claim: cit.claim,
+            startOffset: v.startOffset,
+            endOffset: v.endOffset,
+            verified: true,
+            isPrimarySource: art.isPrimarySource,
+          });
+        } else {
+          hasTamperedOrMissingQuote = true;
+          unverifiedNotes.push(
+            `Unverified quote for "${cit.claim}": quote not found verbatim in article #${art.id}`,
+          );
+        }
       }
+    }
 
-      const verifyResult = verifyQuoteInBody(art.bodyText, cit.quote);
-      if (verifyResult.verified) {
-        validCitations.push({
-          articleId: art.id,
-          bodySha: art.bodySha,
-          quote: verifyResult.quoteClean,
-          claim: cit.claim,
-          startOffset: verifyResult.startOffset,
-          endOffset: verifyResult.endOffset,
-          verified: true,
-          isPrimarySource: art.isPrimarySource,
-        });
+    // 11. Refusal determination:
+    // - If output is null or not sufficient
+    // - If verified citations count is 0
+    // - If any proposed citation was tampered or unverified (honest refusal to prevent hallucination)
+    const isRefusal =
+      !parsedOutput ||
+      !parsedOutput.sufficient ||
+      validCitations.length === 0 ||
+      hasTamperedOrMissingQuote;
+
+    let finalAnswer: string;
+    if (isRefusal) {
+      if (hasTamperedOrMissingQuote) {
+        finalAnswer =
+          "The model's proposed answer relied on quotations that could not be verified verbatim in the source texts. Refusing to answer to prevent hallucination.";
       } else {
-        unverifiedNotes.push(
-          `Unverified quote for "${cit.claim}": quote not found verbatim in article #${art.id}`,
-        );
+        finalAnswer =
+          parsedOutput?.answer && !parsedOutput.sufficient
+            ? parsedOutput.answer
+            : "Could not find sufficient verified evidence to answer this question.";
       }
+    } else {
+      finalAnswer = parsedOutput?.answer ?? "";
     }
-  }
 
-  // 10. Refusal determination: insufficient or 0 valid citations
-  const isRefusal =
-    !parsedOutput || !parsedOutput.sufficient || validCitations.length === 0;
+    if (isRefusal && unverifiedNotes.length === 0) {
+      unverifiedNotes.push(
+        "No verified evidence found in database for this question.",
+      );
+    }
 
-  const finalAnswer =
-    parsedOutput?.answer ??
-    "Could not find sufficient verified evidence to answer this question.";
+    // 12. Calculate total cost for this question from llm_calls
+    let totalCostMicros = 0;
+    try {
+      const costRow = await deps.db
+        .prepare(
+          `SELECT COALESCE(SUM(cost_micros), 0) AS total_cost
+           FROM llm_calls
+           WHERE logical_key LIKE ?1`,
+        )
+        .bind(`ask:%:${questionId}:%`)
+        .first<{ total_cost: number }>();
+      totalCostMicros = costRow?.total_cost ?? 0;
+    } catch {
+      // Ignored
+    }
 
-  if (isRefusal && unverifiedNotes.length === 0) {
-    unverifiedNotes.push(
-      "No verified evidence found in database for this question.",
-    );
-  }
-
-  // 11. Calculate total cost for this question from llm_calls
-  let totalCostMicros = 0;
-  try {
-    const costRow = await deps.db
-      .prepare(
-        `SELECT COALESCE(SUM(cost_micros), 0) AS total_cost
-         FROM llm_calls
-         WHERE logical_key LIKE ?1`,
-      )
-      .bind(`ask:%:${questionId}:%`)
-      .first<{ total_cost: number }>();
-    totalCostMicros = costRow?.total_cost ?? 0;
-  } catch (err) {
-    console.warn({
-      questionId,
-      warn: "failed to sum cost from llm_calls",
-      err,
-    });
-  }
-
-  if (totalCostMicros > ASK_QUESTION_MAX_COST_MICROS) {
+    // 13. Persist Question Result
     await deps.db
       .prepare(
         `UPDATE questions
-         SET status = 'failed',
-             error_message = 'Question budget exceeded',
-             cost_micros = ?2,
-             completed_at = ?3
+         SET status = 'completed',
+             answer = ?2,
+             unverified = ?3,
+             citations = ?4,
+             refusal = ?5,
+             supplemental_fetched = ?6,
+             cost_micros = ?7,
+             prompt_version = ?8,
+             model = ?9,
+             completed_at = ?10,
+             error_message = NULL
          WHERE id = ?1`,
       )
-      .bind(questionId, totalCostMicros, commitNow)
+      .bind(
+        questionId,
+        finalAnswer,
+        JSON.stringify(unverifiedNotes),
+        JSON.stringify(validCitations),
+        isRefusal ? 1 : 0,
+        JSON.stringify(supplementalFetched),
+        totalCostMicros,
+        ASK_PROMPT_VERSION,
+        reasonModel,
+        deps.now(),
+      )
       .run();
+
+    return {
+      status: "completed",
+      questionId,
+      refusal: isRefusal,
+      citationsCount: validCitations.length,
+      costMicros: totalCostMicros,
+    };
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await deps.db
+      .prepare(
+        `UPDATE questions
+         SET status = 'failed', error_message = ?2, completed_at = ?3
+         WHERE id = ?1`,
+      )
+      .bind(questionId, errorMsg, deps.now())
+      .run();
+
     return {
       status: "failed",
       questionId,
-      reason: "Question budget exceeded",
+      reason: errorMsg,
     };
   }
-
-  // 12. Write final result
-  await deps.db
-    .prepare(
-      `UPDATE questions
-       SET status = 'completed',
-           answer = ?2,
-           unverified = ?3,
-           citations = ?4,
-           refusal = ?5,
-           supplemental_fetched = ?6,
-           cost_micros = ?7,
-           prompt_version = ?8,
-           model = ?9,
-           completed_at = ?10
-       WHERE id = ?1`,
-    )
-    .bind(
-      questionId,
-      finalAnswer,
-      JSON.stringify(unverifiedNotes),
-      JSON.stringify(validCitations),
-      isRefusal ? 1 : 0,
-      JSON.stringify(supplementalFetched),
-      totalCostMicros,
-      ASK_PROMPT_VERSION,
-      reasonModel,
-      commitNow,
-    )
-    .run();
-
-  return {
-    status: "completed",
-    questionId,
-    refusal: isRefusal,
-    citationsCount: validCitations.length,
-    costMicros: totalCostMicros,
-  };
 }
