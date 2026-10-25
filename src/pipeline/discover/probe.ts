@@ -285,6 +285,8 @@ export async function probeCandidate(
   const rungs: number[] = [];
   const itemsToSample = feedItems.slice(0, 5);
 
+  let rateLimitedCount = 0;
+
   for (const item of itemsToSample) {
     // Check if item has full content in feed (Rung 0)
     let rung0Body: string | null = null;
@@ -317,9 +319,21 @@ export async function probeCandidate(
       continue;
     }
 
-    const allowedDomains = [siteDomain, siteName, itemUrl.hostname].filter(
-      Boolean,
-    );
+    const itemHost = itemUrl.hostname.toLowerCase();
+    const siteHost = siteDomain.toLowerCase();
+    const baseDomain = siteName.toLowerCase();
+    const isSameSite =
+      itemHost === siteHost ||
+      itemHost === baseDomain ||
+      itemHost.endsWith("." + baseDomain) ||
+      siteHost.endsWith("." + itemHost);
+
+    if (!isSameSite) {
+      // External/cross-domain link in RSS (e.g. ad, sponsor), do not widen whitelist
+      continue;
+    }
+
+    const allowedDomains = [siteDomain, siteName, itemHost].filter(Boolean);
 
     // Robots check for sample article hop
     const robots = await checkRobots(
@@ -341,6 +355,7 @@ export async function probeCandidate(
       deps.now(),
     );
     if (!slot.claimed) {
+      rateLimitedCount++;
       continue;
     }
 
@@ -377,15 +392,18 @@ export async function probeCandidate(
   }
 
   if (sampleArticles.length === 0) {
+    const isRateLimited = rateLimitedCount > 0;
     return {
       kind,
       feedUrl,
       name: siteName,
       siteDomain,
       fetchRung: 0,
-      requiresBrowser: 1,
+      requiresBrowser: isRateLimited ? 0 : 1,
       sampleArticles: [],
-      rejectionReason: "insufficient_body_text",
+      rejectionReason: isRateLimited
+        ? "rate_limited"
+        : "insufficient_body_text",
     };
   }
 

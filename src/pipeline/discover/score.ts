@@ -10,6 +10,7 @@ export interface EvaluationResult {
 
 export interface ScoreDeps {
   models: ModelClient;
+  runId?: number;
 }
 
 function sha256(str: string): string {
@@ -32,11 +33,14 @@ export async function evaluateCandidateSamples(
     const inputPayload = JSON.stringify({
       url: sample.url,
       title: sample.title,
+      summary: sample.summary ?? "",
       bodySha: sha256(sample.body),
       industry: industryName,
       editorialCriteria: industryConfig.prefilter.relevant,
     });
-    const key = `discover_score:${sha256(inputPayload)}`;
+    const key = deps.runId
+      ? `discover_score:${deps.runId}:${sha256(inputPayload)}`
+      : `discover_score:${sha256(inputPayload)}`;
     const state = {
       title: sample.title,
       summary: sample.summary ?? "",

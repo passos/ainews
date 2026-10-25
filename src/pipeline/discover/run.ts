@@ -1,4 +1,4 @@
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { isEnabled } from "../../lib/flags";
 import {
@@ -42,7 +42,10 @@ export interface WebSearchClient {
   }): Promise<WebSearchResponse>;
 }
 
-export function createWebSearchClient(ai?: Env["AI"]): WebSearchClient | null {
+export function createWebSearchClient(
+  ai?: Env["AI"],
+  gatewayId?: string,
+): WebSearchClient | null {
   if (
     !ai ||
     typeof (ai as unknown as { websearch?: unknown }).websearch !== "function"
@@ -56,6 +59,7 @@ export function createWebSearchClient(ai?: Env["AI"]): WebSearchClient | null {
           websearch: (req: unknown) => Promise<unknown>;
         }
       ).websearch({
+        gatewayId: gatewayId ?? "ainews",
         query: options.query,
         limit: options.limit ?? 10,
       });
@@ -150,7 +154,8 @@ export async function runDiscovery(
       now: nowFn,
     });
 
-  const webSearch = overrides.webSearch ?? createWebSearchClient(env.AI);
+  const webSearch =
+    overrides.webSearch ?? createWebSearchClient(env.AI, env.AI_GATEWAY_ID);
   if (!webSearch) {
     await db
       .update(discoveryRuns)
@@ -259,20 +264,24 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
 
     const isFinance = ind.slug.trim().toLowerCase() === FINANCE_SLUG;
 
-    // 5. Probe candidates
-    const probeTargets = candidateUrls.slice(0, MAX_CANDIDATES_TO_PROBE);
-    for (const targetUrl of probeTargets) {
-      // Check discovery task budget limit ($0.05 = 50,000 micros)
+    const getRunCost = async () => {
       const costRes = await db
         .select({ totalCost: sql<number>`coalesce(sum(cost_micros), 0)` })
         .from(llmCalls)
         .where(
-          and(
-            sql`logical_key LIKE ${`discover_%`}`,
-            sql`created_at >= ${run.createdAt}`,
+          or(
+            eq(llmCalls.logicalKey, `discover_queries:${runId}:${ind.id}`),
+            sql`logical_key LIKE ${`discover_score:${runId}:%`}`,
           ),
         );
-      const currentRunCost = Number(costRes[0]?.totalCost ?? 0);
+      return Number(costRes[0]?.totalCost ?? 0);
+    };
+
+    // 5. Probe candidates
+    const probeTargets = candidateUrls.slice(0, MAX_CANDIDATES_TO_PROBE);
+    for (const targetUrl of probeTargets) {
+      // Check discovery task budget limit ($0.05 = 50,000 micros)
+      const currentRunCost = await getRunCost();
       if (currentRunCost >= 50_000) {
         break;
       }
@@ -298,7 +307,10 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
         "pending" | "approved" | "rejected" | "auto_enabled" = "pending";
       let rejectionReason: string | null = null;
 
-      if (probeRes.requiresBrowser === 1) {
+      if (probeRes.rejectionReason === "rate_limited") {
+        candidateStatus = "pending";
+        rejectionReason = "rate_limited";
+      } else if (probeRes.requiresBrowser === 1) {
         candidateStatus = "rejected";
         rejectionReason = probeRes.rejectionReason || "requires_browser";
       } else if (probeRes.kind !== "rss") {
@@ -309,7 +321,7 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
           probeRes.sampleArticles,
           ind.name,
           config,
-          { models },
+          { models, runId },
         );
         sampleScores = evalRes.sampleScores;
         avgScore = evalRes.avgScore;
@@ -356,7 +368,7 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
 
       const wasDecidedByAdmin =
         existingCandidate[0]?.status === "approved" ||
-        existingCandidate[0]?.rejectionReason === "rejected_by_admin";
+        existingCandidate[0]?.status === "rejected";
 
       if (wasDecidedByAdmin) {
         candidateStatus = existingCandidate[0].status;
@@ -400,42 +412,50 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
         candidatesAdded++;
       }
 
-      // Auto-enable into sources if passed and not overridden by admin
+      // Auto-enable into sources atomically if passed and not overridden by admin
       if (candidateStatus === "auto_enabled" && !wasDecidedByAdmin) {
-        await db
-          .insert(sources)
-          .values({
-            industryId: ind.id,
-            name: probeRes.name || probeRes.siteDomain || "",
-            feedUrl: probeRes.feedUrl,
-            siteDomain: probeRes.siteDomain,
-            kind: probeRes.kind,
-            status: "active",
-            fetchRung: probeRes.fetchRung,
-            intervalMinutes: 60,
-            createdAt: nowFn(),
-          })
-          .onConflictDoUpdate({
-            target: [sources.industryId, sources.feedUrl],
-            set: { status: "active" },
-          });
+        const rawDb = overrides.db ?? env.DB;
+        const insertRes = await rawDb
+          .prepare(
+            `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, fetch_rung, interval_minutes, created_at)
+             SELECT ?1, ?2, ?3, ?4, ?5, 'active', ?6, 60, ?7
+             WHERE (SELECT count(*) FROM sources WHERE industry_id = ?1 AND status = 'active') < 50
+             ON CONFLICT (industry_id, feed_url) DO UPDATE SET status = 'active'
+             WHERE (SELECT count(*) FROM sources WHERE industry_id = excluded.industry_id AND status = 'active') < 50`,
+          )
+          .bind(
+            ind.id,
+            probeRes.name || probeRes.siteDomain || "",
+            probeRes.feedUrl,
+            probeRes.siteDomain,
+            probeRes.kind,
+            probeRes.fetchRung,
+            nowFn(),
+          )
+          .run();
 
-        candidatesAutoEnabled++;
-        existingFeeds.add(probeRes.feedUrl);
+        if (insertRes.meta.changes > 0) {
+          candidatesAutoEnabled++;
+          existingFeeds.add(probeRes.feedUrl);
+        } else {
+          // 50 active sources cap reached concurrently! Revert to pending
+          candidateStatus = "pending";
+          rejectionReason = "active_cap_reached";
+          await db
+            .update(sourceCandidates)
+            .set({ status: candidateStatus, rejectionReason })
+            .where(
+              and(
+                eq(sourceCandidates.industryId, ind.id),
+                eq(sourceCandidates.feedUrl, probeRes.feedUrl),
+              ),
+            );
+        }
       }
     }
 
     // 6. Complete run & update cost_micros
-    const finalCostRes = await db
-      .select({ totalCost: sql<number>`coalesce(sum(cost_micros), 0)` })
-      .from(llmCalls)
-      .where(
-        and(
-          sql`logical_key LIKE ${`discover_%`}`,
-          sql`created_at >= ${run.createdAt}`,
-        ),
-      );
-    const finalCost = Number(finalCostRes[0]?.totalCost ?? 0);
+    const finalCost = await getRunCost();
 
     await db
       .update(discoveryRuns)
@@ -450,11 +470,27 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       .where(eq(discoveryRuns.id, runId));
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+    const failCost = await db
+      .select({ totalCost: sql<number>`coalesce(sum(cost_micros), 0)` })
+      .from(llmCalls)
+      .where(
+        or(
+          eq(
+            llmCalls.logicalKey,
+            `discover_queries:${runId}:${run.industryId}`,
+          ),
+          sql`logical_key LIKE ${`discover_score:${runId}:%`}`,
+        ),
+      )
+      .then((r) => Number(r[0]?.totalCost ?? 0))
+      .catch(() => 0);
+
     await db
       .update(discoveryRuns)
       .set({
         status: "failed",
         error: errorMsg,
+        costMicros: failCost,
         completedAt: nowFn(),
       })
       .where(eq(discoveryRuns.id, runId));
