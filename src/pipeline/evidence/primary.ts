@@ -1,8 +1,15 @@
 import type { PipelineEnv } from "../messages";
 import { checkRobots, claimHostSlot } from "../body/robots";
-import { fetchPage, type LadderDeps, type ToMarkdown } from "../body/ladder";
+import {
+  fetchPage,
+  MAX_BODY_BYTES,
+  type LadderDeps,
+  type ToMarkdown,
+} from "../body/ladder";
 import { extractWhitelistedUrls } from "./verify";
 import { normalizeUrl } from "../../lib/url";
+import { isEnabled } from "../../lib/flags";
+import { FINANCE_SLUG } from "../../server/admin/ops";
 import { toMarkdown } from "../../providers/tomarkdown";
 
 export interface PrimaryTrackerDeps {
@@ -18,6 +25,7 @@ export interface PrimaryTrackerDeps {
 interface EventRow {
   id: number;
   industry_id: number;
+  industry_slug: string;
   revision: number;
   primary_domains: string;
 }
@@ -52,7 +60,7 @@ export async function trackEventPrimarySources(
   // 1. Fetch event and industry primary domains
   const event = await deps.db
     .prepare(
-      `SELECT e.id, e.industry_id, e.revision, i.primary_domains
+      `SELECT e.id, e.industry_id, e.revision, i.slug AS industry_slug, i.primary_domains
        FROM events e
        JOIN industries i ON i.id = e.industry_id
        WHERE e.id = ?1`,
@@ -138,10 +146,13 @@ export async function trackEventPrimarySources(
   };
 
   let trackedCount = 0;
+  let attempts = 0;
   const MAX_FETCH_PER_RUN = 2;
+  const MAX_ATTEMPTS = 5;
 
   for (const targetUrl of candidateUrls) {
-    if (trackedCount >= MAX_FETCH_PER_RUN) break;
+    if (trackedCount >= MAX_FETCH_PER_RUN || attempts >= MAX_ATTEMPTS) break;
+    attempts++;
 
     const canonical = normalizeUrl(targetUrl);
     if (!canonical) continue;
@@ -153,33 +164,50 @@ export async function trackEventPrimarySources(
       .first<{ id: number; stage: string }>();
 
     if (existing) {
-      // If already exists, check if in event_articles
-      const linked = await deps.db
+      // Check if this article is already assigned to ANY event
+      const assigned = await deps.db
+        .prepare(`SELECT event_id FROM event_articles WHERE article_id = ?1`)
+        .bind(existing.id)
+        .first<{ event_id: number }>();
+
+      // Article belongs to another event or already to this event; cannot re-assign due to unique constraint
+      if (assigned) {
+        continue;
+      }
+
+      // Check if existing article is approved
+      const isApproved = await deps.db
         .prepare(
-          `SELECT 1 FROM event_articles WHERE event_id = ?1 AND article_id = ?2`,
+          `SELECT 1 FROM reviews r
+           JOIN articles a ON a.id = r.article_id AND r.body_sha = a.body_sha
+           WHERE a.id = ?1 AND r.decision = 'approved'`,
         )
-        .bind(eventId, existing.id)
+        .bind(existing.id)
         .first();
 
-      if (!linked && existing.stage === "grouped") {
-        // Link to event
-        await deps.db
-          .prepare(
-            `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
-             SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
-             WHERE (SELECT revision FROM events WHERE id = ?1) = ?4`,
-          )
-          .bind(eventId, existing.id, now, event.revision)
-          .run();
+      if (isApproved && existing.stage === "grouped") {
+        // Link to event and bump revision atomically
+        const batchRes = await deps.db.batch([
+          deps.db
+            .prepare(
+              `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+               SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
+               WHERE (SELECT revision FROM events WHERE id = ?1) = ?4`,
+            )
+            .bind(eventId, existing.id, now, event.revision),
+          deps.db
+            .prepare(
+              `UPDATE events SET revision = revision + 1, updated_at = ?1
+               WHERE id = ?2 AND revision = ?3`,
+            )
+            .bind(now, eventId, event.revision),
+        ]);
 
-        await deps.db
-          .prepare(
-            `UPDATE events SET revision = revision + 1, updated_at = ?1 WHERE id = ?2`,
-          )
-          .bind(now, eventId)
-          .run();
-
-        trackedCount++;
+        if (batchRes[0].meta.changes === 1) {
+          trackedCount++;
+          await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
+          await deps.qEvidence?.send({ eventId, kind: "evidence" });
+        }
       }
       continue;
     }
@@ -241,9 +269,13 @@ export async function trackEventPrimarySources(
       );
 
       if (page.kind === "body") {
-        const bodyText = page.body.markdown;
+        let bodyText = page.body.markdown;
+        if (bodyText.length > MAX_BODY_BYTES) {
+          bodyText = bodyText.slice(0, MAX_BODY_BYTES);
+        }
         const bodySha = await sha256Hex(bodyText);
-        const title = parsedUrl.hostname;
+        const titleMatch = bodyText.match(/^#\s+(.+)$/m);
+        const title = titleMatch ? titleMatch[1].trim() : parsedUrl.hostname;
 
         // Find or create source for this domain
         const hostFeedUrl = `https://${parsedUrl.hostname}`;
@@ -264,15 +296,17 @@ export async function trackEventPrimarySources(
           .first<{ id: number }>();
 
         const sourceId = sourceRow ? sourceRow.id : 1;
+        const isFinance = event.industry_slug === FINANCE_SLUG;
+        const targetStage = isFinance ? "analyzed" : "grouped";
 
-        // Insert new article as grouped
+        // Insert new article
         const insertArtResult = await deps.db
           .prepare(
             `INSERT INTO articles (
                source_id, industry_id, canonical_url, url, title, fetched_at,
                stage, stage_updated_at, fetch_rung, body_sha, body_kind, body_fetched_at
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'grouped', ?6, ?7, ?8, 'full', ?6)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?6, ?8, ?9, 'full', ?6)
              RETURNING id`,
           )
           .bind(
@@ -282,6 +316,7 @@ export async function trackEventPrimarySources(
             targetUrl,
             title,
             now,
+            targetStage,
             page.body.rung,
             bodySha,
           )
@@ -290,7 +325,7 @@ export async function trackEventPrimarySources(
         if (insertArtResult) {
           const newArticleId = insertArtResult.id;
 
-          // Put body into R2
+          // Put body into R2 before review / event linking
           if (deps.bodies) {
             await deps.bodies.put(
               `bodies/${newArticleId}/${bodySha}.md`,
@@ -304,33 +339,48 @@ export async function trackEventPrimarySources(
             );
           }
 
-          // In D1 batch: approve review, add to event_articles, bump event revision
-          await deps.db.batch([
-            deps.db
-              .prepare(
-                `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
-                 VALUES (?1, ?2, 'approved', 'system:primary_tracker', ?3)
-                 ON CONFLICT (article_id, body_sha) DO NOTHING`,
-              )
-              .bind(newArticleId, bodySha, now),
-            deps.db
-              .prepare(
-                `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
-                 VALUES (?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?4))`,
-              )
-              .bind(eventId, newArticleId, now, eventId),
-            deps.db
-              .prepare(
-                `UPDATE events SET revision = revision + 1, updated_at = ?1 WHERE id = ?2`,
-              )
-              .bind(now, eventId),
-          ]);
+          if (isFinance) {
+            // Finance section articles require human review (AGENTS.md §4).
+            // Left in stage 'analyzed' with no review record, waiting for human decision in /admin/review.
+          } else {
+            // In D1 batch: approve review, record analysis for evidence tags, add to event_articles, bump event revision
+            await deps.db.batch([
+              deps.db
+                .prepare(
+                  `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+                   VALUES (?1, ?2, 'approved', 'system:primary_tracker', ?3)
+                   ON CONFLICT (article_id, body_sha) DO NOTHING`,
+                )
+                .bind(newArticleId, bodySha, now),
+              deps.db
+                .prepare(
+                  `INSERT INTO analyses (
+                     article_id, prompt_version, scores, content_type, evidence_tags, total_score,
+                     prefilter_pass, selected, created_at
+                   )
+                   VALUES (?1, 'primary_tracker', '{}', 'primary_source', '{"kind":"primary_source"}', 100, 1, 1, ?2)
+                   ON CONFLICT (article_id, prompt_version) DO NOTHING`,
+                )
+                .bind(newArticleId, now),
+              deps.db
+                .prepare(
+                  `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+                   VALUES (?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?4))`,
+                )
+                .bind(eventId, newArticleId, now, eventId),
+              deps.db
+                .prepare(
+                  `UPDATE events SET revision = revision + 1, updated_at = ?1 WHERE id = ?2`,
+                )
+                .bind(now, eventId),
+            ]);
 
-          trackedCount++;
+            trackedCount++;
 
-          // Enqueue downstream updates
-          await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
-          await deps.qEvidence?.send({ eventId, kind: "evidence" });
+            // Enqueue downstream updates
+            await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
+            await deps.qEvidence?.send({ eventId, kind: "evidence" });
+          }
         }
       } else {
         // Not a body: record dropped placeholder
@@ -364,6 +414,10 @@ export async function trackDuePrimarySources(
   now = Date.now(),
   limit = 10,
 ): Promise<number[]> {
+  if (!isEnabled(env, "COLLECT_ENABLED")) {
+    return [];
+  }
+
   const { results } = await env.DB.prepare(
     `SELECT DISTINCT e.id
      FROM events e

@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractWhitelistedUrls } from "../../src/pipeline/evidence/verify";
+import type { PipelineEnv } from "../../src/pipeline/messages";
 import {
+  trackDuePrimarySources,
   trackEventPrimarySources,
   type PrimaryTrackerDeps,
 } from "../../src/pipeline/evidence/primary";
@@ -12,6 +14,7 @@ describe("pipeline: primary source tracking (tests/pipeline/primary-source.test.
 
   beforeEach(async () => {
     await env.DB.prepare(`DELETE FROM event_articles`).run();
+    await env.DB.prepare(`DELETE FROM analyses`).run();
     await env.DB.prepare(`DELETE FROM reviews`).run();
     await env.DB.prepare(`DELETE FROM articles`).run();
     await env.DB.prepare(`DELETE FROM events`).run();
@@ -192,17 +195,19 @@ Detailed calibration routines, error budgets, and benchmark comparisons with ear
       );
       expect(result.trackedCount).toBe(1);
 
-      // 1. Verify article was added to articles table in stage grouped
+      // 1. Verify article was added to articles table in stage grouped with parsed markdown title
       const primaryArt = await env.DB.prepare(
-        `SELECT id, canonical_url, stage, body_sha FROM articles WHERE canonical_url = 'https://arxiv.org/abs/2412.19437'`,
+        `SELECT id, title, canonical_url, stage, body_sha FROM articles WHERE canonical_url = 'https://arxiv.org/abs/2412.19437'`,
       ).first<{
         id: number;
+        title: string;
         canonical_url: string;
         stage: string;
         body_sha: string;
       }>();
       expect(primaryArt).not.toBeNull();
       expect(primaryArt!.stage).toBe("grouped");
+      expect(primaryArt!.title).toBe("500-Qubit Processor Paper");
 
       // 2. Verify review was auto-approved
       const review = await env.DB.prepare(
@@ -212,6 +217,15 @@ Detailed calibration routines, error budgets, and benchmark comparisons with ear
         .first<{ decision: string; reviewer: string }>();
       expect(review?.decision).toBe("approved");
       expect(review?.reviewer).toBe("system:primary_tracker");
+
+      // 2b. Verify analysis was created with primary_source tag
+      const analysis = await env.DB.prepare(
+        `SELECT evidence_tags FROM analyses WHERE article_id = ?1`,
+      )
+        .bind(primaryArt!.id)
+        .first<{ evidence_tags: string }>();
+      expect(analysis).not.toBeNull();
+      expect(analysis!.evidence_tags).toContain("primary_source");
 
       // 3. Verify event_articles joined at revision 2
       const ea = await env.DB.prepare(
@@ -298,6 +312,191 @@ Detailed calibration routines, error budgets, and benchmark comparisons with ear
         `SELECT stage FROM articles WHERE canonical_url = 'https://whitehouse.gov/secret-report'`,
       ).first<{ stage: string }>();
       expect(dropped?.stage).toBe("dropped");
+    });
+
+    it("does not auto-approve or link articles in Finance section", async () => {
+      await env.DB.prepare(
+        `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
+         VALUES (2, 'finance', 'Finance', 'review', '["sec.gov"]', '{}', 1, 1000)
+         ON CONFLICT (id) DO UPDATE SET slug = 'finance'`,
+      ).run();
+
+      const finEv = await env.DB.prepare(
+        `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+         VALUES (2, 'Quarterly Earnings Filing', 1, 1000, 1000)
+         RETURNING id`,
+      ).first<{ id: number }>();
+
+      const finArt = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (2, ?1, 'https://techcrunch.com/fin1', 'https://techcrunch.com/fin1', 'Earnings Report', 'Summary', 'sha_fin', 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(sourceId)
+        .first<{ id: number }>();
+
+      await env.DB.prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, 'sha_fin', 'approved', 'admin', 1000)`,
+      )
+        .bind(finArt!.id)
+        .run();
+
+      await env.DB.prepare(
+        `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+         VALUES (?1, ?2, 1000, 1)`,
+      )
+        .bind(finEv!.id, finArt!.id)
+        .run();
+
+      await env.BODIES.put(
+        `bodies/${finArt!.id}/sha_fin.md`,
+        `See official SEC filing at https://sec.gov/filing/10k.`,
+      );
+
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("robots.txt")) {
+          return new Response("User-agent: *\nAllow: /", { status: 200 });
+        }
+        if (url.includes("sec.gov/filing/10k")) {
+          return new Response(
+            `# Form 10-K Annual Report
+
+This annual report contains detailed financial statements and audit certifications for fiscal year 2026.
+Consolidated balance sheets, income statements, and cash flows are presented herein in full compliance with GAAP standards.`,
+            {
+              status: 200,
+              headers: { "Content-Type": "text/markdown" },
+            },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const deps: PrimaryTrackerDeps = {
+        db: env.DB,
+        bodies: env.BODIES,
+        fetch: mockFetch as unknown as typeof fetch,
+        now: () => 2000,
+      };
+
+      const result = await trackEventPrimarySources(
+        deps,
+        env,
+        finEv!.id,
+        ["sec.gov"],
+        2000,
+      );
+      // In Finance, not auto-approved -> trackedCount 0 for auto-linked
+      expect(result.trackedCount).toBe(0);
+
+      // Article was inserted with stage 'analyzed' and no review yet (pending human review)
+      const secArt = await env.DB.prepare(
+        `SELECT id, stage FROM articles WHERE canonical_url = 'https://sec.gov/filing/10k'`,
+      ).first<{ id: number; stage: string }>();
+      expect(secArt).not.toBeNull();
+      expect(secArt!.stage).toBe("analyzed");
+
+      const rev = await env.DB.prepare(
+        `SELECT decision FROM reviews WHERE article_id = ?1`,
+      )
+        .bind(secArt!.id)
+        .first<{ decision: string }>();
+      expect(rev).toBeNull();
+
+      // Event revision remains 1
+      const evRow = await env.DB.prepare(
+        `SELECT revision FROM events WHERE id = ?1`,
+      )
+        .bind(finEv!.id)
+        .first<{ revision: number }>();
+      expect(evRow?.revision).toBe(1);
+    });
+
+    it("skips candidate article already assigned to another event without unique constraint failure", async () => {
+      // Event 2 with its own article
+      const ev2 = await env.DB.prepare(
+        `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+         VALUES (1, 'Second Event', 1, 1000, 1000)
+         RETURNING id`,
+      ).first<{ id: number }>();
+
+      const otherArt = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, ?1, 'https://arxiv.org/abs/2412.9999', 'https://arxiv.org/abs/2412.9999', 'Other Paper', 'Summary', 'sha_other', 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(sourceId)
+        .first<{ id: number }>();
+
+      // Assigned to ev2
+      await env.DB.prepare(
+        `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+         VALUES (?1, ?2, 1000, 1)`,
+      )
+        .bind(ev2!.id, otherArt!.id)
+        .run();
+
+      // Now event 1 mentions https://arxiv.org/abs/2412.9999
+      const art = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, ?1, 'https://techcrunch.com/post_conflict', 'https://techcrunch.com/post_conflict', 'Conflict Post', 'Summary', 'sha_conf', 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(sourceId)
+        .first<{ id: number }>();
+
+      await env.DB.prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, 'sha_conf', 'approved', 'admin', 1000)`,
+      )
+        .bind(art!.id)
+        .run();
+
+      await env.DB.prepare(
+        `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+         VALUES (?1, ?2, 1000, 1)`,
+      )
+        .bind(eventId, art!.id)
+        .run();
+
+      await env.BODIES.put(
+        `bodies/${art!.id}/sha_conf.md`,
+        "Paper already in event 2: https://arxiv.org/abs/2412.9999.",
+      );
+
+      const mockFetch = vi.fn();
+      const deps: PrimaryTrackerDeps = {
+        db: env.DB,
+        bodies: env.BODIES,
+        fetch: mockFetch as unknown as typeof fetch,
+        now: () => 1000,
+      };
+
+      // Must complete without throwing UNIQUE constraint failed: event_articles.article_id
+      const res = await trackEventPrimarySources(
+        deps,
+        env,
+        eventId,
+        ["arxiv.org"],
+        1000,
+      );
+      expect(res.trackedCount).toBe(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("trackDuePrimarySources", () => {
+    it("returns empty array and does not query when COLLECT_ENABLED is false", async () => {
+      const mockEnv = {
+        ...env,
+        COLLECT_ENABLED: "false",
+      };
+      const processed = await trackDuePrimarySources(
+        mockEnv as unknown as PipelineEnv,
+        1000,
+      );
+      expect(processed).toEqual([]);
     });
   });
 });

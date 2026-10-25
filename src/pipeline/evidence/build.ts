@@ -24,6 +24,7 @@ import {
   isPrimarySourceDomain,
   verifyQuoteInBody,
 } from "./verify";
+import { syncRevisionDiff } from "./diff";
 
 export interface EvidenceDeps {
   db: D1Database;
@@ -719,6 +720,12 @@ export async function generateEventEvidence(
     (acc, idx) => acc + (batchResults[idx]?.meta.changes ?? 0),
     0,
   );
+
+  // Sync revision_diff artifact now that claims are committed for this revision
+  const isFinance = event.industry_slug === FINANCE_SLUG;
+  const isAuto = !isFinance && event.industry_publish_mode === "auto";
+  const diffStatus = isAuto ? "published" : "pending_review";
+  await syncRevisionDiff(deps.db, eventId, inputRevision, diffStatus, now);
 
   return {
     status: "generated",

@@ -25,6 +25,7 @@ export async function computeRevisionDiff(
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
+         JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
          WHERE ea.event_id = ?1 AND ea.input_revision <= 1
          ORDER BY a.id ASC`,
       )
@@ -36,6 +37,7 @@ export async function computeRevisionDiff(
         `SELECT claim_text, reality_check
          FROM claims
          WHERE event_id = ?1 AND input_revision <= 1
+           AND status = 'published'
            AND claim_text NOT LIKE '[%]'
          ORDER BY id ASC`,
       )
@@ -68,6 +70,7 @@ export async function computeRevisionDiff(
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
        JOIN sources s ON s.id = a.source_id
+       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
        WHERE ea.event_id = ?1 AND ea.input_revision = ?2
        ORDER BY a.id ASC`,
     )
@@ -85,6 +88,7 @@ export async function computeRevisionDiff(
       `SELECT claim_text, reality_check
        FROM claims
        WHERE event_id = ?1 AND input_revision = ?2
+         AND status = 'published'
          AND claim_text NOT LIKE '[%]'
        ORDER BY id ASC`,
     )
@@ -96,6 +100,7 @@ export async function computeRevisionDiff(
       `SELECT claim_text, reality_check
        FROM claims
        WHERE event_id = ?1 AND input_revision = ?2
+         AND status = 'published'
          AND claim_text NOT LIKE '[%]'
        ORDER BY id ASC`,
     )
@@ -140,4 +145,34 @@ export async function computeRevisionDiff(
     newClaims,
     changedClaims,
   };
+}
+
+/**
+ * Computes and synchronizes the revision_diff artifact in event_artifacts.
+ * Idempotent: updates content if claims or sources changed.
+ */
+export async function syncRevisionDiff(
+  db: D1Database,
+  eventId: number,
+  revision: number,
+  initialStatus: "published" | "pending_review",
+  now: number,
+): Promise<boolean> {
+  const diffData = await computeRevisionDiff(db, eventId, revision);
+  if (!diffData) return false;
+
+  await db
+    .prepare(
+      `INSERT INTO event_artifacts (
+         event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
+       )
+       SELECT ?1, 'revision_diff', '', ?2, 'diff-v1', 'deterministic', ?3, ?4, ?5
+       WHERE (SELECT revision FROM events WHERE id = ?1) = ?2
+       ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
+       DO UPDATE SET content = excluded.content, status = excluded.status`,
+    )
+    .bind(eventId, revision, JSON.stringify(diffData), initialStatus, now)
+    .run();
+
+  return true;
 }

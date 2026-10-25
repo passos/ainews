@@ -534,9 +534,14 @@ export async function decideReview(
       .prepare(
         `UPDATE event_articles
          SET input_revision = (SELECT revision FROM events WHERE id = event_articles.event_id)
-         WHERE article_id = ?1 AND ?2 = 'approved'`,
+         WHERE article_id = ?1
+           AND ?2 = 'approved'
+           AND NOT EXISTS (
+             SELECT 1 FROM reviews
+             WHERE article_id = ?1 AND decision = 'approved' AND body_sha = ?3
+           )`,
       )
-      .bind(data.articleId, data.decision),
+      .bind(data.articleId, data.decision, data.bodySha),
   ]);
 }
 

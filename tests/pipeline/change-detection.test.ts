@@ -12,6 +12,8 @@ describe("pipeline: change detection and revision diff (tests/pipeline/change-de
     await env.DB.prepare(`DELETE FROM event_artifacts`).run();
     await env.DB.prepare(`DELETE FROM claims`).run();
     await env.DB.prepare(`DELETE FROM event_articles`).run();
+    await env.DB.prepare(`DELETE FROM analyses`).run();
+    await env.DB.prepare(`DELETE FROM reviews`).run();
     await env.DB.prepare(`DELETE FROM articles`).run();
     await env.DB.prepare(`DELETE FROM events`).run();
     await env.DB.prepare(`DELETE FROM sources`).run();
@@ -43,6 +45,13 @@ describe("pipeline: change detection and revision diff (tests/pipeline/change-de
        VALUES (1, 1, 'https://techwire.com/art1', 'https://techwire.com/art1', 'Company claims 10x faster reasoning', 'Summary 1', 'sha1', 'grouped', 1000, 1000)
        RETURNING id`,
     ).first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'sha1', 'approved', 'admin', 1000)`,
+    )
+      .bind(art!.id)
+      .run();
 
     await env.DB.prepare(
       `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
@@ -78,6 +87,13 @@ describe("pipeline: change detection and revision diff (tests/pipeline/change-de
     ).first<{ id: number }>();
 
     await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'sha1', 'approved', 'admin', 1000)`,
+    )
+      .bind(art1!.id)
+      .run();
+
+    await env.DB.prepare(
       `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
        VALUES (?1, ?2, 1000, 1)`,
     )
@@ -103,6 +119,13 @@ describe("pipeline: change detection and revision diff (tests/pipeline/change-de
        VALUES (1, 2, 'https://arxiv.org/abs/2412.0001', 'https://arxiv.org/abs/2412.0001', 'Independent Benchmark of Architecture', 'Summary 2', 'sha2', 'grouped', 2000, 2000)
        RETURNING id`,
     ).first<{ id: number }>();
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'sha2', 'approved', 'admin', 2000)`,
+    )
+      .bind(art2!.id)
+      .run();
 
     await env.DB.prepare(
       `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
