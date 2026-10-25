@@ -286,8 +286,31 @@ export async function probeCandidate(
   const itemsToSample = feedItems.slice(0, 5);
 
   let rateLimitedCount = 0;
+  const siteHost = siteDomain.toLowerCase();
+  const cleanSite = siteName.toLowerCase();
+  const allowedDomains = [siteDomain, siteName].filter(Boolean);
 
   for (const item of itemsToSample) {
+    let itemUrl: URL;
+    try {
+      itemUrl = new URL(item.url);
+    } catch {
+      continue;
+    }
+
+    const itemHost = itemUrl.hostname.toLowerCase();
+    // Strictly verify itemHost is on siteDomain or subdomains of cleanSite.
+    // Never allow parent domain (e.g. siteDomain 'tenant.github.io' must NOT match itemHost 'github.io').
+    const isSameSite =
+      itemHost === siteHost ||
+      itemHost === cleanSite ||
+      itemHost.endsWith("." + cleanSite);
+
+    if (!isSameSite) {
+      // External/cross-domain link in RSS (e.g. ad, sponsor), do not fetch or accept as Rung 0
+      continue;
+    }
+
     // Check if item has full content in feed (Rung 0)
     let rung0Body: string | null = null;
     if (item.contentHtml) {
@@ -311,29 +334,6 @@ export async function probeCandidate(
       rungs.push(0);
       continue;
     }
-
-    let itemUrl: URL;
-    try {
-      itemUrl = new URL(item.url);
-    } catch {
-      continue;
-    }
-
-    const itemHost = itemUrl.hostname.toLowerCase();
-    const siteHost = siteDomain.toLowerCase();
-    const baseDomain = siteName.toLowerCase();
-    const isSameSite =
-      itemHost === siteHost ||
-      itemHost === baseDomain ||
-      itemHost.endsWith("." + baseDomain) ||
-      siteHost.endsWith("." + itemHost);
-
-    if (!isSameSite) {
-      // External/cross-domain link in RSS (e.g. ad, sponsor), do not widen whitelist
-      continue;
-    }
-
-    const allowedDomains = [siteDomain, siteName, itemHost].filter(Boolean);
 
     // Robots check for sample article hop
     const robots = await checkRobots(
@@ -367,6 +367,12 @@ export async function probeCandidate(
       allowedDomains,
       ladderDeps,
     );
+
+    if (page.kind === "deferred") {
+      // Crawl slot unavailable on redirect hop
+      rateLimitedCount++;
+      continue;
+    }
 
     if (page.kind === "body" && isBody(page.body.markdown)) {
       if (isBrowserRequired(page.body.markdown)) {
