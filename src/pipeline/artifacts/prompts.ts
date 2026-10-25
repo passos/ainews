@@ -902,9 +902,9 @@ export function parseIndustryImpactReportOutput(
             if (matchedClaim && matchedClaim.consensusStatus === "verified") {
               verified = true;
               // If model additionally provided an attached quote, verify that it's in actual bodyText
+              let quoteVerified = false;
               if (sanitizedCitation.quote) {
                 const trimmedQuote = sanitizedCitation.quote.trim();
-                let quoteMatches = false;
                 if (trimmedQuote.length >= 5) {
                   const targetArticles = sanitizedCitation.articleId
                     ? [articleLookup.get(sanitizedCitation.articleId)].filter(
@@ -918,17 +918,23 @@ export function parseIndustryImpactReportOutput(
                         .toLowerCase()
                         .includes(trimmedQuote.toLowerCase())
                     ) {
-                      quoteMatches = true;
+                      quoteVerified = true;
+                      sanitizedCitation.articleId = art.id;
+                      sanitizedCitation.sourceDomain = art.sourceDomain;
                       break;
                     }
                   }
                 }
-                if (!quoteMatches) {
-                  // Do not display hallucinated quote alongside verified claim ID
-                  delete sanitizedCitation.quote;
-                  delete sanitizedCitation.articleId;
-                }
               }
+              if (!quoteVerified) {
+                // Do not display hallucinated quote, articleId, or sourceDomain alongside verified claim ID
+                delete sanitizedCitation.quote;
+                delete sanitizedCitation.articleId;
+                delete sanitizedCitation.sourceDomain;
+              }
+            } else {
+              // Invalid or disputed claimId: clear it so quote fallback does not carry a ghost claimId
+              delete sanitizedCitation.claimId;
             }
           }
 
@@ -949,6 +955,7 @@ export function parseIndustryImpactReportOutput(
                 art.bodyText.toLowerCase().includes(trimmedQuote.toLowerCase())
               ) {
                 verified = true;
+                delete sanitizedCitation.claimId;
                 sanitizedCitation.articleId = art.id;
                 sanitizedCitation.sourceDomain = art.sourceDomain;
                 break;

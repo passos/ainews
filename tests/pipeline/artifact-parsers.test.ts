@@ -624,6 +624,65 @@ describe("Artifact Output Parsers (Issue #20)", () => {
       expect(res?.affectedIndustries[0].basis).toBe("speculative");
       expect(res?.affectedIndustries[0].citation).toBeNull();
     });
+
+    it("clears phantom claimId when fallback quote matches an actual article (Seat 1 P2 defense)", () => {
+      const fallbackPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 99999, // Phantom claimId!
+              quote: "Advanced packaging wait times grew to 24 weeks", // Real quote!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(fallbackPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      // Phantom claimId must be cleared so UI does not display [Claim #99999]
+      expect(res?.affectedIndustries[0].citation?.claimId).toBeUndefined();
+      expect(res?.affectedIndustries[0].citation?.articleId).toBe(201);
+      expect(res?.affectedIndustries[0].citation?.sourceDomain).toBe(
+        "semianalysis.com",
+      );
+    });
+
+    it("clears model-fabricated sourceDomain when claim is verified without verified quote (Seat 1 P2 defense)", () => {
+      const fakeDomainPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face lead time expansion.",
+            transmissionPath: "Capacity shortage.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 101,
+              sourceDomain: "fabricated-authority.test", // Hallucinated domain!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(fakeDomainPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.claimId).toBe(101);
+      // Hallucinated sourceDomain must be stripped
+      expect(res?.affectedIndustries[0].citation?.sourceDomain).toBeUndefined();
+    });
   });
 
   describe("parseSupplyChainRippleMapOutput (Issue #21)", () => {
