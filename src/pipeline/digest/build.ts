@@ -202,7 +202,9 @@ export async function buildDigest(
             AND r.decision = 'approved'
         )
         AND (
-          EXISTS (
+          (e.created_at >= ?2 AND e.created_at < ?3)
+          OR (e.updated_at >= ?2 AND e.updated_at < ?3 AND e.revision > 0)
+          OR EXISTS (
             SELECT 1 FROM event_articles ea
             JOIN articles a ON a.id = ea.article_id
             JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
@@ -210,7 +212,14 @@ export async function buildDigest(
               AND r.decision = 'approved'
               AND r.created_at >= ?2 AND r.created_at < ?3
           )
-          OR (e.updated_at >= ?2 AND e.updated_at < ?3 AND e.revision > 0)
+          OR EXISTS (
+            SELECT 1 FROM event_articles ea
+            JOIN articles a ON a.id = ea.article_id
+            JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
+            WHERE ea.event_id = e.id
+              AND r.decision = 'approved'
+              AND ea.created_at >= ?2 AND ea.created_at < ?3
+          )
         )
       ORDER BY total_score DESC, e.updated_at DESC, e.id DESC
       LIMIT ?4`

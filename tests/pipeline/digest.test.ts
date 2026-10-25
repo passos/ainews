@@ -1343,4 +1343,150 @@ describe("buildWeeklyDigest", () => {
     expect(sent.subject).toContain("weekly digest — 2026-10-19");
     expect(sent.text).toContain("Weekly Digest");
   });
+
+  it("same weekly digest message delivered 3 times: 1 row in digests, reason called once, email called once", async () => {
+    const fakeEmail = new FakeEmail();
+    let reasonCalls = 0;
+    const fakeTransport: ModelTransport = {
+      run: async () => {
+        reasonCalls++;
+        return {
+          candidates: [
+            {
+              content: {
+                role: "model",
+                parts: [{ text: "Weekly triple delivery test synthesis." }],
+              },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: {
+            promptTokenCount: 50,
+            candidatesTokenCount: 30,
+            totalTokenCount: 80,
+          },
+        };
+      },
+    };
+
+    const envWithFakes: PipelineEnv = {
+      ...env,
+      EMAIL: fakeEmail as unknown as SendEmail,
+      EMAIL_ENABLED: "true",
+      ADMIN_EMAIL: "admin@test.com",
+      SITE_URL: "https://news.ioenv.com",
+      MODEL_CALLS_ENABLED: "true",
+    };
+
+    // Budget setup
+    await env.DB.prepare(
+      `INSERT INTO budgets (day, channel, cap_micros, spent_micros, reserved_micros)
+       VALUES ('2026-10-21', 'gateway', 10000000, 0, 0)
+       ON CONFLICT (day, channel) DO UPDATE SET cap_micros = 10000000`,
+    ).run();
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('weekly-repeat-ind', 'Weekly Repeat', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, site_domain, created_at) VALUES (?1, 'rss', 'Src W', 'http://w/feed', 'w.com', 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    const midweekMs = Date.parse("2026-10-21T12:00:00.000Z");
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, 'http://w.com/repeat-1', 'http://w.com/repeat-1', 'Weekly Story', 'Summary W', 'grouped', 'wsha1', ?3, ?3, ?3) RETURNING id`,
+    )
+      .bind(indId, source!.id, midweekMs)
+      .first<{ id: number }>();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Weekly Event 1', 1, ?2, ?2) RETURNING id",
+    )
+      .bind(indId, midweekMs)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, ?3)",
+    )
+      .bind(event!.id, art!.id, midweekMs)
+      .run();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'wsha1', 'approved', 'auto', ?2)",
+    )
+      .bind(art!.id, midweekMs)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, created_at, selected, title_en, summary_en)
+       VALUES (?1, 'v1', '{}', 'report', '{}', 85, ?2, 1, 'Written W Title', 'Written W Summary')`,
+    )
+      .bind(art!.id, midweekMs)
+      .run();
+
+    const msg: DigestMessage = {
+      kind: "digest",
+      digestKind: "weekly",
+      industryId: indId,
+      periodStart: "2026-10-19",
+    };
+
+    // Deliver 3 times concurrently / consecutively
+    await buildDigest(envWithFakes, msg, midweekMs, {
+      transport: fakeTransport,
+    });
+    await buildDigest(envWithFakes, msg, midweekMs, {
+      transport: fakeTransport,
+    });
+    await buildDigest(envWithFakes, msg, midweekMs, {
+      transport: fakeTransport,
+    });
+
+    const rows = await env.DB.prepare(
+      "SELECT id, kind, period_start, emailed_at FROM digests WHERE industry_id = ?1 AND kind = 'weekly'",
+    )
+      .bind(indId)
+      .all<{
+        id: number;
+        kind: string;
+        period_start: string;
+        emailed_at: number;
+      }>();
+
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]?.period_start).toBe("2026-10-19");
+    expect(rows.results[0]?.emailed_at).toBe(midweekMs);
+    expect(reasonCalls).toBe(1);
+    expect(fakeEmail.sent).toHaveLength(1);
+  });
+
+  it("forceWeekly option enqueues weekly digest on non-Monday", async () => {
+    const queue = new FakeQueue();
+    const testEnv: Pick<PipelineEnv, "DB" | "Q_GENERATE"> = {
+      DB: env.DB,
+      Q_GENERATE: queue as unknown as Queue,
+    };
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('force-ind', 'Force Ind', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    // Wednesday, 2026-10-21 (not Monday)
+    const wednesdayMs = Date.parse("2026-10-21T10:00:00.000Z");
+    const msgs = await enqueueDueDigests(testEnv, wednesdayMs, {
+      forceWeekly: true,
+    });
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+
+    const weeklyMsgs = queue.sent.filter(
+      (m) => m.digestKind === "weekly" && m.industryId === ind!.id,
+    );
+    expect(weeklyMsgs).toHaveLength(1);
+    expect(weeklyMsgs[0]?.periodStart).toBe("2026-10-12"); // Prior week Monday
+  });
 });

@@ -472,4 +472,45 @@ describe("tests/routes/digest.test.ts", () => {
     expect(rssXml).toContain("<title>Weekly Digest — 2026-10-19</title>");
     expect(rssXml).toContain(DISCLAIMER);
   });
+
+  it("falls back to daily digest when kind parameter is unrecognized or invalid", async () => {
+    const eventId = await seedEvent(tech.industryId, "Tech Event Fallback", 0);
+    const artId = await seedArticle({
+      ...tech,
+      title: "Tech Article Fallback",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, artId, 1000);
+    await seedReview(artId, "approved");
+
+    const itemsJson = JSON.stringify([
+      {
+        eventId,
+        title: "Tech Event Fallback",
+        oneLiner: "Fallback development.",
+        sourceName: "Tech Wire",
+        articleCount: 1,
+      },
+    ]);
+
+    await env.DB.prepare(
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Daily recap', ?2, 1000, 2000)`,
+    )
+      .bind(tech.industryId, itemsJson)
+      .run();
+
+    // Passing undefined kind should default to daily
+    const result = await loadDigest(
+      { section: "technology", date: "2026-10-21" },
+      undefined,
+      {
+        getDigest: (slug, date, kind) => getDigest(db(), slug, date, kind),
+        getRecentDigests: (slug, kind) => getRecentDigests(db(), slug, 7, kind),
+      },
+    );
+
+    expect(result.data.kind).toBe("daily");
+    expect(result.data.periodStart).toBe("2026-10-21");
+  });
 });

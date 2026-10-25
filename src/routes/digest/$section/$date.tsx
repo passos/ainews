@@ -9,7 +9,7 @@ import type {
 } from "../../../server/publication/digests";
 
 const digestSearchSchema = z.object({
-  kind: z.enum(["daily", "weekly"]).optional(),
+  kind: z.enum(["daily", "weekly"]).optional().catch(undefined),
 });
 
 export interface LoadDigestFns {
