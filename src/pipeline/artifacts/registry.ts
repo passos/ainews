@@ -148,13 +148,10 @@ export const ARTIFACT_REGISTRY: Record<
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
-      return (
-        ctx.eventScore >= ctx.deepThreshold ||
-        ctx.articles.some(
-          (a) =>
-            a.contentType === "policy_change" ||
-            a.evidenceTags.includes("regulatory_finding"),
-        )
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "policy_change" ||
+          a.evidenceTags.includes("regulatory_finding"),
       );
     },
     buildRequest: (material) => buildPolicyImpactExplorerRequest(material),
@@ -183,15 +180,12 @@ export const ARTIFACT_REGISTRY: Record<
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
-      return (
-        ctx.eventScore >= ctx.deepThreshold ||
-        ctx.articles.some(
-          (a) =>
-            a.contentType === "research_study" ||
-            a.contentType === "tool_or_product" ||
-            a.evidenceTags.includes("peer_reviewed") ||
-            a.evidenceTags.includes("test_scores"),
-        )
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "research_study" ||
+          a.contentType === "tool_or_product" ||
+          a.evidenceTags.includes("peer_reviewed") ||
+          a.evidenceTags.includes("test_scores"),
       );
     },
     buildRequest: (material) => buildEducationEvidenceCheckerRequest(material),
@@ -207,14 +201,11 @@ export const ARTIFACT_REGISTRY: Record<
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
-      return (
-        ctx.eventScore >= ctx.deepThreshold ||
-        ctx.articles.some(
-          (a) =>
-            a.contentType === "ai_in_finance_claim" ||
-            a.evidenceTags.includes("backtest") ||
-            a.evidenceTags.includes("simulated"),
-        )
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "ai_in_finance_claim" ||
+          a.evidenceTags.includes("backtest") ||
+          a.evidenceTags.includes("simulated"),
       );
     },
     buildRequest: (material) => buildFinanceRealityCheckRequest(material),
@@ -230,13 +221,10 @@ export const ARTIFACT_REGISTRY: Record<
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
-      return (
-        ctx.eventScore >= ctx.deepThreshold ||
-        ctx.articles.some(
-          (a) =>
-            a.contentType === "regulatory_action" ||
-            a.evidenceTags.includes("regulatory_finding"),
-        )
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "regulatory_action" ||
+          a.evidenceTags.includes("regulatory_finding"),
       );
     },
     buildRequest: (material) => buildRegulationWatchRequest(material),
@@ -264,13 +252,9 @@ export const ARTIFACT_REGISTRY: Record<
       if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
         return false;
       }
-      return (
-        ctx.eventScore >= ctx.deepThreshold ||
-        ctx.articles.some(
-          (a) =>
-            a.contentType === "market_trend" ||
-            a.contentType === "company_move",
-        )
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "market_trend" || a.contentType === "company_move",
       );
     },
     buildRequest: (material) => buildSkillsCareerTrendsRequest(material),

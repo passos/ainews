@@ -46,6 +46,126 @@ function makeFakeTransport(
   };
 }
 
+function makeAllValidFakeTransport(): ModelTransport {
+  return makeFakeTransport((_model, input) => {
+    const s = JSON.stringify(input);
+    if (s.includes("reality check") || s.includes("claimant")) {
+      return {
+        claimant: "Alpha Fund",
+        claimSummary: "High alpha",
+        claimType: "backtest",
+        testPeriodAndBenchmark: "2020-2024",
+        costsAndAssumptions: "Zero cost",
+        disclosedCautions: ["Hypothetical"],
+      };
+    }
+    if (s.includes("regulation") || s.includes("actionTitle")) {
+      return {
+        regulator: "SEC",
+        actionTitle: "Inquiry",
+        summary: "Summary",
+        affectedInstitutions: ["Banks"],
+        keyRequirements: ["Audit"],
+        effectiveDate: "2026-11-01",
+        enforcementContext: "Context",
+      };
+    }
+    if (
+      s.includes("financial concepts for learners") ||
+      s.includes("plainEnglishDefinition")
+    ) {
+      return {
+        conceptName: "Liquidity",
+        plainEnglishDefinition: "Ease of trading",
+        applicationInStory: "Context",
+        commonPitfalls: ["Pitfall"],
+        keyTakeaways: ["Takeaway"],
+      };
+    }
+    if (s.includes("emergingSkills") || s.includes("workforce")) {
+      return {
+        industryShift: "Shift",
+        emergingSkills: ["Skill 1"],
+        decliningOrAtRiskSkills: ["Skill 2"],
+        affectedOccupations: [{ role: "Dev", impact: "Impact" }],
+        trainingRecommendations: ["Train"],
+      };
+    }
+    if (s.includes("policyName") || s.includes("policy analysis")) {
+      return {
+        policyName: "Policy",
+        summary: "Summary",
+        affectedAudiences: [{ group: "Group", impact: "Impact" }],
+        timeline: [{ phase: "P1", milestone: "M1" }],
+        remainingUncertainties: ["None"],
+      };
+    }
+    if (
+      s.includes("pedagogical facilitation") ||
+      s.includes("classroomActivities")
+    ) {
+      return {
+        topic: "Topic",
+        gradeLevels: ["Grade 8"],
+        discussionQuestions: [{ question: "Q", learningGoal: "G" }],
+        classroomActivities: [{ activity: "A", instructions: "I" }],
+      };
+    }
+    if (
+      s.includes("educationEvidence") ||
+      s.includes("empirical verification analyst")
+    ) {
+      return {
+        subject: "Subject",
+        claimedOutcomes: "Claim",
+        measuredOutcomes: "Measured",
+        studyDesign: {
+          samplePopulation: "P",
+          comparisonGroup: "C",
+          metricUsed: "M",
+        },
+        promotionalGap: "Gap",
+        limitations: ["Limitation"],
+      };
+    }
+    if (s.includes("Research Paper Decoder")) {
+      return {
+        hypothesis: "Hypothesis",
+        method: "Method",
+        findings: "Findings",
+        limitations: "Limitations",
+        applications: "Applications",
+      };
+    }
+    if (
+      s.toLowerCase().includes("learning materials") ||
+      s.includes("conceptExplainer")
+    ) {
+      return {
+        audience: "student",
+        conceptExplainer: "Explainer",
+        glossary: [{ term: "T", definition: "D" }],
+        quiz: [
+          {
+            question: "Q",
+            options: ["A", "B"],
+            answerIndex: 0,
+            explanation: "E",
+          },
+        ],
+        discussionQuestions: ["D"],
+        activities: ["A"],
+      };
+    }
+    return {
+      whatHappened: "Standard event.",
+      whatIsNew: "Novelty.",
+      whatEvidenceExists: "Evidence.",
+      whatToWatchNext: "Next.",
+    };
+  });
+}
+
 async function ensureBudget(day = "2026-10-24") {
   await env.DB.prepare(
     `INSERT INTO budgets (day, channel, cap_micros, reserved_micros, spent_micros)
@@ -1722,29 +1842,7 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       .bind(event!.id, art!.id)
       .run();
 
-    const transport = makeFakeTransport((_model, input) => {
-      const inputStr = JSON.stringify(input);
-      if (
-        inputStr
-          .toLowerCase()
-          .includes("educational policy and regulatory impact analyst") ||
-        inputStr.includes("remainingUncertainties")
-      ) {
-        return {
-          policyName: "Leaked Policy",
-          summary: "Should not generate in tech",
-          affectedAudiences: [],
-          timeline: [],
-          remainingUncertainties: [],
-        };
-      }
-      return {
-        whatHappened: "Cloud provider wins contract.",
-        whatIsNew: "Fast infrastructure.",
-        whatEvidenceExists: "Press release.",
-        whatToWatchNext: "Deployment.",
-      };
-    });
+    const transport = makeAllValidFakeTransport();
 
     const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
       transport,
@@ -2034,6 +2132,461 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     const types = rows.results.map((r) => r.type);
     expect(types).toContain("story_brief");
     expect(types).toContain("skills_career_trends");
+  });
+
+  it("never generates Finance products in non-finance sectors even if article has finance tags", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('technology', 'Technology', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech/feed-fin', 'tech.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech/art-fin-claim', 'https://tech/art-fin-claim', 'AI Backtest Performance in Cloud Deployments', 'Summary', 'shaTechFin', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechFin', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'ai_in_finance_claim', '["backtest", "regulatory_finding"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Tech Finance Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).not.toContain("finance_reality_check");
+    expect(types).not.toContain("regulation_watch");
+    expect(types).not.toContain("finance_concept_explainer");
+  });
+
+  it("does not generate Finance reality check or regulation watch when content type and tags do not match", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('finance', 'Finance', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://fin/feed-unmatch', 'bank.com', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://fin/art-unmatched', 'https://fin/art-unmatched', 'General Macroeconomic Outlook Commentary', 'Summary', 'shaFinUnmatch', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaFinUnmatch', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // General news, no backtest or regulatory finding
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'macro_commentary', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Macro Commentary Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("finance_concept_explainer");
+    expect(types).not.toContain("finance_reality_check");
+    expect(types).not.toContain("regulation_watch");
+  });
+
+  it("never generates Skills and Career Trends in non-industry sectors even with market_trend type", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('technology', 'Technology', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech/feed-trend', 'tech.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech/art-tech-trend', 'https://tech/art-tech-trend', 'Tech Software Market Trend Survey', 'Summary', 'shaTechTrend', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechTrend', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'market_trend', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Tech Market Trend Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).not.toContain("skills_career_trends");
+  });
+
+  it("does not generate Skills and Career Trends in industry sector when content type is not market_trend or company_move", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('industry', 'Industry', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ind/feed-unmatched', 'industry.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ind/art-tutorial', 'https://ind/art-tutorial', 'General Software Tutorial', 'Summary', 'shaIndTut', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaIndTut', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'tutorial_guide', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Software Tutorial Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).not.toContain("skills_career_trends");
+  });
+
+  it("does not generate Education policy or evidence products when content type and tags do not match", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('education', 'Education', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ed/feed-unmatch', 'ed.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ed/art-unmatched', 'https://ed/art-unmatched', 'Student Reflection Essay on Campus Life', 'Summary', 'shaEdEssay', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEdEssay', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'student_reflection', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Campus Life Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("classroom_discussion_builder");
+    expect(types).not.toContain("policy_impact_explorer");
+    expect(types).not.toContain("education_evidence_checker");
   });
 
   it("handles malformed JSON and schema mismatches gracefully without crashing the pipeline", async () => {
