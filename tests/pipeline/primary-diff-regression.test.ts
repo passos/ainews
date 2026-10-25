@@ -542,3 +542,147 @@ it("falls back to standard grouping when origin_event_id belongs to a different 
     expect(ev?.industry_id).toBe(finance.industryId);
   }
 });
+
+it("does not increment event revision if article stage changed before batch insert", async () => {
+  const { groupArticle } =
+    await import("../../src/pipeline/group/group-article");
+  const finance = (await env.DB.prepare(
+    "SELECT i.id AS industryId,s.id AS sourceId FROM industries i JOIN sources s ON s.industry_id=i.id WHERE i.slug='finance'",
+  ).first<{ industryId: number; sourceId: number }>())!;
+
+  const originEventId = await seedEvent(
+    finance.industryId,
+    "Finance Origin Event",
+    1,
+  );
+  const targetUrl = "https://sec.gov/filing-concurrent-stage";
+  const filingArtId = await seedArticle({
+    industryId: finance.industryId,
+    sourceId: finance.sourceId,
+    title: "Finance SEC Filing",
+    url: targetUrl,
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(filingArtId)
+    .run();
+  await seedReview(filingArtId, "approved");
+
+  await env.DB.prepare(
+    `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_pass, selected, created_at)
+     VALUES (?1, 'primary_tracker', '{}', 'primary_source', ?2, 100, 1, 1, 1000)`,
+  )
+    .bind(
+      filingArtId,
+      JSON.stringify({
+        kind: "primary_source",
+        origin_event_id: originEventId,
+      }),
+    )
+    .run();
+
+  // Simulate concurrent stage change: between read and batch, stage becomes 'body_ready'
+  const dbWithConcurrentStageChange = {
+    prepare: (sql: string) => env.DB.prepare(sql),
+    async batch(statements: D1PreparedStatement[]) {
+      await env.DB.prepare(
+        "UPDATE articles SET stage = 'body_ready' WHERE id = ?",
+      )
+        .bind(filingArtId)
+        .run();
+      return env.DB.batch(statements);
+    },
+  } as unknown as D1Database;
+
+  const res = await groupArticle(
+    {
+      db: dbWithConcurrentStageChange,
+      now: () => 1000,
+      vectors: { query: vi.fn(), upsert: vi.fn() },
+      models: { embed: vi.fn(), judge: vi.fn() } as never,
+    },
+    filingArtId,
+  );
+
+  // Grouping skipped because article stage changed:
+  expect(res.status).toBe("skipped");
+
+  // events.revision MUST NOT have incremented (must remain 1):
+  const ev = await env.DB.prepare("SELECT revision FROM events WHERE id=?")
+    .bind(originEventId)
+    .first<{ revision: number }>();
+  expect(ev?.revision).toBe(1);
+
+  // Article MUST NOT be in event_articles:
+  const ea = await env.DB.prepare(
+    "SELECT event_id FROM event_articles WHERE article_id=?",
+  )
+    .bind(filingArtId)
+    .first();
+  expect(ea).toBeNull();
+});
+
+it("attaches approved Finance primary document to originating event via groupArticle bumping revision", async () => {
+  const { groupArticle } =
+    await import("../../src/pipeline/group/group-article");
+  const finance = (await env.DB.prepare(
+    "SELECT i.id AS industryId,s.id AS sourceId FROM industries i JOIN sources s ON s.industry_id=i.id WHERE i.slug='finance'",
+  ).first<{ industryId: number; sourceId: number }>())!;
+
+  const originEventId = await seedEvent(
+    finance.industryId,
+    "Finance Origin Event",
+    1,
+  );
+  const targetUrl = "https://sec.gov/filing-approved-origin-route";
+  const filingArtId = await seedArticle({
+    industryId: finance.industryId,
+    sourceId: finance.sourceId,
+    title: "Approved Finance SEC Filing",
+    url: targetUrl,
+  });
+  await env.DB.prepare("UPDATE articles SET stage='analyzed' WHERE id=?")
+    .bind(filingArtId)
+    .run();
+  await seedReview(filingArtId, "approved");
+
+  await env.DB.prepare(
+    `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_pass, selected, created_at)
+     VALUES (?1, 'primary_tracker', '{}', 'primary_source', ?2, 100, 1, 1, 1000)`,
+  )
+    .bind(
+      filingArtId,
+      JSON.stringify({
+        kind: "primary_source",
+        origin_event_id: originEventId,
+      }),
+    )
+    .run();
+
+  const res = await groupArticle(
+    {
+      db: env.DB,
+      now: () => 1000,
+      vectors: { query: vi.fn(), upsert: vi.fn() },
+      models: { embed: vi.fn(), judge: vi.fn() } as never,
+    },
+    filingArtId,
+  );
+
+  expect(res.status).toBe("grouped");
+  if (res.status === "grouped") {
+    expect(res.eventId).toBe(originEventId);
+  }
+
+  // Approved article bumps event revision from 1 to 2, and joins at input_revision = 2:
+  const ea = await env.DB.prepare(
+    "SELECT event_id, input_revision FROM event_articles WHERE article_id=?",
+  )
+    .bind(filingArtId)
+    .first<{ event_id: number; input_revision: number }>();
+  expect(ea).toEqual({ event_id: originEventId, input_revision: 2 });
+
+  const ev = await env.DB.prepare("SELECT revision FROM events WHERE id=?")
+    .bind(originEventId)
+    .first<{ revision: number }>();
+  expect(ev?.revision).toBe(2);
+});
