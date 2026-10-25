@@ -77,7 +77,22 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                     </div>
                   </td>
                   <td className="px-3 py-2.5 font-semibold">
-                    {formatNumberDisplay(m.reportedValue, m.unit)}
+                    <div>
+                      <span>
+                        {formatNumberDisplay(m.reportedValue, m.unit)}
+                      </span>
+                      {m.reportedCitation?.secUrl && (
+                        <a
+                          href={m.reportedCitation.secUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-1 text-[10px] text-primary hover:underline"
+                          title={`SEC Source: ${m.reportedCitation.periodEnd || "Reported"}`}
+                        >
+                          ↗
+                        </a>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     {m.priorPeriodValue ? (
@@ -85,6 +100,17 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                         <span>
                           {formatNumberDisplay(m.priorPeriodValue, m.unit)}
                         </span>
+                        {m.priorPeriodCitation?.secUrl && (
+                          <a
+                            href={m.priorPeriodCitation.secUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 text-[10px] text-primary hover:underline"
+                            title={`SEC Source: ${m.priorPeriodCitation.periodEnd || "Prior Period"}`}
+                          >
+                            ↗
+                          </a>
+                        )}
                         {m.deltaQoQPercent && (
                           <span
                             className={`ml-1.5 font-mono text-[11px] ${
@@ -109,6 +135,17 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                         <span>
                           {formatNumberDisplay(m.priorYearValue, m.unit)}
                         </span>
+                        {m.priorYearCitation?.secUrl && (
+                          <a
+                            href={m.priorYearCitation.secUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 text-[10px] text-primary hover:underline"
+                            title={`SEC Source: ${m.priorYearCitation.periodEnd || "Prior Year"}`}
+                          >
+                            ↗
+                          </a>
+                        )}
                         {m.deltaYoYPercent && (
                           <span
                             className={`ml-1.5 font-mono text-[11px] ${

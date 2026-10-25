@@ -214,8 +214,10 @@ export async function generateEventArtifacts(
 
   const inputRevision = event.event_revision;
 
-  // Resolve write slot model name from settings if configured
+  // Resolve write and reason slot model names from settings if configured
   let modelName = DEFAULT_SLOTS.write.model;
+  let reasonModelName =
+    DEFAULT_SLOTS.reason?.model || "google/gemini-3.8-flash";
   const slotVal = (
     slotBatchResult.results?.[0] as { value?: string } | undefined
   )?.value;
@@ -224,6 +226,9 @@ export async function generateEventArtifacts(
       const parsed = JSON.parse(slotVal);
       if (parsed?.write?.model) {
         modelName = parsed.write.model;
+      }
+      if (parsed?.reason?.model) {
+        reasonModelName = parsed.reason.model;
       }
     } catch {
       // ignore JSON parse error in settings
@@ -391,13 +396,20 @@ export async function generateEventArtifacts(
         secUrl: f.sec_url,
       }));
 
-      // Query historical facts for QoQ and YoY comparisons
+      // Query historical approved facts for QoQ and YoY comparisons
       const priorFactsRows = await deps.db
         .prepare(
-          `SELECT id, taxonomy, concept, unit, val, period_start, period_end, fiscal_year, fiscal_period, sec_url
-           FROM financial_facts
-           WHERE company_id = ?1 AND filing_id != ?2 AND superseded_by IS NULL
-           ORDER BY period_end DESC`,
+          `SELECT ff.id, ff.taxonomy, ff.concept, ff.unit, ff.val, ff.period_start, ff.period_end, ff.fiscal_year, ff.fiscal_period, ff.sec_url
+           FROM financial_facts ff
+           JOIN filings fl ON fl.id = ff.filing_id
+           JOIN articles a ON a.id = fl.article_id
+           WHERE ff.company_id = ?1
+             AND fl.id != ?2
+             AND EXISTS (
+               SELECT 1 FROM reviews r
+               WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+             )
+           ORDER BY ff.period_end DESC, ff.id DESC`,
         )
         .bind(filingRow.company_id, filingRow.id)
         .all<{
@@ -434,26 +446,122 @@ export async function generateEventArtifacts(
       const priorFactsMap = new Map<string, FactWithMetadata>();
       const priorYearFactsMap = new Map<string, FactWithMetadata>();
 
-      for (const pf of priorFactsRows.results || []) {
-        const item: FactWithMetadata = {
-          taxonomy: pf.taxonomy,
-          concept: pf.concept,
-          label: pf.concept,
-          unit: pf.unit,
-          val: pf.val,
-          periodStart: pf.period_start ?? undefined,
-          periodEnd: pf.period_end,
-          fiscalYear: pf.fiscal_year ?? undefined,
-          fiscalPeriod: pf.fiscal_period ?? undefined,
-          filedDate: "",
-          accessionNumber: "",
-          factId: pf.id,
-          secUrl: pf.sec_url,
-        };
-        if (!priorFactsMap.has(pf.concept)) {
-          priorFactsMap.set(pf.concept, item);
-        } else if (!priorYearFactsMap.has(pf.concept)) {
-          priorYearFactsMap.set(pf.concept, item);
+      const candidateRows = priorFactsRows.results || [];
+
+      for (const cur of currentFactsForComp) {
+        const matchingCandidates = candidateRows.filter(
+          (c) => c.concept === cur.concept && c.unit === cur.unit,
+        );
+        if (matchingCandidates.length === 0) continue;
+
+        const curEndMs = Date.parse(cur.periodEnd);
+        const curStartMs = cur.periodStart ? Date.parse(cur.periodStart) : NaN;
+        const curDurationDays =
+          !isNaN(curStartMs) && !isNaN(curEndMs)
+            ? (curEndMs - curStartMs) / (1000 * 3600 * 24)
+            : null;
+
+        // 1. Select YoY (same quarter / period of previous year)
+        let yoyCandidate: (typeof matchingCandidates)[0] | undefined;
+        if (cur.fiscalYear && cur.fiscalPeriod) {
+          yoyCandidate = matchingCandidates.find(
+            (c) =>
+              c.fiscal_year === cur.fiscalYear! - 1 &&
+              c.fiscal_period === cur.fiscalPeriod,
+          );
+        }
+        if (!yoyCandidate && !isNaN(curEndMs)) {
+          yoyCandidate = matchingCandidates.find((c) => {
+            const cEndMs = Date.parse(c.period_end);
+            if (isNaN(cEndMs)) return false;
+            const diffDays = (curEndMs - cEndMs) / (1000 * 3600 * 24);
+            if (diffDays < 300 || diffDays > 430) return false;
+            if (curDurationDays !== null && c.period_start) {
+              const cStartMs = Date.parse(c.period_start);
+              if (!isNaN(cStartMs)) {
+                const cDurationDays = (cEndMs - cStartMs) / (1000 * 3600 * 24);
+                if (Math.abs(cDurationDays - curDurationDays) > 35)
+                  return false;
+              }
+            }
+            return true;
+          });
+        }
+
+        if (yoyCandidate) {
+          priorYearFactsMap.set(cur.concept, {
+            taxonomy: yoyCandidate.taxonomy,
+            concept: yoyCandidate.concept,
+            label: yoyCandidate.concept,
+            unit: yoyCandidate.unit,
+            val: yoyCandidate.val,
+            periodStart: yoyCandidate.period_start ?? undefined,
+            periodEnd: yoyCandidate.period_end,
+            fiscalYear: yoyCandidate.fiscal_year ?? undefined,
+            fiscalPeriod: yoyCandidate.fiscal_period ?? undefined,
+            filedDate: "",
+            accessionNumber: "",
+            factId: yoyCandidate.id,
+            secUrl: yoyCandidate.sec_url,
+          });
+        }
+
+        // 2. Select QoQ (sequential previous quarter)
+        let qoqCandidate: (typeof matchingCandidates)[0] | undefined;
+        if (cur.fiscalYear && cur.fiscalPeriod) {
+          let targetQoqYear = cur.fiscalYear;
+          let targetQoqPeriod: string | undefined;
+          if (cur.fiscalPeriod === "Q2") targetQoqPeriod = "Q1";
+          else if (cur.fiscalPeriod === "Q3") targetQoqPeriod = "Q2";
+          else if (cur.fiscalPeriod === "Q4") targetQoqPeriod = "Q3";
+          else if (cur.fiscalPeriod === "Q1") {
+            targetQoqPeriod = "Q4";
+            targetQoqYear = cur.fiscalYear - 1;
+          }
+
+          if (targetQoqPeriod) {
+            qoqCandidate = matchingCandidates.find(
+              (c) =>
+                c.fiscal_year === targetQoqYear &&
+                c.fiscal_period === targetQoqPeriod,
+            );
+          }
+        }
+
+        if (!qoqCandidate && !isNaN(curEndMs)) {
+          qoqCandidate = matchingCandidates.find((c) => {
+            const cEndMs = Date.parse(c.period_end);
+            if (isNaN(cEndMs)) return false;
+            const diffDays = (curEndMs - cEndMs) / (1000 * 3600 * 24);
+            if (diffDays < 55 || diffDays > 125) return false;
+            if (curDurationDays !== null && c.period_start) {
+              const cStartMs = Date.parse(c.period_start);
+              if (!isNaN(cStartMs)) {
+                const cDurationDays = (cEndMs - cStartMs) / (1000 * 3600 * 24);
+                if (Math.abs(cDurationDays - curDurationDays) > 35)
+                  return false;
+              }
+            }
+            return true;
+          });
+        }
+
+        if (qoqCandidate) {
+          priorFactsMap.set(cur.concept, {
+            taxonomy: qoqCandidate.taxonomy,
+            concept: qoqCandidate.concept,
+            label: qoqCandidate.concept,
+            unit: qoqCandidate.unit,
+            val: qoqCandidate.val,
+            periodStart: qoqCandidate.period_start ?? undefined,
+            periodEnd: qoqCandidate.period_end,
+            fiscalYear: qoqCandidate.fiscal_year ?? undefined,
+            fiscalPeriod: qoqCandidate.fiscal_period ?? undefined,
+            filedDate: "",
+            accessionNumber: "",
+            factId: qoqCandidate.id,
+            secUrl: qoqCandidate.sec_url,
+          });
         }
       }
 
@@ -497,6 +605,18 @@ export async function generateEventArtifacts(
       concept: f.concept,
       val: f.val,
       periodEnd: f.periodEnd,
+    })),
+    calculatedMetrics: (calculatedMetrics || []).map((m) => ({
+      concept: m.concept,
+      unit: m.unit,
+      reportedValue: m.reportedValue,
+      reportedCitation: m.reportedCitation,
+      priorPeriodValue: m.priorPeriodValue,
+      priorPeriodCitation: m.priorPeriodCitation,
+      priorYearValue: m.priorYearValue,
+      priorYearCitation: m.priorYearCitation,
+      deltaQoQPercent: m.deltaQoQPercent,
+      deltaYoYPercent: m.deltaYoYPercent,
     })),
     disclaimer: event.industry_disclaimer,
   });
@@ -560,8 +680,7 @@ export async function generateEventArtifacts(
       }
 
       const contentJson = JSON.stringify(parsed);
-      const artifactModel =
-        slot === "reason" ? "google/gemini-3.8-flash" : modelName;
+      const artifactModel = slot === "reason" ? reasonModelName : modelName;
 
       // Atomic conditional insert: only write if events.revision is still inputRevision
       const insertResult = await deps.db

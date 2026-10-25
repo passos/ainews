@@ -127,11 +127,16 @@ export async function ingestCompanyFilings(
     null;
 
   // Process recent filings (search for 10-K, 10-Q, 8-K Item 2.02, 10-K/A, 10-Q/A)
-  // Limit to recent 10 filings to avoid long running operations
-  const count = Math.min(recent.accessionNumber.length, 10);
+  // Scan up to 50 recent items to not get blocked by non-earnings filings (e.g. Form 4)
+  const maxScan = Math.min(recent.accessionNumber.length, 50);
+  const maxIngestPerBatch = 5;
   const rawCik = String(parseInt(company.cik, 10));
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < maxScan; i++) {
+    if (ingestedCount >= maxIngestPerBatch) {
+      break;
+    }
+
     const accn = recent.accessionNumber[i];
     const form = recent.form[i];
     const filingDate = recent.filingDate[i];
@@ -151,14 +156,14 @@ export async function ingestCompanyFilings(
       continue;
     }
 
-    // Check if filing already exists
+    // Check if filing already exists and is successfully processed
     const existingFiling = await env.DB.prepare(
-      "SELECT id FROM filings WHERE accession_number = ?1",
+      "SELECT id, status FROM filings WHERE accession_number = ?1",
     )
       .bind(accn)
-      .first<{ id: number }>();
+      .first<{ id: number; status: string }>();
 
-    if (existingFiling) {
+    if (existingFiling && existingFiling.status === "processed") {
       continue;
     }
 
@@ -168,6 +173,7 @@ export async function ingestCompanyFilings(
 
     // Fetch filing document text
     let bodyText: string;
+    let docFetchOk = true;
     try {
       const docHtml = await fetchFilingDocument(secDocUrl, env, now, deps);
       if (deps?.toMarkdown) {
@@ -175,9 +181,39 @@ export async function ingestCompanyFilings(
       } else {
         bodyText = simpleHtmlToMarkdown(docHtml);
       }
+
+      // If 8-K Item 2.02, locate and extract Exhibit 99.1 press release if referenced
+      if (isEarnings8K) {
+        const ex99Match = docHtml.match(
+          /href=["']([^"']*(?:ex[-_]?99|ex9901|ex991)[^"']*\.htm[l]?)["']/i,
+        );
+        if (ex99Match && ex99Match[1]) {
+          try {
+            const exhibitUrl = new URL(ex99Match[1], secDocUrl).href;
+            const exhibitHtml = await fetchFilingDocument(
+              exhibitUrl,
+              env,
+              now,
+              deps,
+            );
+            const exhibitMd = deps?.toMarkdown
+              ? await deps.toMarkdown(exhibitHtml, exhibitUrl)
+              : simpleHtmlToMarkdown(exhibitHtml);
+            bodyText = `${bodyText}\n\n---\n## Exhibit 99.1 (Earnings Press Release)\n\n${exhibitMd}`;
+          } catch (exErr) {
+            console.warn(
+              "Failed to fetch EX-99.1 for 8-K",
+              accn,
+              ex99Match[1],
+              exErr,
+            );
+          }
+        }
+      }
     } catch (e) {
       console.warn("Failed to fetch document for filing", accn, secDocUrl, e);
       bodyText = `SEC ${form} filing submitted by ${company.name} (${company.ticker}) on ${filingDate}.\nAccession: ${accn}\nSEC URL: ${secDocUrl}`;
+      docFetchOk = false;
     }
 
     // Truncate to 1.5MB max
@@ -193,6 +229,16 @@ export async function ingestCompanyFilings(
         companyFactsCache = await fetchCompanyFacts(cik10, env, now, deps);
       } catch (err) {
         console.warn("Failed to fetch company facts for CIK", cik10, err);
+      }
+    }
+
+    // Parse published_at from acceptanceDateTime or filingDate
+    let publishedAt = now;
+    const rawDateTime = recent.acceptanceDateTime?.[i] || filingDate;
+    if (rawDateTime) {
+      const parsedMs = Date.parse(rawDateTime);
+      if (!isNaN(parsedMs)) {
+        publishedAt = parsedMs;
       }
     }
 
@@ -221,7 +267,7 @@ export async function ingestCompanyFilings(
         title,
         summary,
         filingDate,
-        now,
+        publishedAt,
         now,
         now,
         bodySha,
@@ -245,35 +291,75 @@ export async function ingestCompanyFilings(
       },
     });
 
-    // 2. Create filing record
-    const filingInsert = await env.DB.prepare(
-      `INSERT INTO filings (
-        company_id, accession_number, form, filing_date, report_date,
-        items, primary_document, sec_url, article_id, status, created_at
-      ) VALUES (
-        ?1, ?2, ?3, ?4, ?5,
-        ?6, ?7, ?8, ?9, 'processed', ?10
-      ) RETURNING id`,
-    )
-      .bind(
-        company.id,
-        accn,
-        form,
-        filingDate,
+    // 2. Extract facts first to get fiscal year and period
+    let normalizedFacts: ReturnType<typeof extractFactsForFiling> = [];
+    if (companyFactsCache) {
+      normalizedFacts = extractFactsForFiling(companyFactsCache, accn, {
         reportDate,
-        items,
-        primaryDoc,
-        secDocUrl,
-        articleId,
-        now,
+        form,
+      });
+    }
+
+    const filingFy = normalizedFacts[0]?.fiscalYear ?? null;
+    const filingFp = normalizedFacts[0]?.fiscalPeriod ?? null;
+    const filingStatus = docFetchOk ? "processed" : "failed";
+
+    // Create or update filing record
+    let filingId: number | undefined;
+    if (existingFiling) {
+      await env.DB.prepare(
+        `UPDATE filings
+         SET form = ?2, filing_date = ?3, report_date = ?4, items = ?5,
+             primary_document = ?6, sec_url = ?7, article_id = ?8,
+             fiscal_year = ?9, fiscal_period = ?10, status = ?11
+         WHERE id = ?1`,
       )
-      .first<{ id: number }>();
+        .bind(
+          existingFiling.id,
+          form,
+          filingDate,
+          reportDate,
+          items,
+          primaryDoc,
+          secDocUrl,
+          articleId,
+          filingFy,
+          filingFp,
+          filingStatus,
+        )
+        .run();
+      filingId = existingFiling.id;
+    } else {
+      const filingInsert = await env.DB.prepare(
+        `INSERT INTO filings (
+          company_id, accession_number, form, filing_date, report_date,
+          items, primary_document, sec_url, article_id, fiscal_year, fiscal_period, status, created_at
+        ) VALUES (
+          ?1, ?2, ?3, ?4, ?5,
+          ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+        ) RETURNING id`,
+      )
+        .bind(
+          company.id,
+          accn,
+          form,
+          filingDate,
+          reportDate,
+          items,
+          primaryDoc,
+          secDocUrl,
+          articleId,
+          filingFy,
+          filingFp,
+          filingStatus,
+          now,
+        )
+        .first<{ id: number }>();
+      filingId = filingInsert?.id;
+    }
 
-    const filingId = filingInsert?.id;
-
-    // 3. Extract and store XBRL facts if available
-    if (filingId && companyFactsCache) {
-      const normalizedFacts = extractFactsForFiling(companyFactsCache, accn);
+    // 3. Store XBRL facts if available
+    if (filingId && normalizedFacts.length > 0) {
       const isAmended = form.includes("/A");
 
       for (const fact of normalizedFacts) {
@@ -324,7 +410,22 @@ export async function ingestCompanyFilings(
       }
     }
 
-    ingestedCount++;
+    // Enqueue analyze message to accelerate pipeline processing
+    if (env.Q_INGEST && articleId) {
+      try {
+        await env.Q_INGEST.send({ kind: "analyze", articleId });
+      } catch (qErr) {
+        console.warn(
+          "Failed to enqueue analyze message for article",
+          articleId,
+          qErr,
+        );
+      }
+    }
+
+    if (docFetchOk) {
+      ingestedCount++;
+    }
   }
 
   // Update company lastPolledAt

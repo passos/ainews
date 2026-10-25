@@ -424,8 +424,8 @@ export const earningsDecoderSchema = z.strictObject({
   }),
   filing: z.strictObject({
     form: z.string().min(1),
-    fiscalYear: z.number().int(),
-    fiscalPeriod: z.string().min(1),
+    fiscalYear: z.number().int().optional(),
+    fiscalPeriod: z.string().min(1).optional(),
     filingDate: z.string().min(1),
     secUrl: z.string().url(),
     accessionNumber: z.string().min(1),

@@ -117,9 +117,18 @@ export async function edgarFetch(
 
   // Rate limiting via fetch_hosts (delaySec: 0.3s for SEC EDGAR <= 10 req/s constraint)
   await ensureHostRow(env.DB, host, now);
-  const slot = await claimHostSlot(env, host, 1, now);
-  if (!slot.claimed && slot.waitSec) {
-    await sleepFn(slot.waitSec * 1000);
+  const maxRetries = 10;
+  let attempts = 0;
+  let currentNow = now;
+  while (attempts < maxRetries) {
+    const slot = await claimHostSlot(env, host, 1, currentNow);
+    if (slot.claimed) {
+      break;
+    }
+    const waitMs = Math.max(100, (slot.waitSec || 1) * 1000);
+    await sleepFn(waitMs);
+    currentNow += waitMs;
+    attempts++;
   }
 
   const response = await fetchFn(url, {
@@ -128,6 +137,25 @@ export async function edgarFetch(
       Accept: "application/json, text/html, application/xhtml+xml, */*",
     },
   });
+
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get("Retry-After");
+    let backoffSec = 600;
+    if (retryAfterHeader) {
+      const parsed = parseInt(retryAfterHeader, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        backoffSec = parsed;
+      }
+    }
+    await env.DB.prepare(
+      `UPDATE fetch_hosts SET next_allowed_at = ?2 WHERE host = ?1`,
+    )
+      .bind(host, now + backoffSec * 1000)
+      .run();
+    throw new Error(
+      `SEC EDGAR returned HTTP 429 Too Many Requests. Backing off host ${host} for ${backoffSec}s.`,
+    );
+  }
 
   return response;
 }

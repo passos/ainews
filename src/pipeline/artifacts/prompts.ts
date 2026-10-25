@@ -1193,18 +1193,40 @@ export function parseEarningsDecoderOutput(
       cik: filing?.companyCik || "0000000000",
     };
 
+    let fy = filing?.fiscalYear;
+    if (!fy && material?.financialFacts?.[0]?.fiscalYear) {
+      fy = material.financialFacts[0].fiscalYear;
+    }
+    if (!fy && filing?.reportDate) {
+      const parsed = parseInt(filing.reportDate.slice(0, 4), 10);
+      if (!isNaN(parsed) && parsed > 1990 && parsed < 2100) fy = parsed;
+    }
+    if (!fy && filing?.filingDate) {
+      const parsed = parseInt(filing.filingDate.slice(0, 4), 10);
+      if (!isNaN(parsed) && parsed > 1990 && parsed < 2100) fy = parsed;
+    }
+
     const filingInfo = {
       form: filing?.form || "10-Q",
-      fiscalYear: filing?.fiscalYear || new Date().getFullYear(),
-      fiscalPeriod: filing?.fiscalPeriod || "FY",
-      filingDate: filing?.filingDate || new Date().toISOString().slice(0, 10),
+      fiscalYear: fy,
+      fiscalPeriod:
+        filing?.fiscalPeriod ||
+        material?.financialFacts?.[0]?.fiscalPeriod ||
+        "N/A",
+      filingDate: filing?.filingDate || "N/A",
       secUrl: filing?.secUrl || "https://www.sec.gov/edgar",
       accessionNumber: filing?.accessionNumber || "0000000000-00-000000",
     };
 
-    // Prefer pre-computed deterministic metrics from material, or fallback to parsed metrics if provided
+    // In pipeline execution (when material is provided), strictly require deterministic pre-computed metrics
     let metrics: EarningsMetric[] = [];
-    if (material?.calculatedMetrics && material.calculatedMetrics.length > 0) {
+    if (material) {
+      if (
+        !material.calculatedMetrics ||
+        material.calculatedMetrics.length === 0
+      ) {
+        return null;
+      }
       metrics = material.calculatedMetrics;
     } else if (Array.isArray(parsed.metrics) && parsed.metrics.length > 0) {
       metrics = parsed.metrics;

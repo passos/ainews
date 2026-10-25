@@ -3351,11 +3351,18 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0000320193', 'AAPL', 'Apple Inc.', 1, 1000, 1000) RETURNING id",
     ).first<{ id: number }>();
 
-    const src = await env.DB.prepare(
-      "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (?1, 'SEC', 'https://data.sec.gov/submissions/', 'sec.gov', 'html', 'active', 1000) RETURNING id",
+    let src = await env.DB.prepare(
+      "SELECT id FROM sources WHERE industry_id = ?1 AND feed_url = 'https://data.sec.gov/submissions/'",
     )
       .bind(ind!.id)
       .first<{ id: number }>();
+    if (!src) {
+      src = await env.DB.prepare(
+        "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (?1, 'SEC', 'https://data.sec.gov/submissions/', 'sec.gov', 'html', 'active', 1000) RETURNING id",
+      )
+        .bind(ind!.id)
+        .first<{ id: number }>();
+    }
 
     const art = await env.DB.prepare(
       `INSERT INTO articles (
@@ -3449,5 +3456,189 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(parsed.metrics[0].concept).toBe("Revenues");
     expect(parsed.metrics[0].reportedValue).toBe("85777000000");
     expect(parsed.disclaimer).toContain("不构成任何投资建议");
+  });
+
+  it("strictly matches QoQ and YoY baselines and filters out unapproved historical filings for earnings_decoder", async () => {
+    let ind = await env.DB.prepare(
+      "SELECT id FROM industries WHERE slug = 'finance'",
+    ).first<{ id: number }>();
+    if (!ind) {
+      ind = await env.DB.prepare(
+        "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('finance', 'Finance', 'review', 1000) RETURNING id",
+      ).first<{ id: number }>();
+    }
+
+    const comp = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0001045810', 'NVDA', 'NVIDIA Corp', 1, 1000, 1000) RETURNING id",
+    ).first<{ id: number }>();
+
+    let src = await env.DB.prepare(
+      "SELECT id FROM sources WHERE industry_id = ?1 AND feed_url = 'https://data.sec.gov/submissions/'",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    if (!src) {
+      src = await env.DB.prepare(
+        "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (?1, 'SEC', 'https://data.sec.gov/submissions/', 'sec.gov', 'html', 'active', 1000) RETURNING id",
+      )
+        .bind(ind!.id)
+        .first<{ id: number }>();
+    }
+
+    // 1. Prior Q1 2024 filing (approved) - should NOT be picked as YoY!
+    const artQ1 = await env.DB.prepare(
+      `INSERT INTO articles (
+        source_id, industry_id, canonical_url, url, title, summary,
+        published_at, fetched_at, stage, stage_updated_at, body_sha, body_kind
+      ) VALUES (?1, ?2, 'https://sec.gov/nvda-q1-2024', 'https://sec.gov/nvda-q1-2024', 'NVDA Q1 2024', 'NVDA Q1', 100, 100, 'grouped', 100, 'shaQ1', 'full') RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaQ1', 'approved', 'editor', 100)",
+    )
+      .bind(artQ1!.id)
+      .run();
+    const filingQ1 = await env.DB.prepare(
+      `INSERT INTO filings (company_id, accession_number, form, filing_date, report_date, fiscal_year, fiscal_period, sec_url, article_id, status, created_at)
+       VALUES (?1, 'accn-q1-2024', '10-Q', '2024-05-01', '2024-04-30', 2024, 'Q1', 'https://sec.gov/filing/q1', ?2, 'processed', 100) RETURNING id`,
+    )
+      .bind(comp!.id, artQ1!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO financial_facts (company_id, filing_id, accession_number, taxonomy, concept, unit, val, period_end, fiscal_year, fiscal_period, filed_date, sec_url, created_at)
+       VALUES (?1, ?2, 'accn-q1-2024', 'us-gaap', 'Revenues', 'USD', '80000000', '2024-04-30', 2024, 'Q1', '2024-05-01', 'https://sec.gov/fact/q1', 100)`,
+    )
+      .bind(comp!.id, filingQ1!.id)
+      .run();
+
+    // 2. Prior Q2 2024 filing (approved) - should be picked as QoQ
+    const artQ2 = await env.DB.prepare(
+      `INSERT INTO articles (
+        source_id, industry_id, canonical_url, url, title, summary,
+        published_at, fetched_at, stage, stage_updated_at, body_sha, body_kind
+      ) VALUES (?1, ?2, 'https://sec.gov/nvda-q2-2024', 'https://sec.gov/nvda-q2-2024', 'NVDA Q2 2024', 'NVDA Q2', 200, 200, 'grouped', 200, 'shaQ2', 'full') RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaQ2', 'approved', 'editor', 200)",
+    )
+      .bind(artQ2!.id)
+      .run();
+    const filingQ2 = await env.DB.prepare(
+      `INSERT INTO filings (company_id, accession_number, form, filing_date, report_date, fiscal_year, fiscal_period, sec_url, article_id, status, created_at)
+       VALUES (?1, 'accn-q2-2024', '10-Q', '2024-08-01', '2024-07-31', 2024, 'Q2', 'https://sec.gov/filing/q2', ?2, 'processed', 200) RETURNING id`,
+    )
+      .bind(comp!.id, artQ2!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO financial_facts (company_id, filing_id, accession_number, taxonomy, concept, unit, val, period_end, fiscal_year, fiscal_period, filed_date, sec_url, created_at)
+       VALUES (?1, ?2, 'accn-q2-2024', 'us-gaap', 'Revenues', 'USD', '90000000', '2024-07-31', 2024, 'Q2', '2024-08-01', 'https://sec.gov/fact/q2', 200)`,
+    )
+      .bind(comp!.id, filingQ2!.id)
+      .run();
+
+    // 3. Prior Q3 2023 filing (approved) - should be picked as YoY!
+    const artQ3Prev = await env.DB.prepare(
+      `INSERT INTO articles (
+        source_id, industry_id, canonical_url, url, title, summary,
+        published_at, fetched_at, stage, stage_updated_at, body_sha, body_kind
+      ) VALUES (?1, ?2, 'https://sec.gov/nvda-q3-2023', 'https://sec.gov/nvda-q3-2023', 'NVDA Q3 2023', 'NVDA Q3 Prev', 50, 50, 'grouped', 50, 'shaQ3Prev', 'full') RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaQ3Prev', 'approved', 'editor', 50)",
+    )
+      .bind(artQ3Prev!.id)
+      .run();
+    const filingQ3Prev = await env.DB.prepare(
+      `INSERT INTO filings (company_id, accession_number, form, filing_date, report_date, fiscal_year, fiscal_period, sec_url, article_id, status, created_at)
+       VALUES (?1, 'accn-q3-2023', '10-Q', '2023-11-01', '2023-10-31', 2023, 'Q3', 'https://sec.gov/filing/q3prev', ?2, 'processed', 50) RETURNING id`,
+    )
+      .bind(comp!.id, artQ3Prev!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO financial_facts (company_id, filing_id, accession_number, taxonomy, concept, unit, val, period_end, fiscal_year, fiscal_period, filed_date, sec_url, created_at)
+       VALUES (?1, ?2, 'accn-q3-2023', 'us-gaap', 'Revenues', 'USD', '70000000', '2023-10-31', 2023, 'Q3', '2023-11-01', 'https://sec.gov/fact/q3prev', 50)`,
+    )
+      .bind(comp!.id, filingQ3Prev!.id)
+      .run();
+
+    // 4. Current Q3 2024 filing (approved)
+    const artCurrent = await env.DB.prepare(
+      `INSERT INTO articles (
+        source_id, industry_id, canonical_url, url, title, summary,
+        published_at, fetched_at, stage, stage_updated_at, body_sha, body_kind
+      ) VALUES (?1, ?2, 'https://sec.gov/nvda-q3-2024', 'https://sec.gov/nvda-q3-2024', 'NVDA Q3 2024', 'NVDA Q3 Current', 300, 300, 'grouped', 300, 'shaQ3Curr', 'full') RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+    await env.BODIES.put(
+      "bodies/" + artCurrent!.id + "/shaQ3Curr.md",
+      "NVDA Q3 2024 Earnings Body",
+    );
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaQ3Curr', 'approved', 'editor', 300)",
+    )
+      .bind(artCurrent!.id)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'sec_filing', '["sec_filing", "financial_results"]', 90, 0.95, 1, 'cat', 'none', 1, 300)`,
+    )
+      .bind(artCurrent!.id)
+      .run();
+
+    const filingCurrent = await env.DB.prepare(
+      `INSERT INTO filings (company_id, accession_number, form, filing_date, report_date, fiscal_year, fiscal_period, sec_url, article_id, status, created_at)
+       VALUES (?1, 'accn-q3-2024', '10-Q', '2024-11-01', '2024-10-31', 2024, 'Q3', 'https://sec.gov/filing/q3curr', ?2, 'processed', 300) RETURNING id`,
+    )
+      .bind(comp!.id, artCurrent!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO financial_facts (company_id, filing_id, accession_number, taxonomy, concept, unit, val, period_end, fiscal_year, fiscal_period, filed_date, sec_url, created_at)
+       VALUES (?1, ?2, 'accn-q3-2024', 'us-gaap', 'Revenues', 'USD', '100000000', '2024-10-31', 2024, 'Q3', '2024-11-01', 'https://sec.gov/fact/q3curr', 300)`,
+    )
+      .bind(comp!.id, filingCurrent!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'NVDA Q3 Financial Results', 1, 300, 300) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 300)",
+    )
+      .bind(event!.id, artCurrent!.id)
+      .run();
+
+    const transport = makeAllValidFakeTransport();
+    const res = await generateEventArtifacts(testEnv, event!.id, 300, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+
+    const rows = await env.DB.prepare(
+      "SELECT content FROM event_artifacts WHERE event_id = ?1 AND type = 'earnings_decoder'",
+    )
+      .bind(event!.id)
+      .first<{ content: string }>();
+
+    expect(rows).not.toBeNull();
+    const parsed = JSON.parse(rows!.content);
+    const revMetric = parsed.metrics.find(
+      (m: { concept: string }) => m.concept === "Revenues",
+    );
+    expect(revMetric).toBeDefined();
+    expect(revMetric.reportedValue).toBe("100000000");
+    // QoQ should be Q2 2024 (90,000,000)
+    expect(revMetric.priorPeriodValue).toBe("90000000");
+    expect(revMetric.deltaQoQPercent).toBe("+11.1%");
+    // YoY should be Q3 2023 (70,000,000), NOT Q1 2024 (80,000,000)!
+    expect(revMetric.priorYearValue).toBe("70000000");
+    expect(revMetric.deltaYoYPercent).toBe("+42.9%");
   });
 });

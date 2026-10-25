@@ -367,6 +367,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
       NOW,
       {
         fetch: fakeFetch,
+        sleep: async () => {},
       },
     );
     expect(res1.ingestedCount).toBe(1);
@@ -453,6 +454,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
       NOW + 1000,
       {
         fetch: fakeAmendedFetch,
+        sleep: async () => {},
       },
     );
     expect(res2.ingestedCount).toBe(1);
@@ -516,5 +518,192 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     );
     expect(resDisabled.polledCount).toBe(0);
     expect(resDisabled.companyTickers).toEqual([]);
+  });
+
+  it("handles HTTP 429 with Retry-After backoff", async () => {
+    const fakeFetch = vi.fn().mockImplementation(async () => {
+      return new Response("Too Many Requests", {
+        status: 429,
+        headers: { "Retry-After": "120" },
+      });
+    });
+
+    await expect(
+      edgarFetch(
+        "https://data.sec.gov/submissions/CIK0000320193.json",
+        {
+          DB: env.DB,
+          SEC_USER_AGENT: "Personal News test@example.com",
+        },
+        NOW,
+        { fetch: fakeFetch, sleep: async () => {} },
+      ),
+    ).rejects.toThrow("SEC EDGAR returned HTTP 429 Too Many Requests");
+
+    const hostRow = await env.DB.prepare(
+      "SELECT next_allowed_at FROM fetch_hosts WHERE host = 'data.sec.gov'",
+    ).first<{ next_allowed_at: number }>();
+    expect(hostRow?.next_allowed_at).toBe(NOW + 120 * 1000);
+  });
+
+  it("scans past Form 4 filings to ingest 11th periodic 10-Q filing", async () => {
+    await resetPipeline();
+    const industryId = await seedIndustry("finance");
+
+    const companyRes = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0000320193', 'AAPL', 'Apple Inc.', 1, ?1, ?1) RETURNING id",
+    )
+      .bind(NOW)
+      .first<{ id: number }>();
+    const companyId = companyRes!.id;
+
+    // First 10 filings are Form 4, 11th filing is 10-Q
+    const accessionNumbers = Array.from(
+      { length: 11 },
+      (_, i) => `0000320193-24-0000${String(i).padStart(2, "0")}`,
+    );
+    const forms = [...Array(10).fill("4"), "10-Q"];
+    const filingDates = Array(11).fill("2024-08-02");
+    const reportDates = Array(11).fill("2024-06-29");
+    const acceptanceDateTimes = Array(11).fill("2024-08-02T16:00:00.000Z");
+    const items = Array(11).fill("");
+    const primaryDocuments = [...Array(10).fill("form4.xml"), "aapl-10q.htm"];
+
+    const mockSubmissions = {
+      cik: "0000320193",
+      entityType: "operating",
+      name: "Apple Inc.",
+      tickers: ["AAPL"],
+      filings: {
+        recent: {
+          accessionNumber: accessionNumbers,
+          filingDate: filingDates,
+          reportDate: reportDates,
+          acceptanceDateTime: acceptanceDateTimes,
+          form: forms,
+          items,
+          primaryDocument: primaryDocuments,
+        },
+      },
+    };
+
+    const fakeFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("submissions")) {
+        return new Response(JSON.stringify(mockSubmissions), { status: 200 });
+      }
+      return new Response("<html><body>Apple 10-Q Document</body></html>", {
+        status: 200,
+      });
+    });
+
+    const mockEnv = {
+      DB: env.DB,
+      BODIES: env.BODIES,
+      SEC_USER_AGENT: "Personal News test@example.com",
+      COLLECT_ENABLED: "true",
+    };
+
+    const res = await ingestCompanyFilings(
+      mockEnv as unknown as PipelineEnv,
+      companyId,
+      NOW,
+      { fetch: fakeFetch, sleep: async () => {} },
+    );
+
+    expect(res.ingestedCount).toBe(1);
+
+    const filing = await env.DB.prepare(
+      "SELECT accession_number, form FROM filings WHERE company_id = ?1",
+    )
+      .bind(companyId)
+      .first<{ accession_number: string; form: string }>();
+
+    expect(filing?.form).toBe("10-Q");
+    expect(filing?.accession_number).toBe(accessionNumbers[10]);
+
+    // Check published_at was parsed from acceptanceDateTime (2024-08-02T16:00:00.000Z)
+    const article = await env.DB.prepare(
+      "SELECT published_at FROM articles WHERE industry_id = ?1",
+    )
+      .bind(industryId)
+      .first<{ published_at: number }>();
+    expect(article?.published_at).toBe(Date.parse("2024-08-02T16:00:00.000Z"));
+  });
+
+  it("fetches and appends referenced EX-99.1 exhibit for 8-K Item 2.02 filings", async () => {
+    await resetPipeline();
+    await seedIndustry("finance");
+
+    const companyRes = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES ('0000320193', 'AAPL', 'Apple Inc.', 1, ?1, ?1) RETURNING id",
+    )
+      .bind(NOW)
+      .first<{ id: number }>();
+    const companyId = companyRes!.id;
+
+    const mock8KSubmissions = {
+      cik: "0000320193",
+      entityType: "operating",
+      name: "Apple Inc.",
+      tickers: ["AAPL"],
+      filings: {
+        recent: {
+          accessionNumber: ["0000320193-24-000050"],
+          filingDate: ["2024-08-01"],
+          reportDate: ["2024-08-01"],
+          acceptanceDateTime: ["2024-08-01T16:30:00.000Z"],
+          form: ["8-K"],
+          items: ["2.02"],
+          primaryDocument: ["aapl-8k.htm"],
+        },
+      },
+    };
+
+    const fakeFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("submissions")) {
+        return new Response(JSON.stringify(mock8KSubmissions), { status: 200 });
+      }
+      if (url.includes("aapl-8k.htm")) {
+        return new Response(
+          '<html><body>Item 2.02 Results of Operations. See <a href="ex9901.htm">Exhibit 99.1</a> for details.</body></html>',
+          { status: 200 },
+        );
+      }
+      if (url.includes("ex9901.htm")) {
+        return new Response(
+          "<html><body><h1>Q3 Earnings Release</h1><p>Apple Reports Net Sales of $85.8B.</p></body></html>",
+          { status: 200 },
+        );
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const mockEnv = {
+      DB: env.DB,
+      BODIES: env.BODIES,
+      SEC_USER_AGENT: "Personal News test@example.com",
+      COLLECT_ENABLED: "true",
+    };
+
+    const res = await ingestCompanyFilings(
+      mockEnv as unknown as PipelineEnv,
+      companyId,
+      NOW,
+      { fetch: fakeFetch, sleep: async () => {} },
+    );
+
+    expect(res.ingestedCount).toBe(1);
+
+    const article = await env.DB.prepare(
+      "SELECT id, body_sha FROM articles WHERE canonical_url LIKE '%aapl-8k.htm'",
+    ).first<{ id: number; body_sha: string }>();
+
+    expect(article).not.toBeNull();
+    const bodyObj = await env.BODIES.get(
+      `bodies/${article!.id}/${article!.body_sha}.md`,
+    );
+    const bodyContent = await bodyObj!.text();
+    expect(bodyContent).toContain("Exhibit 99.1 (Earnings Press Release)");
+    expect(bodyContent).toContain("Apple Reports Net Sales of $85.8B");
   });
 });
