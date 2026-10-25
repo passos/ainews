@@ -271,8 +271,15 @@ export async function groupArticle(
         // and shares the same industry as the target event.
         deps.db
           .prepare(
-            `INSERT INTO event_articles (event_id, article_id, created_at)
-             SELECT ?1, ?2, ?3
+            `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+             SELECT ?1, ?2, ?3, (
+               SELECT revision + CASE WHEN EXISTS (
+                 SELECT 1 FROM reviews r
+                 JOIN articles a ON a.id = r.article_id
+                 WHERE a.id = ?2 AND r.body_sha = a.body_sha AND r.decision = 'approved'
+               ) THEN 1 ELSE 0 END
+               FROM events WHERE id = ?1
+             )
              WHERE EXISTS (
                SELECT 1 FROM articles a
                JOIN events e ON e.id = ?1
@@ -342,8 +349,8 @@ export async function groupArticle(
           .bind(articleId, article.title, commitNow, article.industry_id),
         deps.db
           .prepare(
-            `INSERT INTO event_articles (event_id, article_id, created_at)
-             SELECT last_insert_rowid(), ?1, ?2
+            `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+             SELECT last_insert_rowid(), ?1, ?2, 1
              WHERE changes() = 1`,
           )
           .bind(articleId, commitNow),

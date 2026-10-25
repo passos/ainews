@@ -43,7 +43,10 @@ export interface ArtifactDefinition {
   parseOutput: (rawText: string, audience?: string) => unknown | null;
 }
 
-export const ARTIFACT_REGISTRY: Record<ArtifactType, ArtifactDefinition> = {
+export const ARTIFACT_REGISTRY: Record<
+  Exclude<ArtifactType, "revision_diff">,
+  ArtifactDefinition
+> = {
   story_brief: {
     type: "story_brief",
     audiences: [""],

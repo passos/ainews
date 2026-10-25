@@ -530,6 +530,13 @@ export async function decideReview(
          DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
       )
       .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
+    database
+      .prepare(
+        `UPDATE event_articles
+         SET input_revision = (SELECT revision FROM events WHERE id = event_articles.event_id)
+         WHERE article_id = ?1 AND ?2 = 'approved'`,
+      )
+      .bind(data.articleId, data.decision),
   ]);
 }
 

@@ -115,6 +115,21 @@ function ClaimRow({
                 Primary source cited
               </span>
             )}
+            {claim.realityCheck === "vendor_only" && (
+              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-amber-600 dark:text-amber-400">
+                Vendor Claim (Unverified)
+              </span>
+            )}
+            {claim.realityCheck === "independent_verified" && (
+              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-emerald-600 dark:text-emerald-400">
+                Independent Benchmark Confirmed
+              </span>
+            )}
+            {claim.realityCheck === "independent_disputed" && (
+              <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-red-600 dark:text-red-400">
+                Disputed by Independent Benchmark
+              </span>
+            )}
             <span className="font-mono text-[0.65rem] text-muted-foreground">
               {claim.evidence.length}{" "}
               {claim.evidence.length === 1
@@ -165,6 +180,15 @@ function ClaimRow({
                           ★ Original source
                         </span>
                       )}
+                      <span
+                        className={`rounded border px-1.5 py-0.2 font-mono text-[0.62rem] font-semibold uppercase tracking-wider ${
+                          cit.sourceRole === "vendor"
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                        }`}
+                      >
+                        {cit.sourceRole === "vendor" ? "Vendor" : "Independent"}
+                      </span>
                       <span className="font-mono text-[0.68rem] text-muted-foreground">
                         {cit.sourceName} ({cit.sourceDomain})
                       </span>

@@ -49,7 +49,15 @@ export const Route = createFileRoute("/e/$eventId")({
 function EventPage() {
   const { data, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
-  const { section, articles, corrections, title, artifacts, evidence } = data;
+  const {
+    section,
+    articles,
+    corrections,
+    title,
+    artifacts,
+    evidence,
+    timelineRevisions,
+  } = data;
 
   const hasExplanations =
     artifacts?.explanations && Object.keys(artifacts.explanations).length > 0;
@@ -138,21 +146,65 @@ function EventPage() {
         </Await>
       </Suspense>
 
-      <section aria-label="Story timeline" className="flex flex-col gap-3">
+      <section aria-label="Story timeline" className="flex flex-col gap-4">
         <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
           Timeline
         </h2>
-        <div className="flex flex-col gap-3">
-          {articles.map((a, idx) => (
-            <div key={a.id} className="flex flex-col gap-1">
-              {idx === 0 && (
-                <div className="flex items-center gap-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
-                  <span>★ First seen</span>
+        <div className="flex flex-col gap-5">
+          {timelineRevisions && timelineRevisions.length > 0
+            ? timelineRevisions.map((revBlock, revIdx) => (
+                <div
+                  key={revBlock.revision}
+                  className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card/30 p-3 sm:p-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-xs font-bold text-primary">
+                        Revision {revBlock.revision}
+                      </span>
+                      {revIdx === 0 && (
+                        <span className="flex items-center gap-1 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                          ★ First seen
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {revBlock.diff && revBlock.diff.summary && (
+                    <div className="rounded bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
+                      <span className="font-mono font-bold text-sec-ink mr-1">
+                        ★ What&apos;s new in this revision:
+                      </span>
+                      <span>{revBlock.diff.summary}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3">
+                    {revBlock.articles.map((a) => (
+                      <div key={a.id} className="flex flex-col gap-1">
+                        {a.evidence &&
+                          (a.evidence.includes("preprint") ||
+                            a.evidence.includes("primary_source")) && (
+                            <div className="flex items-center gap-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                              <span>★ Original source</span>
+                            </div>
+                          )}
+                        <ArticleCard article={a} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              )}
-              <ArticleCard article={a} />
-            </div>
-          ))}
+              ))
+            : articles.map((a, idx) => (
+                <div key={a.id} className="flex flex-col gap-1">
+                  {idx === 0 && (
+                    <div className="flex items-center gap-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                      <span>★ First seen</span>
+                    </div>
+                  )}
+                  <ArticleCard article={a} />
+                </div>
+              ))}
         </div>
       </section>
     </div>

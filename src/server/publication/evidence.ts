@@ -6,6 +6,8 @@ import type {
   EventEvidenceView,
   EvidencePublicationStatus,
   EvidenceStance,
+  RealityCheckStatus,
+  SourceRole,
 } from "../../lib/evidence/types";
 import { approvedArticleWhere, type Db } from "./articles";
 
@@ -19,6 +21,7 @@ export async function getEventEvidence(
     claim_type: string;
     consensus_status: string;
     primary_source_preferred: number;
+    reality_check: string;
     claim_status: string;
     evidence_id: number | null;
     article_id: number | null;
@@ -32,6 +35,7 @@ export async function getEventEvidence(
     end_offset: number | null;
     stance: string | null;
     is_primary_source: number | null;
+    source_role: string | null;
     verified: number | null;
   }>(sql`
     SELECT
@@ -40,6 +44,7 @@ export async function getEventEvidence(
       c.claim_type,
       c.consensus_status,
       c.primary_source_preferred,
+      COALESCE(c.reality_check, 'unspecified') AS reality_check,
       c.status AS claim_status,
       ev.id AS evidence_id,
       ev.article_id,
@@ -53,6 +58,7 @@ export async function getEventEvidence(
       ev.end_offset,
       ev.stance,
       ev.is_primary_source,
+      ev.source_role,
       ev.verified
     FROM events e
     JOIN claims c ON c.event_id = e.id AND c.input_revision = e.revision
@@ -67,6 +73,7 @@ export async function getEventEvidence(
         ce.end_offset,
         ce.stance,
         ce.is_primary_source,
+        COALESCE(ce.source_role, 'independent') AS source_role,
         ce.verified,
         COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS article_title,
         a.canonical_url AS article_url,
@@ -104,6 +111,7 @@ export async function getEventEvidence(
         claimType: r.claim_type as ClaimType,
         consensusStatus: r.consensus_status as ConsensusStatus,
         primarySourcePreferred: r.primary_source_preferred === 1,
+        realityCheck: (r.reality_check as RealityCheckStatus) || "unspecified",
         status: r.claim_status as EvidencePublicationStatus,
         evidence: [],
       };
@@ -127,6 +135,7 @@ export async function getEventEvidence(
         endOffset: r.end_offset ?? 0,
         stance: (r.stance ?? "support") as EvidenceStance,
         isPrimarySource: r.is_primary_source === 1,
+        sourceRole: (r.source_role as SourceRole) || "independent",
         verified: r.verified === 1,
       });
     }

@@ -13,6 +13,7 @@ import {
   type ArticleMetadata,
 } from "./registry";
 import type { ArtifactArticleMaterial, ArtifactEventMaterial } from "./prompts";
+import { computeRevisionDiff } from "../evidence/diff";
 
 export interface ArtifactDeps {
   db?: D1Database;
@@ -375,6 +376,44 @@ export async function generateEventArtifacts(
           eventId,
           inputRevision,
         });
+      }
+    }
+  }
+
+  // Ensure revision_diff artifact exists for updates (inputRevision > 1) (N§2.2)
+  if (inputRevision > 1) {
+    const existingDiff = await deps.db
+      .prepare(
+        `SELECT id FROM event_artifacts
+         WHERE event_id = ?1 AND type = 'revision_diff' AND audience = '' AND input_revision = ?2`,
+      )
+      .bind(eventId, inputRevision)
+      .first<{ id: number }>();
+
+    if (!existingDiff) {
+      const diffData = await computeRevisionDiff(
+        deps.db,
+        eventId,
+        inputRevision,
+      );
+      if (diffData) {
+        await deps.db
+          .prepare(
+            `INSERT INTO event_artifacts (
+               event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
+             )
+             SELECT ?1, 'revision_diff', '', ?2, 'diff-v1', 'deterministic', ?3, ?4, ?5
+             WHERE (SELECT revision FROM events WHERE id = ?1) = ?2
+             ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model) DO NOTHING`,
+          )
+          .bind(
+            eventId,
+            inputRevision,
+            JSON.stringify(diffData),
+            initialStatus,
+            deps.now(),
+          )
+          .run();
       }
     }
   }

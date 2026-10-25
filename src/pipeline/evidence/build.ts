@@ -20,6 +20,7 @@ import {
 } from "./prompts";
 import {
   evaluateClaimConsensus,
+  evaluateRealityCheck,
   isPrimarySourceDomain,
   verifyQuoteInBody,
 } from "./verify";
@@ -510,6 +511,7 @@ export async function generateEventEvidence(
       endOffset: number;
       stance: "support" | "dispute";
       isPrimarySource: boolean;
+      sourceRole: "vendor" | "independent";
       verified: boolean;
     }> = [];
 
@@ -547,6 +549,7 @@ export async function generateEventEvidence(
         endOffset: verification.endOffset,
         stance: cit.stance,
         isPrimarySource: isPrimary,
+        sourceRole: cit.sourceRole ?? (isPrimary ? "vendor" : "independent"),
         verified: verification.verified,
       });
     }
@@ -555,6 +558,8 @@ export async function generateEventEvidence(
       hasSnapshotDispute || hasIncompleteInspection
         ? "unverified"
         : evaluateClaimConsensus(verifiedCitations);
+
+    const realityCheck = evaluateRealityCheck(verifiedCitations);
 
     const hasUnresolvedDispute =
       hasSnapshotDispute ||
@@ -572,7 +577,7 @@ export async function generateEventEvidence(
       deps.db
         .prepare(
           `INSERT INTO claims (
-             event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
+             event_id, claim_text, claim_type, consensus_status, primary_source_preferred, reality_check, status, input_revision, prompt_version, model, created_at
            )
            SELECT
              e.id,
@@ -580,24 +585,25 @@ export async function generateEventEvidence(
              ?3,
              ?4,
              ?5,
+             ?6,
              CASE
                WHEN i.slug = '${FINANCE_SLUG}' THEN 'pending_review'
-               WHEN ?10 = 1 THEN 'pending_review'
+               WHEN ?11 = 1 THEN 'pending_review'
                WHEN i.publish_mode = 'auto' AND ?4 != 'unverified' THEN 'published'
                ELSE 'pending_review'
              END,
-             ?6,
              ?7,
              ?8,
-             ?9
+             ?9,
+             ?10
            FROM events e
            JOIN industries i ON i.id = e.industry_id
            WHERE e.id = ?1
-             AND e.revision = ?6
+             AND e.revision = ?7
              AND NOT EXISTS (
                SELECT 1 FROM claims
                WHERE event_id = ?1
-                 AND input_revision = ?6
+                 AND input_revision = ?7
                  AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
@@ -608,6 +614,7 @@ export async function generateEventEvidence(
           rawClaim.claimType,
           consensusStatus,
           primarySourcePreferred ? 1 : 0,
+          realityCheck,
           inputRevision,
           CLAIMS_PROMPT_VERSION,
           modelName,
@@ -623,21 +630,21 @@ export async function generateEventEvidence(
         deps.db
           .prepare(
             `INSERT INTO claim_evidence (
-               claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, verified, created_at
+               claim_id, article_id, body_sha, quote, quote_clean, start_offset, end_offset, stance, is_primary_source, source_role, verified, created_at
              )
              SELECT
-               c.id, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+               c.id, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
              FROM claims c
-             WHERE c.event_id = ?11
-               AND c.input_revision = ?12
-               AND c.claim_text = ?13
-               AND c.prompt_version = ?14
-               AND c.model = ?15
-               AND (SELECT revision FROM events WHERE id = ?11) = ?12
+             WHERE c.event_id = ?12
+               AND c.input_revision = ?13
+               AND c.claim_text = ?14
+               AND c.prompt_version = ?15
+               AND c.model = ?16
+               AND (SELECT revision FROM events WHERE id = ?12) = ?13
                AND NOT EXISTS (
                  SELECT 1 FROM claims
-                 WHERE event_id = ?11
-                   AND input_revision = ?12
+                 WHERE event_id = ?12
+                   AND input_revision = ?13
                    AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
                )`,
           )
@@ -650,6 +657,7 @@ export async function generateEventEvidence(
             c.endOffset,
             c.stance,
             c.isPrimarySource ? 1 : 0,
+            c.sourceRole,
             c.verified ? 1 : 0,
             now,
             eventId,

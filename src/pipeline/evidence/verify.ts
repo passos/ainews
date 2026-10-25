@@ -1,5 +1,6 @@
 import MarkdownIt from "markdown-it";
 import type { ConsensusStatus, EvidenceStance } from "../../lib/evidence/types";
+import { normalizeUrl, safeHttpUrl } from "../../lib/url";
 
 const md = new MarkdownIt({ html: false, linkify: false });
 
@@ -749,4 +750,126 @@ export function isPrimarySourceDomain(
       normalizedDomain === target || normalizedDomain.endsWith(`.${target}`)
     );
   });
+}
+
+/**
+ * Extracts links pointing to whitelisted domains from markdown text.
+ */
+export function extractWhitelistedUrls(
+  markdown: string,
+  primaryDomains: string[] = [],
+): string[] {
+  if (!markdown || primaryDomains.length === 0) {
+    return [];
+  }
+
+  const foundUrls = new Set<string>();
+  const linkMd = new MarkdownIt({ html: false, linkify: true });
+  const tokens = linkMd.parse(markdown, {});
+
+  interface MarkdownToken {
+    type: string;
+    attrs?: Array<[string, string | number]> | null;
+    children?: readonly MarkdownToken[] | null;
+  }
+
+  function walk(toks: readonly MarkdownToken[]) {
+    for (const token of toks) {
+      if (token.type === "link_open" && token.attrs) {
+        for (const [attrName, attrVal] of token.attrs) {
+          if (attrName === "href" && attrVal) {
+            foundUrls.add(String(attrVal).trim());
+          }
+        }
+      }
+      if (token.children && token.children.length > 0) {
+        walk(token.children);
+      }
+    }
+  }
+
+  walk(tokens as unknown as MarkdownToken[]);
+
+  // Also match plain text regex for URLs that might not be hyperlinked
+  const urlRegex = /https?:\/\/[^\s)\]>"'<>]+/gi;
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(markdown)) !== null) {
+    foundUrls.add(match[0].trim());
+  }
+
+  const validUrls: string[] = [];
+  const seenNormalized = new Set<string>();
+
+  for (const raw of foundUrls) {
+    const safe = safeHttpUrl(raw);
+    if (!safe) continue;
+    try {
+      const parsed = new URL(safe);
+      if (isPrimarySourceDomain(parsed.hostname, primaryDomains)) {
+        const canonical = normalizeUrl(safe) ?? safe;
+        if (!seenNormalized.has(canonical)) {
+          seenNormalized.add(canonical);
+          validUrls.push(safe);
+        }
+      }
+    } catch {
+      // ignore invalid URL
+    }
+  }
+
+  return validUrls;
+}
+
+export type RealityCheckStatus =
+  | "vendor_only"
+  | "independent_verified"
+  | "independent_disputed"
+  | "unspecified";
+
+export interface RealityCheckCitation {
+  verified: boolean;
+  sourceRole: "vendor" | "independent";
+  stance: "support" | "dispute";
+}
+
+/**
+ * Evaluates Launch Reality Check status based on citations:
+ * - vendor_only: all supporting citations are from vendor, no independent citations
+ * - independent_verified: at least one independent citation supports, no independent dispute
+ * - independent_disputed: at least one independent citation disputes
+ * - unspecified: no verified citations
+ */
+export function evaluateRealityCheck(
+  citations: readonly RealityCheckCitation[],
+): RealityCheckStatus {
+  const verified = citations.filter((c) => c.verified);
+  if (verified.length === 0) {
+    return "unspecified";
+  }
+
+  // 1. Independent dispute takes precedence
+  const hasIndependentDispute = verified.some(
+    (c) => c.sourceRole === "independent" && c.stance === "dispute",
+  );
+  if (hasIndependentDispute) {
+    return "independent_disputed";
+  }
+
+  // 2. Independent support
+  const hasIndependentSupport = verified.some(
+    (c) => c.sourceRole === "independent" && c.stance === "support",
+  );
+  if (hasIndependentSupport) {
+    return "independent_verified";
+  }
+
+  // 3. Only vendor support (and no independent citations)
+  const hasVendorSupport = verified.some(
+    (c) => c.sourceRole === "vendor" && c.stance === "support",
+  );
+  if (hasVendorSupport) {
+    return "vendor_only";
+  }
+
+  return "unspecified";
 }

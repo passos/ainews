@@ -2,8 +2,10 @@ import { sql } from "drizzle-orm";
 import {
   type ArtifactAudience,
   type EventArtifactsView,
+  type RevisionDiff,
   audienceExplainSchema,
   researchPaperDecoderSchema,
+  revisionDiffSchema,
   storyBriefSchema,
 } from "../../lib/artifacts/types";
 import type { EventEvidenceView } from "../../lib/evidence/types";
@@ -19,11 +21,18 @@ import {
 } from "./articles";
 import { getEventEvidence } from "./evidence";
 
+export interface RevisionTimelineBlock {
+  revision: number;
+  diff: RevisionDiff | null;
+  articles: ArticleView[];
+}
+
 export interface EventView {
   id: number;
   title: string;
   section: SectionInfo;
   articles: ArticleView[];
+  timelineRevisions: RevisionTimelineBlock[];
   corrections: string[];
   artifacts: EventArtifactsView;
   evidence: EventEvidenceView;
@@ -106,12 +115,56 @@ export async function getEvent(
 
   const evidence = await getEventEvidence(db, eventId);
 
+  // Load all published revision_diff artifacts for this event (N§2.2)
+  const diffRows = await db.all<{
+    input_revision: number;
+    content: string;
+  }>(sql`
+    SELECT ea.input_revision, ea.content
+    FROM event_artifacts ea
+    WHERE ea.event_id = ${eventId}
+      AND ea.type = 'revision_diff'
+      AND ea.status = 'published'
+    ORDER BY ea.input_revision ASC
+  `);
+
+  const diffMap = new Map<number, RevisionDiff>();
+  for (const d of diffRows) {
+    try {
+      const parsed = revisionDiffSchema.safeParse(JSON.parse(d.content));
+      if (parsed.success) {
+        diffMap.set(d.input_revision, parsed.data);
+      }
+    } catch {
+      // ignore json error
+    }
+  }
+
+  const revisionSet = new Set<number>();
+  for (const a of articles) {
+    revisionSet.add(a.inputRevision);
+  }
+  for (const r of diffMap.keys()) {
+    revisionSet.add(r);
+  }
+  if (revisionSet.size === 0) revisionSet.add(1);
+
+  const sortedRevisions = Array.from(revisionSet).sort((a, b) => a - b);
+  const timelineRevisions: RevisionTimelineBlock[] = sortedRevisions.map(
+    (rev) => ({
+      revision: rev,
+      diff: diffMap.get(rev) ?? null,
+      articles: articles.filter((a) => a.inputRevision === rev),
+    }),
+  );
+
   return {
     id: eventId,
     // Event public title: title of earliest approved article (refinement invariant 7)
     title: first.title,
     section,
     articles,
+    timelineRevisions,
     corrections: correctionRows.map((c) => c.body),
     artifacts,
     evidence,
