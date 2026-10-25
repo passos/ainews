@@ -99,6 +99,7 @@ it("migrations create the core tables", async () => {
     "claims",
     "corrections",
     "digests",
+    "discovery_runs",
     "dlq_messages",
     "event_articles",
     "event_artifacts",
@@ -109,6 +110,7 @@ it("migrations create the core tables", async () => {
     "questions",
     "reviews",
     "settings",
+    "source_candidates",
     "sources",
   ]);
 });

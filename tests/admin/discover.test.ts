@@ -1,0 +1,210 @@
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vitest";
+import {
+  createIndustry,
+  listSourceCandidates,
+  approveCandidate,
+  rejectCandidate,
+  triggerDiscovery,
+} from "../../src/server/admin/ops";
+import { adminOr403 } from "../../src/server/admin/access";
+import { isEnabled } from "../../src/lib/flags";
+
+const ACCESS_ENV = {
+  ADMIN_EMAIL: "admin@example.com",
+  ACCESS_TEAM_DOMAIN: "https://test.cloudflareaccess.com",
+  ACCESS_AUD: "test-aud",
+};
+
+describe("Admin Discover & Source Operations", () => {
+  it("rejects unauthorized calls without Access tokens with 403", async () => {
+    const req = new Request(
+      "https://news.ioenv.com/_serverFn/draftIndustryConfig",
+      {
+        method: "POST",
+      },
+    );
+    await expect(adminOr403(req, ACCESS_ENV)).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 403,
+    );
+  });
+
+  it("createIndustry validates config, enforces Finance rules, and saves new section", async () => {
+    // 1. Finance section requires review mode
+    await expect(
+      createIndustry(env.DB, {
+        slug: "finance",
+        name: "Finance & Markets",
+        publishMode: "auto",
+        primaryDomains: ["bloomberg.com"],
+        config: "{}",
+        disclaimer: "Strict disclaimer",
+      }),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+
+    // 2. Finance section requires non-empty disclaimer
+    await expect(
+      createIndustry(env.DB, {
+        slug: "finance",
+        name: "Finance & Markets",
+        publishMode: "review",
+        primaryDomains: ["bloomberg.com"],
+        config: "{}",
+        disclaimer: null,
+      }),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+
+    // 3. Valid industry creation
+    const created = await createIndustry(env.DB, {
+      slug: "biotech",
+      name: "Biotechnology",
+      publishMode: "review",
+      primaryDomains: ["nature.com", "biorxiv.org"],
+      config: JSON.stringify({ analysis: { test: true } }),
+      disclaimer: null,
+    });
+    expect(created.id).toBeGreaterThan(0);
+    expect(created.slug).toBe("biotech");
+    expect(created.configVersion).toBe(1);
+
+    // 4. Duplicate slug rejected
+    await expect(
+      createIndustry(env.DB, {
+        slug: "biotech",
+        name: "Biotech Duplicate",
+        publishMode: "review",
+        primaryDomains: [],
+        config: "{}",
+        disclaimer: null,
+      }),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+  });
+
+  it("candidate management: list, approve, and reject operations", async () => {
+    // Setup industry
+    const indRes = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('cand-ind', 'Cand Industry', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = indRes!.id;
+
+    // Insert 2 candidates
+    const c1 = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, avg_score, status, created_at)
+       VALUES (?1, 'Candidate One', 'https://c1.com/feed', 'c1.com', 'rss', 0, 85, 'pending', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    const c2 = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, avg_score, status, created_at)
+       VALUES (?1, 'Candidate Two', 'https://c2.com/feed', 'c2.com', 'rss', 1, 40, 'pending', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    // 1. List candidates
+    const allCands = await listSourceCandidates(env.DB, { industryId: indId });
+    expect(allCands.length).toBeGreaterThanOrEqual(2);
+
+    // 2. Approve candidate 1 -> activated in sources
+    const approveRes = await approveCandidate(env.DB, c1!.id, 2000);
+    expect(approveRes.success).toBe(true);
+
+    const c1Updated = await env.DB.prepare(
+      "SELECT status FROM source_candidates WHERE id = ?1",
+    )
+      .bind(c1!.id)
+      .first<{ status: string }>();
+    expect(c1Updated?.status).toBe("approved");
+
+    const src1 = await env.DB.prepare(
+      "SELECT status, fetch_rung FROM sources WHERE industry_id = ?1 AND feed_url = ?2",
+    )
+      .bind(indId, "https://c1.com/feed")
+      .first<{ status: string; fetch_rung: number }>();
+    expect(src1?.status).toBe("active");
+    expect(src1?.fetch_rung).toBe(0);
+
+    // 3. Reject candidate 2
+    const rejectRes = await rejectCandidate(env.DB, {
+      id: c2!.id,
+      reason: "low_relevance",
+    });
+    expect(rejectRes.success).toBe(true);
+
+    const c2Updated = await env.DB.prepare(
+      "SELECT status, rejection_reason FROM source_candidates WHERE id = ?1",
+    )
+      .bind(c2!.id)
+      .first<{ status: string; rejection_reason: string }>();
+    expect(c2Updated?.status).toBe("rejected");
+    expect(c2Updated?.rejection_reason).toBe("low_relevance");
+
+    // 4. Cannot approve candidate requiring browser
+    const cBrowser = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+       VALUES (?1, 'Browser Candidate', 'https://browser.com/feed', 'browser.com', 'rss', 0, 1, 90, 'rejected', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await expect(
+      approveCandidate(env.DB, cBrowser!.id, 2000),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+
+    // 5. Cannot approve non-RSS candidate without list configuration
+    const cHtml = await env.DB.prepare(
+      `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+       VALUES (?1, 'HTML Candidate', 'https://html.com/articles', 'html.com', 'html', 0, 0, 90, 'pending', 1000) RETURNING id`,
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+
+    await expect(approveCandidate(env.DB, cHtml!.id, 2000)).rejects.toSatisfy(
+      (err: unknown) => err instanceof Response && err.status === 400,
+    );
+  });
+
+  it("triggerDiscovery enqueues message, and fails when DISCOVERY_ENABLED is false", async () => {
+    const indRes = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('trig-ind', 'Trigger Industry', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = indRes!.id;
+
+    const sentMessages: unknown[] = [];
+    const fakeQueue = {
+      send: async (msg: unknown) => {
+        sentMessages.push(msg);
+      },
+    };
+
+    const res = await triggerDiscovery(
+      env.DB,
+      fakeQueue,
+      { industryId: indId, queries: ["test query"] },
+      1000,
+    );
+
+    expect(res.status).toBe("pending");
+    expect(res.runId).toBeGreaterThan(0);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]).toEqual({ kind: "discover", runId: res.runId });
+
+    // Safety guard verification: when DISCOVERY_ENABLED is not "true", isEnabled returns false
+    expect(isEnabled(env, "DISCOVERY_ENABLED")).toBe(false);
+    expect(isEnabled({ DISCOVERY_ENABLED: "false" }, "DISCOVERY_ENABLED")).toBe(
+      false,
+    );
+    expect(isEnabled({ DISCOVERY_ENABLED: "true" }, "DISCOVERY_ENABLED")).toBe(
+      true,
+    );
+  });
+});

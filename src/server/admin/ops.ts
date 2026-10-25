@@ -10,10 +10,12 @@ import {
   articles,
   budgets,
   corrections,
+  discoveryRuns,
   dlqMessages,
   industries,
   llmCalls,
   reviews,
+  sourceCandidates,
   sources,
 } from "../db/schema";
 
@@ -130,6 +132,62 @@ export async function updateIndustryConfig(
     .run();
 }
 
+export async function createIndustry(
+  database: D1Database,
+  data: {
+    slug: string;
+    name: string;
+    publishMode: "auto" | "review";
+    primaryDomains: string[];
+    config: string;
+    disclaimer: string | null;
+  },
+  now = Date.now(),
+) {
+  const d = getDb(database);
+  const cleanSlug = data.slug.trim().toLowerCase();
+  const isFinance = cleanSlug === FINANCE_SLUG;
+  if (isFinance && data.publishMode === "auto") {
+    throw new Response("Finance section cannot use auto publish_mode", {
+      status: 400,
+    });
+  }
+  if (isFinance && (!data.disclaimer || !data.disclaimer.trim())) {
+    throw new Response("Finance section must retain a non-empty disclaimer", {
+      status: 400,
+    });
+  }
+
+  try {
+    JSON.parse(data.config);
+  } catch {
+    throw new Response("Config must be valid JSON", { status: 400 });
+  }
+
+  const existing = await d
+    .select()
+    .from(industries)
+    .where(sql`${industries.slug} = ${cleanSlug}`);
+  if (existing.length > 0) {
+    throw new Response("Industry slug already exists", { status: 400 });
+  }
+
+  const rows = await d
+    .insert(industries)
+    .values({
+      slug: cleanSlug,
+      name: data.name.trim(),
+      publishMode: data.publishMode,
+      primaryDomains: JSON.stringify(data.primaryDomains),
+      config: data.config,
+      disclaimer: data.disclaimer?.trim() ? data.disclaimer.trim() : null,
+      configVersion: 1,
+      createdAt: now,
+    })
+    .returning();
+  return rows[0];
+}
+
 // -----------------------------------------------------------------------------
 // Sources
 // -----------------------------------------------------------------------------
@@ -155,6 +213,7 @@ export async function listSources(
       nextFetchAt: sources.nextFetchAt,
       utcOffset: sources.utcOffset,
       config: sources.config,
+      fetchRung: sources.fetchRung,
       failCount: sources.failCount,
       emptyFetches: sources.emptyFetches,
       lastOkAt: sources.lastOkAt,
@@ -273,6 +332,123 @@ export async function triggerCollect(
   sourceId: number,
 ) {
   await qIngest.send({ kind: "collect", sourceId });
+}
+
+export async function listSourceCandidates(
+  database: D1Database,
+  search?: { industryId?: number; status?: string },
+) {
+  const d = getDb(database);
+  const conditions = [];
+  if (search?.industryId) {
+    conditions.push(sql`${sourceCandidates.industryId} = ${search.industryId}`);
+  }
+  if (search?.status) {
+    conditions.push(sql`${sourceCandidates.status} = ${search.status}`);
+  }
+  const whereClause = conditions.length
+    ? sql.join(conditions, sql` AND `)
+    : undefined;
+
+  return d
+    .select()
+    .from(sourceCandidates)
+    .where(whereClause)
+    .orderBy(sql`${sourceCandidates.createdAt} DESC`);
+}
+
+export async function approveCandidate(
+  database: D1Database,
+  candidateId: number,
+  now = Date.now(),
+) {
+  const d = getDb(database);
+  const rows = await d
+    .select()
+    .from(sourceCandidates)
+    .where(sql`${sourceCandidates.id} = ${candidateId}`);
+  const candidate = rows[0];
+  if (!candidate) {
+    throw new Response("Candidate not found", { status: 404 });
+  }
+
+  if (candidate.requiresBrowser === 1) {
+    throw new Response("Cannot approve source requiring browser rendering", {
+      status: 400,
+    });
+  }
+
+  if (candidate.kind !== "rss") {
+    throw new Response(
+      "Cannot approve non-RSS candidate without list configuration",
+      { status: 400 },
+    );
+  }
+
+  await database.batch([
+    database
+      .prepare(
+        `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, fetch_rung, interval_minutes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, 60, ?7)
+         ON CONFLICT (industry_id, feed_url) DO UPDATE SET status = 'active'`,
+      )
+      .bind(
+        candidate.industryId,
+        candidate.name || candidate.siteDomain || "",
+        candidate.feedUrl,
+        candidate.siteDomain,
+        candidate.kind,
+        candidate.fetchRung,
+        now,
+      ),
+    database
+      .prepare(`UPDATE source_candidates SET status = 'approved' WHERE id = ?1`)
+      .bind(candidateId),
+  ]);
+
+  return { success: true };
+}
+
+export async function rejectCandidate(
+  database: D1Database,
+  data: { id: number; reason?: string },
+) {
+  const d = getDb(database);
+  await d
+    .update(sourceCandidates)
+    .set({
+      status: "rejected",
+      rejectionReason: data.reason ?? "rejected_by_admin",
+    })
+    .where(sql`${sourceCandidates.id} = ${data.id}`);
+  return { success: true };
+}
+
+export async function triggerDiscovery(
+  database: D1Database,
+  qGenerate: { send: (msg: unknown) => Promise<unknown> },
+  data: { industryId: number; queries?: string[] },
+  now = Date.now(),
+) {
+  const ind = await getIndustry(database, data.industryId);
+  if (!ind) {
+    throw new Response("Industry not found", { status: 404 });
+  }
+
+  const d = getDb(database);
+  const inserted = await d
+    .insert(discoveryRuns)
+    .values({
+      industryId: data.industryId,
+      status: "pending",
+      searchQueries: JSON.stringify(data.queries ?? []),
+      createdAt: now,
+    })
+    .returning({ id: discoveryRuns.id });
+
+  const runId = inserted[0].id;
+  await qGenerate.send({ kind: "discover", runId });
+  return { runId, status: "pending" };
 }
 
 // -----------------------------------------------------------------------------
