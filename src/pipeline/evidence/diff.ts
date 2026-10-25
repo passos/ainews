@@ -169,7 +169,24 @@ export async function syncRevisionDiff(
        SELECT ?1, 'revision_diff', '', ?2, 'diff-v1', 'deterministic', ?3, ?4, ?5
        WHERE (SELECT revision FROM events WHERE id = ?1) = ?2
        ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
-       DO UPDATE SET content = excluded.content, status = excluded.status`,
+       DO UPDATE SET
+         content = CASE
+           WHEN (
+             COALESCE(json_array_length(excluded.content, '$.newClaims'), 0) +
+             COALESCE(json_array_length(excluded.content, '$.changedClaims'), 0) +
+             COALESCE(json_array_length(excluded.content, '$.newSources'), 0)
+           ) >= (
+             COALESCE(json_array_length(event_artifacts.content, '$.newClaims'), 0) +
+             COALESCE(json_array_length(event_artifacts.content, '$.changedClaims'), 0) +
+             COALESCE(json_array_length(event_artifacts.content, '$.newSources'), 0)
+           )
+           THEN excluded.content
+           ELSE event_artifacts.content
+         END,
+         status = CASE
+           WHEN excluded.status = 'published' THEN 'published'
+           ELSE event_artifacts.status
+         END`,
     )
     .bind(eventId, revision, JSON.stringify(diffData), initialStatus, now)
     .run();

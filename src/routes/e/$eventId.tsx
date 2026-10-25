@@ -171,11 +171,28 @@ function EventPage() {
                   </div>
 
                   {revBlock.diff && revBlock.diff.summary && (
-                    <div className="rounded bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
-                      <span className="font-mono font-bold text-sec-ink mr-1">
-                        ★ What&apos;s new in this revision:
-                      </span>
-                      <span>{revBlock.diff.summary}</span>
+                    <div className="flex flex-col gap-1.5 rounded bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
+                      <div>
+                        <span className="font-mono font-bold text-sec-ink mr-1">
+                          ★ What&apos;s new in this revision:
+                        </span>
+                        <span>{revBlock.diff.summary}</span>
+                      </div>
+                      {revBlock.diff.changedClaims &&
+                        revBlock.diff.changedClaims.length > 0 && (
+                          <div className="mt-1 flex flex-col gap-1 border-t border-border/30 pt-1.5">
+                            <span className="font-mono text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Status updates on existing claims:
+                            </span>
+                            <ul className="list-inside list-disc space-y-0.5 text-[0.75rem] text-foreground/80">
+                              {revBlock.diff.changedClaims.map(
+                                (claim, cIdx) => (
+                                  <li key={cIdx}>{claim}</li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+                        )}
                     </div>
                   )}
 

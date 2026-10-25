@@ -46,6 +46,26 @@ async function sha256Hex(text: string): Promise<string> {
     .join("");
 }
 
+function truncateUtf8Bytes(str: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(str);
+  if (bytes.byteLength <= maxBytes) return str;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end - 1] & 0xc0) === 0x80) {
+    end--;
+  }
+  if (end > 0) {
+    const lead = bytes[end - 1];
+    let charLen = 1;
+    if ((lead & 0xe0) === 0xc0) charLen = 2;
+    else if ((lead & 0xf0) === 0xe0) charLen = 3;
+    else if ((lead & 0xf8) === 0xf0) charLen = 4;
+    if (end - 1 + charLen > maxBytes) {
+      end = end - 1;
+    }
+  }
+  return new TextDecoder("utf-8").decode(bytes.subarray(0, end));
+}
+
 /**
  * Tracks primary sources linked in approved articles for an event (N§2.2, N§2.5).
  * Only fetches links pointing to whitelisted domains in `industries.primary_domains`.
@@ -151,8 +171,7 @@ export async function trackEventPrimarySources(
   const MAX_ATTEMPTS = 5;
 
   for (const targetUrl of candidateUrls) {
-    if (trackedCount >= MAX_FETCH_PER_RUN || attempts >= MAX_ATTEMPTS) break;
-    attempts++;
+    if (trackedCount >= MAX_FETCH_PER_RUN) break;
 
     const canonical = normalizeUrl(targetUrl);
     if (!canonical) continue;
@@ -186,19 +205,24 @@ export async function trackEventPrimarySources(
         .first();
 
       if (isApproved && existing.stage === "grouped") {
-        // Link to event and bump revision atomically
+        // Link to event and bump revision atomically, verifying approval in-batch
         const batchRes = await deps.db.batch([
           deps.db
             .prepare(
               `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
                SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
-               WHERE (SELECT revision FROM events WHERE id = ?1) = ?4`,
+               WHERE (SELECT revision FROM events WHERE id = ?1) = ?4
+                 AND EXISTS (
+                   SELECT 1 FROM reviews r
+                   JOIN articles a ON a.id = r.article_id AND r.body_sha = a.body_sha
+                   WHERE a.id = ?2 AND r.decision = 'approved'
+                 )`,
             )
             .bind(eventId, existing.id, now, event.revision),
           deps.db
             .prepare(
               `UPDATE events SET revision = revision + 1, updated_at = ?1
-               WHERE id = ?2 AND revision = ?3`,
+               WHERE id = ?2 AND revision = ?3 AND changes() = 1`,
             )
             .bind(now, eventId, event.revision),
         ]);
@@ -211,6 +235,9 @@ export async function trackEventPrimarySources(
       }
       continue;
     }
+
+    if (attempts >= MAX_ATTEMPTS) break;
+    attempts++;
 
     // New URL to fetch via ladder
     let parsedUrl: URL;
@@ -269,10 +296,7 @@ export async function trackEventPrimarySources(
       );
 
       if (page.kind === "body") {
-        let bodyText = page.body.markdown;
-        if (bodyText.length > MAX_BODY_BYTES) {
-          bodyText = bodyText.slice(0, MAX_BODY_BYTES);
-        }
+        const bodyText = truncateUtf8Bytes(page.body.markdown, MAX_BODY_BYTES);
         const bodySha = await sha256Hex(bodyText);
         const titleMatch = bodyText.match(/^#\s+(.+)$/m);
         const title = titleMatch ? titleMatch[1].trim() : parsedUrl.hostname;
@@ -327,16 +351,24 @@ export async function trackEventPrimarySources(
 
           // Put body into R2 before review / event linking
           if (deps.bodies) {
-            await deps.bodies.put(
-              `bodies/${newArticleId}/${bodySha}.md`,
-              bodyText,
-              {
-                customMetadata: {
-                  url: targetUrl,
-                  fetchedAt: String(now),
+            try {
+              await deps.bodies.put(
+                `bodies/${newArticleId}/${bodySha}.md`,
+                bodyText,
+                {
+                  customMetadata: {
+                    url: targetUrl,
+                    fetchedAt: String(now),
+                  },
                 },
-              },
-            );
+              );
+            } catch (r2Err) {
+              await deps.db
+                .prepare(`DELETE FROM articles WHERE id = ?1`)
+                .bind(newArticleId)
+                .run();
+              throw r2Err;
+            }
           }
 
           if (isFinance) {

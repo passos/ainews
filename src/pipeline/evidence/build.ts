@@ -394,6 +394,11 @@ export async function generateEventEvidence(
       )
       .run();
 
+    const isFinance = event.industry_slug === FINANCE_SLUG;
+    const isAuto = !isFinance && event.industry_publish_mode === "auto";
+    const diffStatus = isAuto ? "published" : "pending_review";
+    await syncRevisionDiff(deps.db, eventId, inputRevision, diffStatus, now);
+
     return {
       status: "generated",
       eventId,

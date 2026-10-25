@@ -126,6 +126,9 @@ describe("tests/routes/event-timeline.test.ts", () => {
     const rev2 = view!.timelineRevisions.find((r) => r.revision === 2);
     expect(rev2).toBeDefined();
     expect(rev2!.diff?.summary).toContain("New claims identified");
+    expect(rev2!.diff?.changedClaims).toEqual([
+      "Model claims 10x throughput (vendor_only → independent_disputed)",
+    ]);
     expect(rev2!.articles.length).toBe(1);
     expect(rev2!.articles[0].id).toBe(art2);
     expect(rev2!.articles[0].evidence).toContain("preprint");

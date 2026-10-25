@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
+import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -524,14 +525,6 @@ export async function decideReview(
     ),
     database
       .prepare(
-        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (article_id, body_sha)
-         DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
-      )
-      .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
-    database
-      .prepare(
         `UPDATE event_articles
          SET input_revision = (SELECT revision FROM events WHERE id = event_articles.event_id)
          WHERE article_id = ?1
@@ -542,6 +535,14 @@ export async function decideReview(
            )`,
       )
       .bind(data.articleId, data.decision, data.bodySha),
+    database
+      .prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (article_id, body_sha)
+         DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
+      )
+      .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
   ]);
 }
 
@@ -1277,7 +1278,24 @@ export async function reviewClaim(
     .bind(targetStatus, data.claimId, data.expectedRevision)
     .run();
 
-  return res.meta.changes === 1;
+  const success = res.meta.changes === 1;
+  if (success && data.decision === "approved") {
+    const claim = await database
+      .prepare(`SELECT event_id FROM claims WHERE id = ?1`)
+      .bind(data.claimId)
+      .first<{ event_id: number }>();
+    if (claim) {
+      await syncRevisionDiff(
+        database,
+        claim.event_id,
+        data.expectedRevision,
+        "published",
+        Date.now(),
+      );
+    }
+  }
+
+  return success;
 }
 
 // -----------------------------------------------------------------------------
