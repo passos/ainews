@@ -5,6 +5,7 @@ export * from "./budgets";
 export * from "./claims";
 export * from "./corrections";
 export * from "./digests";
+export * from "./discovery";
 export * from "./dlq-messages";
 export * from "./event-articles";
 export * from "./event-artifacts";

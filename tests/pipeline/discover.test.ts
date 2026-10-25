@@ -1,0 +1,685 @@
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { runDiscovery } from "../../src/pipeline/discover/run";
+import { draftIndustryConfig } from "../../src/pipeline/discover/draft";
+import {
+  probeCandidate,
+  isBrowserRequired,
+} from "../../src/pipeline/discover/probe";
+import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
+import {
+  discoveryRuns,
+  sourceCandidates,
+  sources,
+  industries,
+} from "../../src/server/db/schema";
+import { analysisConfigSchema } from "../../src/pipeline/analyze/config";
+import {
+  BudgetExceededError,
+  type ModelClient,
+} from "../../src/providers/models";
+import type { GenerateMessage } from "../../src/pipeline/messages";
+
+const SAMPLE_ANALYSIS_CONFIG = {
+  prefilter: {
+    relevant: "Material about biotechnology innovations.",
+    off_topic: "Material unrelated to biology.",
+    noise: "Promotions, marketing, spam.",
+  },
+  categories: {
+    therapeutics: "New drugs and therapies",
+    genomics: "Gene editing and sequencing",
+  },
+  contentTypes: {
+    research: {
+      description: "Primary scientific paper or trial",
+      weights: { sig: 2, nov: 2, cred: 2, reson: 2, act: 2 },
+    },
+  },
+  dimensions: {
+    sig: ["t1", "t2", "t3", "t4", "t5"],
+    nov: ["t1", "t2", "t3", "t4", "t5"],
+    cred: ["t1", "t2", "t3", "t4", "t5"],
+    reson: ["t1", "t2", "t3", "t4", "t5"],
+    act: ["t1", "t2", "t3", "t4", "t5"],
+  },
+  noise: {
+    none: {
+      description: "No noise",
+      caps: {},
+    },
+  },
+  labels: ["claim_mode", "development_stage"],
+  thresholds: {
+    prefilterMinRelevant: 0.3,
+    select: 60,
+  },
+  summaryGuidance: "Summarize findings clearly.",
+  guardrails: ["Verify data", "Check controls"],
+};
+
+describe("Pipeline: Source Discovery & Auto-Enable", () => {
+  it("DISCOVERY_ENABLED = false halts execution without making search or model calls", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "disc-guard",
+        name: "Discovery Guard Section",
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const searchMock = vi.fn();
+    const generateTextMock = vi.fn();
+
+    // Call with env having DISCOVERY_ENABLED: "false"
+    const fakeEnv = {
+      ...env,
+      DISCOVERY_ENABLED: "false",
+    };
+
+    await runDiscovery(fakeEnv, run[0].id, 2000, {
+      webSearch: { search: searchMock as unknown as WebSearch["search"] },
+      models: {
+        generateText:
+          generateTextMock as unknown as ModelClient["generateText"],
+      } as unknown as ModelClient,
+    });
+
+    expect(searchMock).not.toHaveBeenCalled();
+    expect(generateTextMock).not.toHaveBeenCalled();
+
+    const updated = await db
+      .select()
+      .from(discoveryRuns)
+      .where(eq(discoveryRuns.id, run[0].id));
+    expect(updated[0].status).toBe("skipped");
+    expect(updated[0].error).toContain("DISCOVERY_ENABLED is false");
+  });
+
+  it("identifies JS challenge / Cloudflare wall and rejects candidate as requiresBrowser = 1", async () => {
+    const wallHtml = `
+      <html>
+        <head><title>Just a moment...</title></head>
+        <body>
+          <div id="challenge-running">Checking your browser before accessing example.com</div>
+          <div class="cf-turnstile"></div>
+        </body>
+      </html>
+    `;
+
+    expect(isBrowserRequired(wallHtml)).toBe(true);
+
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) {
+        return new Response("User-agent: *\nAllow: /", { status: 200 });
+      }
+      return new Response(wallHtml, {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+    };
+
+    const probe = await probeCandidate("https://wall-site.com", env, {
+      fetch: fakeFetch,
+      now: () => 1000,
+    });
+
+    expect(probe.requiresBrowser).toBe(1);
+    expect(probe.rejectionReason).toBe("requires_browser");
+  });
+
+  it("runDiscovery rejects candidates requiring browser and never auto-enables them", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "browser-wall-sec",
+        name: "Wall Section",
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        searchQueries: JSON.stringify(["wall feed"]),
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const wallHtml = `
+      <html>
+        <head><title>Just a moment...</title></head>
+        <body>
+          <div id="challenge-running">Checking your browser</div>
+          <div class="cf-turnstile"></div>
+        </body>
+      </html>
+    `;
+
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) {
+        return new Response("User-agent: *\nAllow: /", { status: 200 });
+      }
+      return new Response(wallHtml, { status: 200 });
+    };
+
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: [{ url: "https://wall-site.com", title: "Wall Site" }],
+        metadata: { query: "wall feed", requestId: "r", latencyMs: 5 },
+      }),
+    };
+
+    await runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 1000, {
+      webSearch: fakeWebSearch,
+      fetch: fakeFetch,
+    });
+
+    const candidates = await db
+      .select()
+      .from(sourceCandidates)
+      .where(eq(sourceCandidates.runId, run[0].id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("rejected");
+    expect(candidates[0].requiresBrowser).toBe(1);
+    expect(candidates[0].rejectionReason).toBe("requires_browser");
+
+    const created = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.siteDomain, "wall-site.com"));
+    expect(created).toHaveLength(0);
+  });
+
+  it("auto-enables high-scoring non-finance candidates when active sources < 50", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "auto-tech",
+        name: "Auto Tech Section",
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        searchQueries: JSON.stringify(["tech feed"]),
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const fakeRss = `<?xml version="1.0" encoding="UTF-8"?>
+      <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+        <channel>
+          <title>Good Tech Blog</title>
+          <link>https://goodtech.com</link>
+          <item>
+            <title>Revolutionary Breakthrough in AI</title>
+            <link>https://goodtech.com/post-1</link>
+            <content:encoded><![CDATA[Detailed scientific analysis of the breakthrough with extensive data and evaluation results demonstrating clear superiority across all benchmark tests. It contains enough characters to satisfy the minimum length requirement easily.]]></content:encoded>
+          </item>
+        </channel>
+      </rss>`;
+
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) {
+        return new Response("User-agent: *\nAllow: /", { status: 200 });
+      }
+      return new Response(fakeRss, {
+        status: 200,
+        headers: { "Content-Type": "application/rss+xml" },
+      });
+    };
+
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: [
+          {
+            url: "https://goodtech.com/feed.xml",
+            title: "Good Tech Feed",
+          },
+        ],
+        metadata: {
+          query: "tech feed",
+          requestId: "req-1",
+          latencyMs: 10,
+        },
+      }),
+    };
+
+    const fakeModels = {
+      judge: (async () => ({
+        relevance: {
+          score: 3.8,
+          confidence: 0.9,
+          probabilities: { "3": 0.2, "4": 0.8 }, // expectedTier = 3*0.2 + 4*0.8 = 3.8 -> 95/100
+        },
+      })) as unknown as ModelClient["judge"],
+    };
+
+    const fakeEnv = {
+      ...env,
+      DISCOVERY_ENABLED: "true",
+    };
+
+    await runDiscovery(fakeEnv, run[0].id, 1000, {
+      webSearch: fakeWebSearch,
+      models: fakeModels as unknown as ModelClient,
+      fetch: fakeFetch,
+    });
+
+    const runAfter = (
+      await db
+        .select()
+        .from(discoveryRuns)
+        .where(eq(discoveryRuns.id, run[0].id))
+    )[0];
+    expect(runAfter.status).toBe("completed");
+    expect(runAfter.candidatesAutoEnabled).toBe(1);
+
+    const candidates = await db
+      .select()
+      .from(sourceCandidates)
+      .where(eq(sourceCandidates.runId, run[0].id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("auto_enabled");
+    expect(candidates[0].avgScore).toBeGreaterThanOrEqual(60);
+
+    // Verify source is activated in sources table
+    const createdSources = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.feedUrl, "https://goodtech.com/feed.xml"));
+    expect(createdSources).toHaveLength(1);
+    expect(createdSources[0].status).toBe("active");
+  });
+
+  it("enforces 50 active sources cap: marks candidate as pending with active_cap_reached", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "cap-section",
+        name: "Capped Section",
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    // Seed 50 active sources
+    const batchInserts = [];
+    for (let i = 1; i <= 50; i++) {
+      batchInserts.push(
+        env.DB.prepare(
+          `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+           VALUES (?1, ?2, ?3, 'rss', 'active', 1000)`,
+        ).bind(ind[0].id, `Source ${i}`, `https://src${i}.com/feed`),
+      );
+    }
+    await env.DB.batch(batchInserts);
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        searchQueries: JSON.stringify(["feed query"]),
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const fakeRss = `<?xml version="1.0"?>
+      <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+        <channel>
+          <title>Extra 51st Source</title>
+          <item>
+            <title>High Quality Article</title>
+            <link>https://extra51.com/post</link>
+            <content:encoded><![CDATA[Detailed scientific analysis of the breakthrough with extensive data and evaluation results demonstrating clear superiority across all benchmark tests. It contains enough characters to satisfy the minimum length requirement easily, with additional explanations to ensure it exceeds the two hundred characters threshold comfortably.]]></content:encoded>
+          </item>
+        </channel>
+      </rss>`;
+
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) {
+        return new Response("User-agent: *\nAllow: /", { status: 200 });
+      }
+      return new Response(fakeRss, { status: 200 });
+    };
+
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: [{ url: "https://extra51.com/rss", title: "51st Feed" }],
+        metadata: { query: "q", requestId: "r", latencyMs: 5 },
+      }),
+    };
+
+    const fakeModels = {
+      judge: (async () => ({
+        relevance: {
+          score: 4,
+          confidence: 1.0,
+          probabilities: { "4": 1.0 }, // 100/100 score
+        },
+      })) as unknown as ModelClient["judge"],
+    };
+
+    await runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 1000, {
+      webSearch: fakeWebSearch,
+      models: fakeModels as unknown as ModelClient,
+      fetch: fakeFetch,
+    });
+
+    const candidates = await db
+      .select()
+      .from(sourceCandidates)
+      .where(eq(sourceCandidates.runId, run[0].id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(candidates[0].rejectionReason).toBe("active_cap_reached");
+
+    // Source must NOT be inserted into sources
+    const extraSource = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.feedUrl, "https://extra51.com/rss"));
+    expect(extraSource).toHaveLength(0);
+  });
+
+  it("enforces Finance section rule: NEVER auto-enables candidates, stays pending", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "finance",
+        name: "Finance & Markets",
+        publishMode: "review",
+        disclaimer: "Strict financial disclaimer",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        searchQueries: JSON.stringify(["finance feed"]),
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const fakeRss = `<?xml version="1.0"?>
+      <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+        <channel>
+          <title>Wall Street Journal</title>
+          <item>
+            <title>Fed Interest Rate Decision</title>
+            <link>https://wsj.com/post</link>
+            <content:encoded><![CDATA[Detailed scientific analysis of the breakthrough with extensive data and evaluation results demonstrating clear superiority across all benchmark tests. It contains enough characters to satisfy the minimum length requirement easily, with additional financial statistics and market indices.]]></content:encoded>
+          </item>
+        </channel>
+      </rss>`;
+
+    const fakeFetch: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith("/robots.txt")) {
+        return new Response("User-agent: *\nAllow: /", { status: 200 });
+      }
+      return new Response(fakeRss, { status: 200 });
+    };
+
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: [{ url: "https://wsj.com/feed.xml", title: "WSJ Feed" }],
+        metadata: { query: "q", requestId: "r", latencyMs: 5 },
+      }),
+    };
+
+    const fakeModels = {
+      judge: (async () => ({
+        relevance: {
+          score: 4,
+          confidence: 1.0,
+          probabilities: { "4": 1.0 }, // 100/100 score
+        },
+      })) as unknown as ModelClient["judge"],
+    };
+
+    await runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 1000, {
+      webSearch: fakeWebSearch,
+      models: fakeModels as unknown as ModelClient,
+      fetch: fakeFetch,
+    });
+
+    const candidates = await db
+      .select()
+      .from(sourceCandidates)
+      .where(eq(sourceCandidates.runId, run[0].id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(candidates[0].rejectionReason).toBe("finance_requires_review");
+
+    // Must not be auto-enabled
+    const src = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.feedUrl, "https://wsj.com/feed.xml"));
+    expect(src).toHaveLength(0);
+  });
+
+  it("handles BudgetExceededError gracefully without throwing to DLQ", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "budget-section",
+        name: "Budget Test Section",
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    const fakeModels: Partial<ModelClient> = {
+      generateText: async () => {
+        throw new BudgetExceededError("gateway", "2026-10-24", 5000);
+      },
+    };
+
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: [],
+        metadata: { query: "q", requestId: "r", latencyMs: 5 },
+      }),
+    };
+
+    // runDiscovery must resolve without throwing!
+    await expect(
+      runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 1000, {
+        models: fakeModels as unknown as ModelClient,
+        webSearch: fakeWebSearch,
+      }),
+    ).resolves.toBeUndefined();
+
+    const runAfter = (
+      await db
+        .select()
+        .from(discoveryRuns)
+        .where(eq(discoveryRuns.id, run[0].id))
+    )[0];
+    expect(runAfter.status).toBe("failed");
+    expect(runAfter.error).toContain("budget gateway");
+  });
+
+  it("draftIndustryConfig generates valid AnalysisConfig passing analysisConfigSchema", async () => {
+    const fakeReasonOutput = JSON.stringify({
+      name: "Quantum Computing",
+      slug: "quantum",
+      disclaimer: null,
+      primaryDomains: ["quantum-journal.org", "arxiv.org"],
+      analysis: {
+        prefilter: {
+          relevant:
+            "Qubits, quantum hardware, quantum algorithms, error correction.",
+          off_topic: "Classical computing only, general science.",
+          noise: "Hype with no technical claims, stock marketing.",
+        },
+        categories: {
+          hardware: "QPU designs and superconducting chips",
+          algorithms: "Quantum algorithms and software",
+        },
+        contentTypes: {
+          paper: {
+            description: "Research paper on quantum physics",
+            weights: { sig: 3, nov: 2, cred: 2, reson: 2, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["d1", "d2", "d3", "d4", "d5"],
+          nov: ["d1", "d2", "d3", "d4", "d5"],
+          cred: ["d1", "d2", "d3", "d4", "d5"],
+          reson: ["d1", "d2", "d3", "d4", "d5"],
+          act: ["d1", "d2", "d3", "d4", "d5"],
+        },
+        noise: {
+          none: { description: "Clean content", caps: {} },
+        },
+        labels: ["claim_mode", "publication_status"],
+        thresholds: {
+          prefilterMinRelevant: 0.3,
+          select: 55,
+        },
+        summaryGuidance: "Focus on quantum fidelity and qubit counts.",
+        guardrails: ["Never exaggerate quantum supremacy claims."],
+      },
+    });
+
+    const fakeModels = {
+      generateText: (async () => ({
+        text: fakeReasonOutput,
+        usage: { inputTokens: 100, outputTokens: 200 },
+      })) as unknown as ModelClient["generateText"],
+    };
+
+    const draft = await draftIndustryConfig(
+      {
+        db: env.DB,
+        env,
+        models: fakeModels as unknown as ModelClient,
+      },
+      {
+        description:
+          "Everything about quantum hardware, qubits, and algorithms.",
+        name: "Quantum Tech",
+      },
+    );
+
+    expect(draft.name).toBe("Quantum Computing");
+    expect(draft.slug).toBe("quantum");
+    expect(draft.primaryDomains).toContain("quantum-journal.org");
+
+    // Strictly test schema parse
+    const parseResult = analysisConfigSchema.safeParse(draft.analysis);
+    expect(parseResult.success).toBe(true);
+  });
+
+  it("consumer handles discover message properly", async () => {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug: "consumer-ind",
+        name: "Consumer Section",
+        publishMode: "review",
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+
+    let acked = false;
+    const msg: Message<GenerateMessage> = {
+      id: "msg-1",
+      body: { kind: "discover", runId: run[0].id },
+      timestamp: new Date(),
+      attempts: 1,
+      ack: () => {
+        acked = true;
+      },
+      retry: () => {},
+    };
+
+    const batch: MessageBatch<GenerateMessage> = {
+      queue: "ainews-generate",
+      messages: [msg],
+      ackAll: () => {},
+      retryAll: () => {},
+      metadata: {} as unknown as MessageBatchMetadata,
+    };
+
+    // Run via handleGenerateBatch
+    await handleGenerateBatch(
+      batch,
+      { ...env, DISCOVERY_ENABLED: "false" },
+      {},
+    );
+
+    expect(acked).toBe(true);
+    const runAfter = (
+      await db
+        .select()
+        .from(discoveryRuns)
+        .where(eq(discoveryRuns.id, run[0].id))
+    )[0];
+    expect(runAfter.status).toBe("skipped");
+  });
+});

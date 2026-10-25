@@ -62,6 +62,7 @@
     { "binding": "V_CHUNKS", "index_name": "ainews-chunks" },
   ],
   "ai": { "binding": "AI" },
+  "web_search": { "binding": "WEBSEARCH" },
   "send_email": [{ "name": "EMAIL" }],
   "vars": {
     "SITE_URL": "https://news.ioenv.com",
