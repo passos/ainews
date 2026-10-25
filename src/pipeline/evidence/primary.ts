@@ -139,6 +139,19 @@ export async function trackEventPrimarySources(
     }
   }
 
+  // Record that this event was scanned for primary sources (LRU rotation for trackDuePrimarySources)
+  await deps.db
+    .prepare(
+      `INSERT INTO event_artifacts (
+         event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
+       )
+       VALUES (?1, 'primary_tracked', '', ?2, 'v1', 'tracker', '{}', 'published', ?3)
+       ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
+       DO UPDATE SET created_at = excluded.created_at`,
+    )
+    .bind(eventId, event.revision, now)
+    .run();
+
   if (candidateUrls.length === 0) {
     return { trackedCount: 0 };
   }
@@ -230,17 +243,27 @@ export async function trackEventPrimarySources(
       }
 
       // If existing article was created by primary tracker but its approval batch failed,
-      // recover and complete the approval + event linking on retry:
+      // recover and complete the approval + event linking on retry, BUT NEVER overwrite
+      // an administrator rejection or existing review:
       if (!isApproved && !assigned && existing.stage === "grouped") {
+        const existingReview = await deps.db
+          .prepare(`SELECT decision FROM reviews WHERE article_id = ?1`)
+          .bind(existing.id)
+          .first<{ decision: string }>();
+
+        if (existingReview?.decision === "rejected") {
+          continue;
+        }
+
         const isFinance = event.industry_slug === FINANCE_SLUG;
-        if (!isFinance) {
+        if (!isFinance && !existingReview) {
           const bodySha = existing.body_sha || (await sha256Hex(canonical));
           const batchRes = await deps.db.batch([
             deps.db
               .prepare(
                 `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
                  VALUES (?1, ?2, 'approved', 'system:primary_tracker', ?3)
-                 ON CONFLICT (article_id, body_sha) DO UPDATE SET decision = excluded.decision`,
+                 ON CONFLICT (article_id, body_sha) DO NOTHING`,
               )
               .bind(existing.id, bodySha, now),
             deps.db
@@ -256,25 +279,28 @@ export async function trackEventPrimarySources(
             deps.db
               .prepare(
                 `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
-                 VALUES (?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?4))`,
+                 SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
+                 WHERE EXISTS (
+                   SELECT 1 FROM reviews
+                   WHERE article_id = ?2 AND decision = 'approved'
+                 )`,
               )
-              .bind(eventId, existing.id, now, eventId),
+              .bind(eventId, existing.id, now),
             deps.db
               .prepare(
-                `UPDATE events SET revision = revision + 1, updated_at = ?1 WHERE id = ?2`,
+                `UPDATE events SET revision = revision + 1, updated_at = ?1
+                 WHERE id = ?2 AND changes() = 1`,
               )
               .bind(now, eventId),
           ]);
 
-          if (
-            batchRes[0].meta.changes === 1 ||
-            batchRes[2].meta.changes === 1
-          ) {
+          if (batchRes[2].meta.changes === 1) {
             trackedCount++;
             await deps.qArtifacts?.send({ eventId, kind: "artifacts" });
             await deps.qEvidence?.send({ eventId, kind: "evidence" });
           }
         }
+        continue;
       }
       continue;
     }
@@ -478,6 +504,19 @@ export async function trackEventPrimarySources(
     }
   }
 
+  // Record that this event was scanned for primary sources (LRU rotation for trackDuePrimarySources)
+  await deps.db
+    .prepare(
+      `INSERT INTO event_artifacts (
+         event_id, type, audience, input_revision, prompt_version, model, content, status, created_at
+       )
+       VALUES (?1, 'primary_tracked', '', ?2, 'v1', 'tracker', '{}', 'published', ?3)
+       ON CONFLICT (event_id, type, audience, input_revision, prompt_version, model)
+       DO UPDATE SET created_at = excluded.created_at`,
+    )
+    .bind(eventId, event.revision, now)
+    .run();
+
   return { trackedCount };
 }
 
@@ -494,12 +533,19 @@ export async function trackDuePrimarySources(
   }
 
   const { results } = await env.DB.prepare(
-    `SELECT DISTINCT e.id
+    `SELECT e.id
      FROM events e
      JOIN event_articles ea ON ea.event_id = e.id
      JOIN articles a ON a.id = ea.article_id
      JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-     ORDER BY e.updated_at DESC
+     LEFT JOIN (
+       SELECT event_id, MAX(created_at) AS last_scanned_at
+       FROM event_artifacts
+       WHERE type = 'primary_tracked'
+       GROUP BY event_id
+     ) pt ON pt.event_id = e.id
+     GROUP BY e.id
+     ORDER BY COALESCE(MAX(pt.last_scanned_at), 0) ASC, e.updated_at DESC
      LIMIT ?1`,
   )
     .bind(limit)

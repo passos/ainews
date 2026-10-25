@@ -13,6 +13,9 @@ describe("pipeline: primary source tracking (tests/pipeline/primary-source.test.
   let sourceId: number;
 
   beforeEach(async () => {
+    await env.DB.prepare(`DELETE FROM claim_evidence`).run();
+    await env.DB.prepare(`DELETE FROM claims`).run();
+    await env.DB.prepare(`DELETE FROM event_artifacts`).run();
     await env.DB.prepare(`DELETE FROM event_articles`).run();
     await env.DB.prepare(`DELETE FROM analyses`).run();
     await env.DB.prepare(`DELETE FROM reviews`).run();

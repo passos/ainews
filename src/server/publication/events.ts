@@ -115,6 +115,26 @@ export async function getEvent(
 
   const evidence = await getEventEvidence(db, eventId);
 
+  // Find claims whose evidence has been completely withdrawn or rejected (publication guard)
+  const withdrawnClaimRows = await db.all<{ claim_text: string }>(sql`
+    SELECT DISTINCT c.claim_text
+    FROM claims c
+    WHERE c.event_id = ${eventId}
+      AND EXISTS (
+        SELECT 1 FROM claim_evidence ce
+        WHERE ce.claim_id = c.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM claim_evidence ce
+        JOIN articles a ON a.id = ce.article_id AND ce.body_sha = a.body_sha AND ${approvedArticleWhere}
+        JOIN event_articles ea ON ea.article_id = a.id AND ea.event_id = ${eventId}
+        WHERE ce.claim_id = c.id AND ce.verified = 1
+      )
+  `);
+  const withdrawnClaimsSet = new Set(
+    withdrawnClaimRows.map((r) => r.claim_text),
+  );
+
   // Load all published revision_diff artifacts for this event (N§2.2)
   // Architecture §7 publication guard: only load diffs for revisions that currently have approved articles
   const diffRows = await db.all<{
@@ -148,6 +168,51 @@ export async function getEvent(
     }
   }
 
+  function sanitizeRevisionDiff(diff: RevisionDiff, rev: number): RevisionDiff {
+    const hasWithdrawn =
+      diff.newClaims.some((c) => withdrawnClaimsSet.has(c)) ||
+      diff.changedClaims.some((c) => {
+        const base = c.includes(" (") ? c.slice(0, c.indexOf(" (")) : c;
+        return withdrawnClaimsSet.has(base);
+      });
+
+    if (!hasWithdrawn) {
+      return diff;
+    }
+
+    const newClaims = diff.newClaims.filter((c) => !withdrawnClaimsSet.has(c));
+    const changedClaims = diff.changedClaims.filter((c) => {
+      const base = c.includes(" (") ? c.slice(0, c.indexOf(" (")) : c;
+      return !withdrawnClaimsSet.has(base);
+    });
+
+    let summary: string;
+    if (rev <= 1) {
+      summary =
+        diff.newSources.length > 0
+          ? `Initial report based on ${diff.newSources.join(", ")}.`
+          : "Initial reporting on the event.";
+    } else if (newClaims.length > 0 && diff.newSources.length > 0) {
+      summary = `New claims identified from ${diff.newSources.join(", ")}: ${newClaims.slice(0, 2).join("; ")}.`;
+    } else if (diff.newSources.length > 0) {
+      summary = `New sources added: ${diff.newSources.join(", ")}.`;
+    } else if (newClaims.length > 0) {
+      summary = `New claims identified: ${newClaims.slice(0, 2).join("; ")}.`;
+    } else if (changedClaims.length > 0) {
+      summary = `Updated reality check status on existing claims.`;
+    } else {
+      summary = `Event updated at revision ${rev}.`;
+    }
+
+    return {
+      revision: rev,
+      summary,
+      newSources: diff.newSources,
+      newClaims,
+      changedClaims,
+    };
+  }
+
   const revisionSet = new Set<number>();
   for (const a of articles) {
     revisionSet.add(a.inputRevision);
@@ -156,11 +221,14 @@ export async function getEvent(
 
   const sortedRevisions = Array.from(revisionSet).sort((a, b) => a - b);
   const timelineRevisions: RevisionTimelineBlock[] = sortedRevisions.map(
-    (rev) => ({
-      revision: rev,
-      diff: diffMap.get(rev) ?? null,
-      articles: articles.filter((a) => a.inputRevision === rev),
-    }),
+    (rev) => {
+      const rawDiff = diffMap.get(rev);
+      return {
+        revision: rev,
+        diff: rawDiff ? sanitizeRevisionDiff(rawDiff, rev) : null,
+        articles: articles.filter((a) => a.inputRevision === rev),
+      };
+    },
   );
 
   return {

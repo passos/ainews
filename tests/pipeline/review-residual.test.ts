@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, expect, it, vi } from "vitest";
-import { trackEventPrimarySources } from "../../src/pipeline/evidence/primary";
+import {
+  trackEventPrimarySources,
+  trackDuePrimarySources,
+} from "../../src/pipeline/evidence/primary";
 import { syncRevisionDiff } from "../../src/pipeline/evidence/diff";
 import { generateEventEvidence } from "../../src/pipeline/evidence/build";
 import { generateEventArtifacts } from "../../src/pipeline/artifacts/build";
@@ -526,4 +529,116 @@ it("independent review: retry recovers a transient primary approval batch failur
     2000,
   );
   expect(retry.trackedCount).toBe(1);
+});
+
+it("independent review: preserves an administrator rejection when retrying an orphaned primary article", async () => {
+  const target = "https://arxiv.org/abs/review-extra";
+  const { seedEvent, seedArticle, seedEventArticle, seedReview } =
+    await import("../publication/helpers");
+  const tech = { industryId: 1, sourceId: 1 };
+  const eventId = await seedEvent(tech.industryId, "Event", 1);
+  const report = await seedArticle({ ...tech, title: "Report" });
+  await seedEventArticle(eventId, report, 1000, 1);
+  await seedReview(report, "approved");
+  await env.BODIES.put(
+    `bodies/${report}/sha-current.md`,
+    `Read [paper](${target}).`,
+  );
+  const markdown =
+    "# Paper\n\n" + "Detailed findings and research limitations. ".repeat(30);
+  const mockFetch = vi.fn(async (url: string) =>
+    url.includes("robots.txt")
+      ? new Response("User-agent: *\nAllow: /", { status: 200 })
+      : new Response(markdown, {
+          headers: { "Content-Type": "text/markdown" },
+        }),
+  );
+  const failingDb = {
+    prepare: (sql: string) => env.DB.prepare(sql),
+    batch: async () => {
+      throw new Error("transient approval batch failure");
+    },
+  } as unknown as D1Database;
+  await trackEventPrimarySources(
+    { db: failingDb, bodies: env.BODIES, fetch: mockFetch as typeof fetch },
+    env,
+    eventId,
+    ["arxiv.org"],
+    1000,
+  );
+  const orphan = (await env.DB.prepare(
+    "SELECT id,stage,body_sha FROM articles WHERE canonical_url=?",
+  )
+    .bind(target)
+    .first<{ id: number; stage: string; body_sha: string }>())!;
+  expect(orphan.stage).toBe("grouped");
+  expect(
+    await env.DB.prepare("SELECT 1 FROM event_articles WHERE article_id=?")
+      .bind(orphan.id)
+      .first(),
+  ).toBeNull();
+  await decideReview(env.DB, {
+    articleId: orphan.id,
+    bodySha: orphan.body_sha,
+    decision: "rejected",
+    reviewer: "admin",
+  });
+  await trackEventPrimarySources(
+    { db: env.DB, bodies: env.BODIES, fetch: mockFetch as typeof fetch },
+    env,
+    eventId,
+    ["arxiv.org"],
+    2000,
+  );
+  const review = await env.DB.prepare(
+    "SELECT decision FROM reviews WHERE article_id=? AND body_sha=?",
+  )
+    .bind(orphan.id, orphan.body_sha)
+    .first<{ decision: string }>();
+  const link = await env.DB.prepare(
+    "SELECT event_id FROM event_articles WHERE article_id=?",
+  )
+    .bind(orphan.id)
+    .first();
+  expect({ decision: review!.decision, link }).toEqual({
+    decision: "rejected",
+    link: null,
+  });
+});
+
+it("independent review: eventually scans the oldest eligible event when eleven events are eligible", async () => {
+  const { seedEvent, seedArticle, seedEventArticle, seedReview } =
+    await import("../publication/helpers");
+  const tech = { industryId: 1, sourceId: 1 };
+  await env.DB.prepare(
+    "UPDATE industries SET primary_domains='[\"arxiv.org\"]' WHERE id=?",
+  )
+    .bind(tech.industryId)
+    .run();
+  let oldestArticle = 0;
+  for (let i = 0; i < 11; i++) {
+    const eventId = await seedEvent(tech.industryId, `Event ${i}`, 1);
+    await env.DB.prepare("UPDATE events SET updated_at=? WHERE id=?")
+      .bind(i, eventId)
+      .run();
+    const article = await seedArticle({ ...tech, title: `Report ${i}` });
+    await seedEventArticle(eventId, article, i, 1);
+    await seedReview(article, "approved");
+    if (i === 0) oldestArticle = article;
+  }
+  // Return no body so this scheduling probe makes no outbound requests.
+  const scannedKeys: string[] = [];
+  const get = vi.fn(async (key: string) => {
+    scannedKeys.push(key);
+    return null;
+  });
+  const scheduledEnv = {
+    ...env,
+    COLLECT_ENABLED: "true",
+    BODIES: { get },
+  } as unknown as PipelineEnv;
+  for (let i = 0; i < 3; i++)
+    await trackDuePrimarySources(scheduledEnv, 1000 + i * 600000);
+  expect(get).toHaveBeenCalledTimes(30);
+  expect(scannedKeys).toContain(`bodies/${oldestArticle}/sha-current.md`);
 });
