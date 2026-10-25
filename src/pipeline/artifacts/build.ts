@@ -235,6 +235,8 @@ export async function generateEventArtifacts(
     selectThreshold,
     deepThreshold,
     articles: articleMetas,
+    industrySlug: event.industry_slug,
+    industryName: event.industry_name,
   };
 
   // 3. Fetch body text from R2 (if available) or fallback to summary

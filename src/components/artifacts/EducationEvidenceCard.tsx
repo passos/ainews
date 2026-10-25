@@ -1,0 +1,102 @@
+import type { EducationEvidenceChecker } from "../../lib/artifacts/types";
+
+export function EducationEvidenceCard({
+  evidence,
+}: {
+  evidence: EducationEvidenceChecker;
+}) {
+  return (
+    <section
+      aria-label="Education Evidence Checker"
+      className="border-2 border-border bg-card p-4 sm:p-5"
+    >
+      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
+        <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          🔬 Education Evidence Checker
+        </span>
+        <span className="font-mono text-[0.68rem] text-muted-foreground">
+          Promotional Claims vs. Empirical Outcomes
+        </span>
+      </header>
+
+      <div className="flex flex-col gap-4">
+        <div>
+          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Evaluation Subject
+          </h4>
+          <p className="mt-0.5 text-sm font-semibold text-foreground">
+            {evidence.subject}
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-xs leading-relaxed">
+            <h5 className="font-mono font-bold uppercase tracking-wider text-red-700 dark:text-red-400">
+              Claimed Outcomes (Promotional)
+            </h5>
+            <p className="mt-1 text-foreground">{evidence.claimedOutcomes}</p>
+          </div>
+
+          <div className="rounded border border-green-500/30 bg-green-500/10 p-3 text-xs leading-relaxed">
+            <h5 className="font-mono font-bold uppercase tracking-wider text-green-700 dark:text-green-400">
+              Measured Outcomes (Empirical)
+            </h5>
+            <p className="mt-1 text-foreground">{evidence.measuredOutcomes}</p>
+          </div>
+        </div>
+
+        <div className="rounded border border-border/80 bg-muted/20 p-3 text-xs">
+          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Study Design & Methodology
+          </h4>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div>
+              <span className="font-mono font-bold text-foreground">
+                Population:
+              </span>
+              <p className="text-muted-foreground">
+                {evidence.studyDesign.samplePopulation}
+              </p>
+            </div>
+            <div>
+              <span className="font-mono font-bold text-foreground">
+                Comparison Group:
+              </span>
+              <p className="text-muted-foreground">
+                {evidence.studyDesign.comparisonGroup}
+              </p>
+            </div>
+            <div>
+              <span className="font-mono font-bold text-foreground">
+                Metric Used:
+              </span>
+              <p className="text-muted-foreground">
+                {evidence.studyDesign.metricUsed}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-l-2 border-sec pl-3 text-xs leading-relaxed">
+          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-sec-ink">
+            Critical Gap Analysis
+          </h4>
+          <p className="mt-1 text-foreground">{evidence.promotionalGap}</p>
+        </div>
+
+        {evidence.limitations.length > 0 && (
+          <div className="rounded border border-border/60 bg-muted/10 p-3 text-xs">
+            <h4 className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              Documented Limitations
+            </h4>
+            <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
+              {evidence.limitations.map((lim, idx) => (
+                <li key={idx}>{lim}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

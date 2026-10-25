@@ -285,6 +285,30 @@ describe("generateEventArtifacts", () => {
           whatToWatchNext: "District adoption votes in autumn.",
         };
       }
+      if (
+        inputStr.toLowerCase().includes("learning materials") ||
+        inputStr.includes("conceptExplainer")
+      ) {
+        return {
+          audience: inputStr.includes("STUDENT")
+            ? "student"
+            : inputStr.includes("EDUCATOR")
+              ? "educator"
+              : "professional",
+          conceptExplainer: "Adaptive math tutoring breakdown.",
+          glossary: [{ term: "Tutor", definition: "Learning helper." }],
+          quiz: [
+            {
+              question: "How does the tutor adapt?",
+              options: ["Pacing", "Color"],
+              answerIndex: 0,
+              explanation: "Adjusts to pace.",
+            },
+          ],
+          discussionQuestions: ["Will this increase equity?"],
+          activities: ["Try 3 practice problems."],
+        };
+      }
       // Audience Explain
       if (inputStr.includes("STUDENT")) {
         return {
@@ -345,8 +369,8 @@ describe("generateEventArtifacts", () => {
       transport,
     });
     expect(res.status).toBe("generated");
-    // 1 Brief + 3 Audience Explains = 4 artifacts
-    expect(res.generatedCount).toBe(4);
+    // 1 Brief + 3 Audience Explains + 3 Learning Materials = 7 artifacts
+    expect(res.generatedCount).toBe(7);
 
     const rows = await env.DB.prepare(
       "SELECT type, audience, status FROM event_artifacts WHERE event_id = ?1 ORDER BY type, audience",
@@ -354,7 +378,7 @@ describe("generateEventArtifacts", () => {
       .bind(event!.id)
       .all<{ type: string; audience: string; status: string }>();
 
-    expect(rows.results).toHaveLength(4);
+    expect(rows.results).toHaveLength(7);
     // Review mode industry -> initial status is pending_review
     expect(rows.results.every((r) => r.status === "pending_review")).toBe(true);
 
@@ -457,6 +481,32 @@ describe("generateEventArtifacts", () => {
           applications: "Long-document reasoning and code synthesis agents.",
         };
       }
+      if (
+        inputStr.toLowerCase().includes("learning materials") ||
+        inputStr.includes("conceptExplainer")
+      ) {
+        return {
+          audience: inputStr.includes("STUDENT")
+            ? "student"
+            : inputStr.includes("EDUCATOR")
+              ? "educator"
+              : "professional",
+          conceptExplainer: "Sparse attention mechanisms explained.",
+          glossary: [
+            { term: "Sparsity", definition: "Skipping unnecessary tokens." },
+          ],
+          quiz: [
+            {
+              question: "What is the speed advantage?",
+              options: ["4x latency cut", "No improvement"],
+              answerIndex: 0,
+              explanation: "Reduces quadratic cost to linear.",
+            },
+          ],
+          discussionQuestions: ["Where is memory bound vs compute bound?"],
+          activities: ["Benchmark token attention masks."],
+        };
+      }
       // Audience explain
       return {
         audience: "student",
@@ -476,8 +526,8 @@ describe("generateEventArtifacts", () => {
       transport,
     });
     expect(res.status).toBe("generated");
-    // 1 Brief + 3 Explain + 1 Decoder = 5 artifacts
-    expect(res.generatedCount).toBe(5);
+    // 1 Brief + 3 Explain + 3 Learning Material + 1 Decoder = 8 artifacts
+    expect(res.generatedCount).toBe(8);
 
     const decoderRow = await env.DB.prepare(
       "SELECT type, status, content FROM event_artifacts WHERE event_id = ?1 AND type = 'research_paper_decoder'",
@@ -665,26 +715,43 @@ describe("generateEventArtifacts", () => {
       .bind(event!.id, art!.id)
       .run();
 
-    const transport = makeFakeTransport((_model, _input) => ({
-      whatHappened: "Bank reported AI backtesting results.",
-      whatIsNew: "First reported deployment on commodities trading.",
-      whatEvidenceExists: "SEC 8-K filing item 2.02.",
-      whatToWatchNext: "Next quarterly audit.",
-    }));
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr.toLowerCase().includes("financial literacy") ||
+        inputStr.includes("conceptName")
+      ) {
+        return {
+          conceptName: "Commercial Bank Reserves",
+          plainEnglishDefinition: "Funds held to meet regulatory requirements.",
+          applicationInStory:
+            "Report shows how automated systems optimize liquidity.",
+          commonPitfalls: ["Banks only hold physical currency."],
+          keyTakeaways: ["Liquidity management is key to stability."],
+        };
+      }
+      return {
+        whatHappened: "Bank reported AI backtesting results.",
+        whatIsNew: "First reported deployment on commodities trading.",
+        whatEvidenceExists: "SEC 8-K filing item 2.02.",
+        whatToWatchNext: "Next quarterly audit.",
+      };
+    });
 
     const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
       transport,
     });
     expect(res.status).toBe("generated");
 
-    const row = await env.DB.prepare(
-      "SELECT status FROM event_artifacts WHERE event_id = ?1",
+    const rows = await env.DB.prepare(
+      "SELECT type, status FROM event_artifacts WHERE event_id = ?1",
     )
       .bind(event!.id)
-      .first<{ status: string }>();
+      .all<{ type: string; status: string }>();
 
-    // Mandatory Finance review rule: status must be pending_review!
-    expect(row?.status).toBe("pending_review");
+    expect(rows.results.length).toBeGreaterThanOrEqual(1);
+    // Mandatory Finance review rule: ALL artifact rows must be pending_review!
+    expect(rows.results.every((r) => r.status === "pending_review")).toBe(true);
   });
 
   it("is idempotent: repeated invocation on same event and revision makes zero duplicate calls", async () => {
@@ -1026,5 +1093,652 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     });
     expect(res.status).toBe("generated");
     expect(res.generatedCount).toBe(1);
+  });
+
+  it("generates Education editorial products when matching keywords in education sector", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: {
+        deepThreshold: 90,
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('education', 'Education', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ed/feed-pol', 'ed.gov', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ed/art-policy', 'https://ed/art-policy', 'Department of Education AI Policy and Classroom Trial Results', 'A comprehensive study evaluating teacher pedagogy and legislative mandate.', 'shaEduPol', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEduPol', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'research_study', '["policy", "research"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Education Policy & Study Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr.toLowerCase().includes("policy analysis") ||
+        inputStr.includes("affectedAudiences")
+      ) {
+        return {
+          policyName: "Federal K-12 AI Directives",
+          summary: "New policy framework for automated tutoring.",
+          affectedAudiences: [
+            { group: "Teachers", impact: "Mandatory training" },
+          ],
+          timeline: [{ phase: "Phase 1", milestone: "Guideline publication" }],
+          remainingUncertainties: ["State adoption variance"],
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("pedagogical facilitation") ||
+        inputStr.includes("classroomActivities")
+      ) {
+        return {
+          topic: "Classroom AI Ethics",
+          gradeLevels: ["Middle School", "High School"],
+          discussionQuestions: [
+            {
+              question: "Should AI write essays?",
+              learningGoal: "Explore authenticity",
+            },
+          ],
+          classroomActivities: [
+            { activity: "Debate", instructions: "Split into 2 teams" },
+          ],
+        };
+      }
+      if (
+        inputStr
+          .toLowerCase()
+          .includes("promotional claims vs. empirical outcomes") ||
+        inputStr.includes("claimedOutcomes")
+      ) {
+        return {
+          subject: "AI Literacy Program",
+          claimedOutcomes: "Triples test scores",
+          measuredOutcomes: "Modest 5% improvement",
+          studyDesign: {
+            samplePopulation: "50 students",
+            comparisonGroup: "Historical cohort",
+            metricUsed: "State test",
+          },
+          promotionalGap: "Vendor selective reporting",
+          limitations: ["Small sample size"],
+        };
+      }
+      return {
+        whatHappened: "Education policy study announced.",
+        whatIsNew: "Federal guidelines established.",
+        whatEvidenceExists: "Empirical trial on 50 classrooms.",
+        whatToWatchNext: "Next semester rollouts.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // Story brief + 3 Education products = 4 artifacts
+    expect(res.generatedCount).toBe(4);
+
+    const rows = await env.DB.prepare(
+      "SELECT type, status FROM event_artifacts WHERE event_id = ?1 ORDER BY type",
+    )
+      .bind(event!.id)
+      .all<{ type: string; status: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("policy_impact_explorer");
+    expect(types).toContain("classroom_discussion_builder");
+    expect(types).toContain("education_evidence_checker");
+  });
+
+  it("never generates Education editorial products in non-education sectors", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    // Technology industry
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('technology', 'Technology', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech/feed-pol', 'tech.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    // Contains education keywords but is in Technology sector
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://tech/art-edu-words', 'https://tech/art-edu-words', 'Department of Education AI Policy Cloud Infrastructure', 'Cloud servers handling student classroom data.', 'shaTechEdu', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaTechEdu', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'research_study', '["policy", "research"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Tech Cloud Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr
+          .toLowerCase()
+          .includes("educational policy and regulatory impact analyst") ||
+        inputStr.includes("remainingUncertainties")
+      ) {
+        return {
+          policyName: "Leaked Policy",
+          summary: "Should not generate in tech",
+          affectedAudiences: [],
+          timeline: [],
+          remainingUncertainties: [],
+        };
+      }
+      return {
+        whatHappened: "Cloud provider wins contract.",
+        whatIsNew: "Fast infrastructure.",
+        whatEvidenceExists: "Press release.",
+        whatToWatchNext: "Deployment.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // Story brief only, NO education artifacts!
+    expect(res.generatedCount).toBe(1);
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toEqual(["story_brief"]);
+    expect(types).not.toContain("policy_impact_explorer");
+    expect(types).not.toContain("classroom_discussion_builder");
+    expect(types).not.toContain("education_evidence_checker");
+  });
+
+  it("generates Finance editorial products, enforces pending_review, and prevents cross-sector leakage", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    // Finance industry with auto publish mode
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('finance', 'Finance', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://fin/feed-all', 'sec.gov', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    // Article with keywords matching backtest, sec, and liquidity
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://fin/art-all', 'https://fin/art-all', 'Hedge Fund AI Backtest Model Faces SEC Audit Over Liquidity Risk', 'Trading model claimed high alpha but SEC examines margin requirements.', 'shaFinAll', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaFinAll', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'regulatory_action', '["backtest", "sec"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Hedge Fund SEC Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr.toLowerCase().includes("reality check") ||
+        inputStr.includes("testPeriodAndBenchmark")
+      ) {
+        return {
+          claimant: "Alpha Fund",
+          claimSummary: "Model yields 25% returns",
+          claimType: "backtest",
+          testPeriodAndBenchmark: "2020-2024 vs S&P 500",
+          costsAndAssumptions: "Zero transaction fees",
+          disclosedCautions: ["Severe drawdowns in illiquid assets"],
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("regulatory compliance intelligence") ||
+        inputStr.includes("actionTitle")
+      ) {
+        return {
+          regulator: "SEC",
+          actionTitle: "Inquiry into Model Risk Management",
+          summary: "Examining AI model assumptions.",
+          affectedInstitutions: ["Registered Hedge Funds"],
+          keyRequirements: ["Disclose data provenance and validation"],
+          effectiveDate: "Immediate",
+          enforcementContext: "Section 206 of Advisers Act",
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("financial literacy") ||
+        inputStr.includes("conceptName")
+      ) {
+        return {
+          conceptName: "Liquidity Risk in Algorithmic Trading",
+          plainEnglishDefinition:
+            "The risk that you cannot sell an asset quickly without taking a massive loss.",
+          applicationInStory:
+            "The model assumed endless buyers even during sudden sell-offs.",
+          commonPitfalls: ["Confusing trading volume with market liquidity"],
+          keyTakeaways: ["Always model transaction slippage"],
+        };
+      }
+      return {
+        whatHappened: "SEC opened inquiry into hedge fund AI model.",
+        whatIsNew: "First formal algorithmic probe.",
+        whatEvidenceExists: "Formal inquiry letters.",
+        whatToWatchNext: "Hearing schedule.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // Story brief + 3 Finance products = 4 artifacts
+    expect(res.generatedCount).toBe(4);
+
+    const rows = await env.DB.prepare(
+      "SELECT type, status FROM event_artifacts WHERE event_id = ?1 ORDER BY type",
+    )
+      .bind(event!.id)
+      .all<{ type: string; status: string }>();
+
+    expect(rows.results).toHaveLength(4);
+    // CRITICAL SECURITY GUARDRAIL: Even with publish_mode='auto', EVERY Finance artifact MUST BE pending_review!
+    expect(rows.results.every((r) => r.status === "pending_review")).toBe(true);
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("finance_reality_check");
+    expect(types).toContain("regulation_watch");
+    expect(types).toContain("finance_concept_explainer");
+  });
+
+  it("generates Skills and Career Trends in industry sector and prevents leakage into education", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    // Industry sector
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('industry', 'Industry', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ind/feed-car', 'industry.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ind/art-career', 'https://ind/art-career', 'Tech Workforce Automation Reshapes Software Engineering Skills and Salary Trends', 'Major hiring and reskilling shifts across software roles.', 'shaIndCar', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaIndCar', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'workforce_and_skills', '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Tech Hiring Trends Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (
+        inputStr.toLowerCase().includes("workforce & occupational evolution") ||
+        inputStr.includes("emergingSkills")
+      ) {
+        return {
+          industryShift:
+            "Widespread AI agent adoption in enterprise codebase maintenance.",
+          emergingSkills: ["Agent orchestration", "System verification evals"],
+          decliningOrAtRiskSkills: ["Boilerplate CRUD drafting"],
+          affectedOccupations: [
+            {
+              role: "Junior Developer",
+              impact: "Shift towards evaluation and code review",
+            },
+          ],
+          trainingRecommendations: [
+            "Master prompt and agent test harness design",
+          ],
+        };
+      }
+      return {
+        whatHappened: "Industry hiring survey published.",
+        whatIsNew: "Rapid growth in AI agent orchestration skills.",
+        whatEvidenceExists: "Survey of 500 engineering directors.",
+        whatToWatchNext: "Upcoming compensation surveys.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // Story brief + SkillsCareerTrends = 2 artifacts
+    expect(res.generatedCount).toBe(2);
+
+    const rows = await env.DB.prepare(
+      "SELECT type, status FROM event_artifacts WHERE event_id = ?1 ORDER BY type",
+    )
+      .bind(event!.id)
+      .all<{ type: string; status: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).toContain("skills_career_trends");
+  });
+
+  it("handles malformed JSON and schema mismatches gracefully without crashing the pipeline", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+      artifacts: { deepThreshold: 90 },
+    });
+
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('education', 'Education Resilience', 'auto', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'auto'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://ed/fail-feed', 'ed.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://ed/fail-art', 'https://ed/fail-art', 'Department of Education AI Policy Draft', 'Legislative draft on AI.', 'shaEduFail', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaEduFail', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'policy_change', '["policy"]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Fail Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    // Transport returns invalid JSON for policy explorer, but valid Story Brief
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (inputStr.toLowerCase().includes("policy analysis")) {
+        return "MALFORMED_NON_JSON_CONTENT{{{";
+      }
+      return {
+        whatHappened: "Resilience event happened.",
+        whatIsNew: "Novelty test.",
+        whatEvidenceExists: "Evidence exists.",
+        whatToWatchNext: "Next steps.",
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    // Pipeline does not throw; generated valid brief and skipped malformed artifacts
+    expect(res.status).toBe("generated");
+    expect(res.generatedCount).toBe(1); // Story brief succeeded; others with mismatched schema skipped
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1",
+    )
+      .bind(event!.id)
+      .all<{ type: string }>();
+
+    const types = rows.results.map((r) => r.type);
+    expect(types).toContain("story_brief");
+    expect(types).not.toContain("policy_impact_explorer");
   });
 });

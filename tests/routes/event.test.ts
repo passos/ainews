@@ -261,4 +261,100 @@ describe("tests/routes/event.test.ts", () => {
     expect(claim.evidence[0].verified).toBe(true);
     expect(claim.evidence[0].isPrimarySource).toBe(true);
   });
+
+  it("loads published new artifacts (learning materials, vertical editorial products) and excludes pending_review or malformed rows", async () => {
+    const eventId = await seedEvent(
+      tech.industryId,
+      "New Artifacts Test Event",
+      1,
+    );
+
+    const art = await seedArticle({
+      ...tech,
+      title: "Article for New Artifacts",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    // 1. Published Learning Material (student)
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'learning_material', 'student', 1, 'pv1', 'gemini', '{"audience":"student","conceptExplainer":"Explaining basics","glossary":[],"quiz":[{"question":"Q1","options":["A","B"],"answerIndex":0,"explanation":"E1"}],"discussionQuestions":["D1"],"activities":["A1"]}', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 2. Pending Review Learning Material (educator) -> must not be returned
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'learning_material', 'educator', 1, 'pv1', 'gemini', '{"audience":"educator","conceptExplainer":"Pending Explainer","glossary":[],"quiz":[],"discussionQuestions":[],"activities":[]}', 'pending_review', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 3. Published Policy Impact Explorer
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'policy_impact_explorer', '', 1, 'pv1', 'gemini', '{"policyName":"Title 1","summary":"Sum 1","affectedAudiences":[],"timeline":[],"remainingUncertainties":[]}', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 4. Pending Review Finance Reality Check -> must not be returned
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'finance_reality_check', '', 1, 'pv1', 'gemini', '{"claimant":"C1","claimSummary":"S1","claimType":"backtest","testPeriodAndBenchmark":"T1","costsAndAssumptions":"C1","disclosedCautions":[]}', 'pending_review', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 5. Published Skills Career Trends
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'skills_career_trends', '', 1, 'pv1', 'gemini', '{"industryShift":"AI tools","emergingSkills":["Eval"],"decliningOrAtRiskSkills":["Manual"],"affectedOccupations":[],"trainingRecommendations":[]}', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    // 6. Published but malformed JSON for Regulation Watch -> should be ignored safely
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, audience, input_revision, prompt_version, model, content, status, created_at)
+       VALUES (?1, 'regulation_watch', '', 1, 'pv1', 'gemini', 'INVALID_JSON_CONTENT{{{', 'published', 1000)`,
+    )
+      .bind(eventId)
+      .run();
+
+    const result = await loadEvent(
+      { eventId: String(eventId) },
+      {
+        getEvent: (id) => getEvent(db(), id),
+        getEventSources: (id) => getEventSources(db(), id),
+      },
+    );
+
+    const artifacts = result.data.artifacts;
+    expect(artifacts).toBeDefined();
+
+    // Learning Material: student present, educator absent
+    expect(artifacts.learningMaterials?.student).toBeDefined();
+    expect(artifacts.learningMaterials?.student?.conceptExplainer).toBe(
+      "Explaining basics",
+    );
+    expect(artifacts.learningMaterials?.educator).toBeUndefined();
+
+    // Policy Impact: present
+    expect(artifacts.policyImpact).toBeDefined();
+    expect(artifacts.policyImpact?.policyName).toBe("Title 1");
+
+    // Finance Reality Check: pending_review -> must be null
+    expect(artifacts.financeRealityCheck).toBeNull();
+
+    // Skills Career Trends: present
+    expect(artifacts.skillsCareerTrends).toBeDefined();
+    expect(artifacts.skillsCareerTrends?.industryShift).toBe("AI tools");
+
+    // Regulation Watch: malformed JSON -> safely null
+    expect(artifacts.regulationWatch).toBeNull();
+  });
 });

@@ -6,14 +6,38 @@ import {
 import type { TextRequest } from "../../providers/adapters";
 import {
   AUDIENCE_EXPLAIN_PROMPT_VERSION,
+  CLASSROOM_DISCUSSION_PROMPT_VERSION,
+  EDUCATION_EVIDENCE_PROMPT_VERSION,
+  FINANCE_CONCEPT_PROMPT_VERSION,
+  FINANCE_REALITY_CHECK_PROMPT_VERSION,
+  LEARNING_MATERIAL_PROMPT_VERSION,
+  POLICY_IMPACT_PROMPT_VERSION,
+  REGULATION_WATCH_PROMPT_VERSION,
+  RESEARCH_PAPER_DECODER_PROMPT_VERSION,
+  SKILLS_CAREER_PROMPT_VERSION,
+  STORY_BRIEF_PROMPT_VERSION,
   buildAudienceExplainRequest,
+  buildClassroomDiscussionBuilderRequest,
+  buildEducationEvidenceCheckerRequest,
+  buildFinanceConceptExplainerRequest,
+  buildFinanceRealityCheckRequest,
+  buildLearningMaterialRequest,
+  buildPolicyImpactExplorerRequest,
+  buildRegulationWatchRequest,
   buildResearchPaperDecoderRequest,
+  buildSkillsCareerTrendsRequest,
   buildStoryBriefRequest,
   parseAudienceExplainOutput,
+  parseClassroomDiscussionBuilderOutput,
+  parseEducationEvidenceCheckerOutput,
+  parseFinanceConceptExplainerOutput,
+  parseFinanceRealityCheckOutput,
+  parseLearningMaterialOutput,
+  parsePolicyImpactExplorerOutput,
+  parseRegulationWatchOutput,
   parseResearchPaperDecoderOutput,
+  parseSkillsCareerTrendsOutput,
   parseStoryBriefOutput,
-  RESEARCH_PAPER_DECODER_PROMPT_VERSION,
-  STORY_BRIEF_PROMPT_VERSION,
   type ArtifactEventMaterial,
 } from "./prompts";
 
@@ -29,6 +53,8 @@ export interface ArtifactEligibilityContext {
   selectThreshold: number;
   deepThreshold: number;
   articles: ArticleMetadata[];
+  industrySlug: string;
+  industryName: string;
 }
 
 export interface ArtifactDefinition {
@@ -95,5 +121,161 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildResearchPaperDecoderRequest(material),
     parseOutput: (rawText) => parseResearchPaperDecoderOutput(rawText),
+  },
+
+  learning_material: {
+    type: "learning_material",
+    audiences: ARTIFACT_AUDIENCES,
+    promptVersion: LEARNING_MATERIAL_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      // News-to-Learning materials are generated for deep events across all verticals
+      return ctx.articles.length > 0 && ctx.eventScore >= ctx.deepThreshold;
+    },
+    buildRequest: (material, audience) => {
+      const aud = (audience || "student") as ArtifactAudience;
+      return buildLearningMaterialRequest(material, aud);
+    },
+    parseOutput: (rawText) => parseLearningMaterialOutput(rawText),
+  },
+
+  policy_impact_explorer: {
+    type: "policy_impact_explorer",
+    audiences: [""],
+    promptVersion: POLICY_IMPACT_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "education") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold ||
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "policy_change" ||
+            a.evidenceTags.includes("policy") ||
+            a.evidenceTags.includes("regulation"),
+        )
+      );
+    },
+    buildRequest: (material) => buildPolicyImpactExplorerRequest(material),
+    parseOutput: (rawText) => parsePolicyImpactExplorerOutput(rawText),
+  },
+
+  classroom_discussion_builder: {
+    type: "classroom_discussion_builder",
+    audiences: [""],
+    promptVersion: CLASSROOM_DISCUSSION_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "education") return false;
+      return ctx.articles.length > 0 && ctx.eventScore >= ctx.selectThreshold;
+    },
+    buildRequest: (material) =>
+      buildClassroomDiscussionBuilderRequest(material),
+    parseOutput: (rawText) => parseClassroomDiscussionBuilderOutput(rawText),
+  },
+
+  education_evidence_checker: {
+    type: "education_evidence_checker",
+    audiences: [""],
+    promptVersion: EDUCATION_EVIDENCE_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "education") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold ||
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "research_study" ||
+            a.contentType === "tool_or_product" ||
+            a.evidenceTags.includes("research") ||
+            a.evidenceTags.includes("peer_reviewed"),
+        )
+      );
+    },
+    buildRequest: (material) => buildEducationEvidenceCheckerRequest(material),
+    parseOutput: (rawText) => parseEducationEvidenceCheckerOutput(rawText),
+  },
+
+  finance_reality_check: {
+    type: "finance_reality_check",
+    audiences: [""],
+    promptVersion: FINANCE_REALITY_CHECK_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "finance") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold ||
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "ai_in_finance_claim" ||
+            a.evidenceTags.includes("ai_finance") ||
+            a.evidenceTags.includes("backtest"),
+        )
+      );
+    },
+    buildRequest: (material) => buildFinanceRealityCheckRequest(material),
+    parseOutput: (rawText) => parseFinanceRealityCheckOutput(rawText),
+  },
+
+  regulation_watch: {
+    type: "regulation_watch",
+    audiences: [""],
+    promptVersion: REGULATION_WATCH_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "finance") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold ||
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "regulatory_action" ||
+            a.evidenceTags.includes("regulation") ||
+            a.evidenceTags.includes("sec") ||
+            a.evidenceTags.includes("finra"),
+        )
+      );
+    },
+    buildRequest: (material) => buildRegulationWatchRequest(material),
+    parseOutput: (rawText) => parseRegulationWatchOutput(rawText),
+  },
+
+  finance_concept_explainer: {
+    type: "finance_concept_explainer",
+    audiences: [""],
+    promptVersion: FINANCE_CONCEPT_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "finance") return false;
+      return ctx.articles.length > 0 && ctx.eventScore >= ctx.selectThreshold;
+    },
+    buildRequest: (material) => buildFinanceConceptExplainerRequest(material),
+    parseOutput: (rawText) => parseFinanceConceptExplainerOutput(rawText),
+  },
+
+  skills_career_trends: {
+    type: "skills_career_trends",
+    audiences: [""],
+    promptVersion: SKILLS_CAREER_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      if (ctx.industrySlug !== "industry") return false;
+      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
+        return false;
+      }
+      return (
+        ctx.eventScore >= ctx.deepThreshold ||
+        ctx.articles.some(
+          (a) =>
+            a.contentType === "workforce_and_skills" ||
+            a.contentType === "market_trend",
+        )
+      );
+    },
+    buildRequest: (material) => buildSkillsCareerTrendsRequest(material),
+    parseOutput: (rawText) => parseSkillsCareerTrendsOutput(rawText),
   },
 };

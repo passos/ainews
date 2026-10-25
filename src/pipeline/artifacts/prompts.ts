@@ -1,9 +1,25 @@
 import {
   type AudienceExplain,
+  type ClassroomDiscussionBuilder,
+  type EducationEvidenceChecker,
+  type FinanceConceptExplainer,
+  type FinanceRealityCheck,
+  type LearningMaterial,
+  type PolicyImpactExplorer,
+  type RegulationWatch,
   type ResearchPaperDecoder,
+  type SkillsCareerTrends,
   type StoryBrief,
   audienceExplainSchema,
+  classroomDiscussionBuilderSchema,
+  educationEvidenceCheckerSchema,
+  financeConceptExplainerSchema,
+  financeRealityCheckSchema,
+  learningMaterialSchema,
+  policyImpactExplorerSchema,
+  regulationWatchSchema,
   researchPaperDecoderSchema,
+  skillsCareerTrendsSchema,
   storyBriefSchema,
 } from "../../lib/artifacts/types";
 import type { TextRequest } from "../../providers/adapters";
@@ -12,10 +28,20 @@ import { WRITE_THINKING } from "../analyze/prompts";
 export const STORY_BRIEF_PROMPT_VERSION = "brief-v1";
 export const AUDIENCE_EXPLAIN_PROMPT_VERSION = "explain-v1";
 export const RESEARCH_PAPER_DECODER_PROMPT_VERSION = "decoder-v1";
+export const LEARNING_MATERIAL_PROMPT_VERSION = "learning-material-v1";
+export const POLICY_IMPACT_PROMPT_VERSION = "policy-impact-v1";
+export const CLASSROOM_DISCUSSION_PROMPT_VERSION = "classroom-discussion-v1";
+export const EDUCATION_EVIDENCE_PROMPT_VERSION = "education-evidence-v1";
+export const FINANCE_REALITY_CHECK_PROMPT_VERSION = "finance-reality-check-v1";
+export const REGULATION_WATCH_PROMPT_VERSION = "regulation-watch-v1";
+export const FINANCE_CONCEPT_PROMPT_VERSION = "finance-concept-v1";
+export const SKILLS_CAREER_PROMPT_VERSION = "skills-career-v1";
 
 export const BRIEF_MAX_OUTPUT_TOKENS = 1500;
 export const EXPLAIN_MAX_OUTPUT_TOKENS = 2000;
 export const DECODER_MAX_OUTPUT_TOKENS = 2500;
+export const LEARNING_MATERIAL_MAX_OUTPUT_TOKENS = 2500;
+export const VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS = 2000;
 
 export interface ArtifactArticleMaterial {
   id: number;
@@ -236,6 +262,497 @@ export function parseResearchPaperDecoderOutput(
     const jsonStr = extractJsonText(rawText);
     const parsed = JSON.parse(jsonStr);
     const res = researchPaperDecoderSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Learning Material (News-to-Learning, N§2.3: student, educator, professional)
+// -----------------------------------------------------------------------------
+
+export function buildLearningMaterialRequest(
+  material: ArtifactEventMaterial,
+  audience: "student" | "educator" | "professional",
+): TextRequest {
+  const system = [
+    `You are an interactive curriculum and learning materials designer for Personal News (${material.industryName}).`,
+    `Transform the verified news event into high-quality learning materials tailored for: ${audience.toUpperCase()}.`,
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "audience": "${audience}",
+  "conceptExplainer": "A thorough, engaging 2-4 paragraph explanation of the core technical/conceptual foundations behind this story.",
+  "glossary": [
+    {
+      "term": "Essential term",
+      "definition": "Precise, accessible definition in context"
+    }
+  ],
+  "quiz": [
+    {
+      "question": "Multiple-choice comprehension or critical thinking question testing key concepts from the story.",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answerIndex": 0,
+      "explanation": "Clear explanation of why this answer is correct and why other options are incorrect or incomplete."
+    }
+  ],
+  "discussionQuestions": [
+    "Thought-provoking questions encouraging deeper inquiry, ethical evaluation, or debate."
+  ],
+  "activities": [
+    "Practical, actionable learning or classroom activities (e.g. simulation, data exploration, debate, or case study exercise)."
+  ]
+}`,
+    "Rules:",
+    "- Provide at least 2 quiz questions with 3-4 options each.",
+    "- Make the quiz answers unambiguous and directly grounded in the text.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: LEARNING_MATERIAL_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseLearningMaterialOutput(
+  rawText: string,
+): LearningMaterial | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = learningMaterialSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Policy Impact Explorer (Education: N§3)
+// -----------------------------------------------------------------------------
+
+export function buildPolicyImpactExplorerRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are an education policy intelligence specialist for Personal News (${material.industryName}).`,
+    "Analyze the education policy development in this story using the Policy Impact Explorer framework.",
+    `Produce a JSON object matching this schema:
+{
+  "policyName": "Official or descriptive name of the policy, regulation, or curriculum initiative.",
+  "summary": "Factual overview of the policy mandate, its statutory or administrative context, and stated goals.",
+  "affectedAudiences": [
+    {
+      "group": "e.g. K-12 Teachers, School Districts, Higher Ed Institutions, Students, or EdTech Vendors",
+      "impact": "Specific direct or compliance consequence for this stakeholder group."
+    }
+  ],
+  "timeline": [
+    {
+      "phase": "e.g. Immediate / Q1 2027 / Mandatory Compliance",
+      "milestone": "What occurs or must be implemented by this point."
+    }
+  ],
+  "remainingUncertainties": [
+    "Unresolved legal, funding, technical, or implementation ambiguities."
+  ]
+}`,
+    "Rules:",
+    "- Ground all impacts strictly on the reported facts.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parsePolicyImpactExplorerOutput(
+  rawText: string,
+): PolicyImpactExplorer | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = policyImpactExplorerSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Classroom Discussion Builder (Education: N§3)
+// -----------------------------------------------------------------------------
+
+export function buildClassroomDiscussionBuilderRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a master educator and pedagogical designer for Personal News (${material.industryName}).`,
+    "Turn the verified news story into an actionable classroom discussion and activity guide.",
+    `Produce a JSON object matching this schema:
+{
+  "topic": "Core pedagogical theme or question raised by the story.",
+  "gradeLevels": ["e.g. Middle School", "High School", "Undergraduate"],
+  "discussionQuestions": [
+    {
+      "question": "Engaging discussion prompt for students.",
+      "learningGoal": "What critical thinking skill or concept this question fosters."
+    }
+  ],
+  "classroomActivities": [
+    {
+      "activity": "Name of the structured classroom activity (e.g. Socratic Seminar, Jigsaw, Policy Debate)",
+      "instructions": "Clear step-by-step facilitation instructions for the teacher or instructor."
+    }
+  ]
+}`,
+    "Rules:",
+    "- Ensure activities are evidence-based and suitable for academic settings.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseClassroomDiscussionBuilderOutput(
+  rawText: string,
+): ClassroomDiscussionBuilder | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = classroomDiscussionBuilderSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Education Evidence Checker (Education: N§3)
+// -----------------------------------------------------------------------------
+
+export function buildEducationEvidenceCheckerRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are an empirical education research evaluator for Personal News (${material.industryName}).`,
+    "Critically assess promotional claims versus measured empirical learning outcomes in this story.",
+    `Produce a JSON object matching this schema:
+{
+  "subject": "The educational tool, curriculum, intervention, or methodology being evaluated.",
+  "claimedOutcomes": "What promoters, companies, or press releases claim the tool/intervention achieves.",
+  "measuredOutcomes": "What the actual empirical data or peer-reviewed study measured (e.g. completion speed vs deep problem-solving transfer).",
+  "studyDesign": {
+    "samplePopulation": "Number of participants, grade level, and school setting (or 'Not specified').",
+    "comparisonGroup": "Control group characteristics or 'No control group used'.",
+    "metricUsed": "Specific assessment or test instrument used to evaluate outcomes."
+  },
+  "promotionalGap": "Explicit critique of the gap between promotional headlines and demonstrated learning gains.",
+  "limitations": [
+    "Methodological limitations, small sample sizes, lack of long-term retention data, or conflicts of interest."
+  ]
+}`,
+    "Rules:",
+    "- Distinguish completing exercises faster from demonstrating genuine concept transfer.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseEducationEvidenceCheckerOutput(
+  rawText: string,
+): EducationEvidenceChecker | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = educationEvidenceCheckerSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// AI-in-Finance Reality Check (Finance: N§3 & N§4)
+// -----------------------------------------------------------------------------
+
+export function buildFinanceRealityCheckRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a quantitative finance and AI risk auditor for Personal News (${material.industryName}).`,
+    "Separate promotional AI announcements and backtests from documented live trading deployments and regulatory reality.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "claimant": "Financial institution, hedge fund, or fintech firm making the claim.",
+  "claimSummary": "The claimed outperformance, efficiency gain, or trading advantage.",
+  "claimType": "One of: announcement | pilot | backtest | live_deployment | regulatory_finding",
+  "testPeriodAndBenchmark": "The time period analyzed, benchmark index used (e.g. 60/40, S&P 500), and test methodology.",
+  "costsAndAssumptions": "Slippage, transaction costs, leverage, data snooping caveats, or market conditions assumed.",
+  "disclosedCautions": [
+    "Explicit caveats and disclaimers made by the researchers or authors themselves (e.g. in-sample overfitting warnings)."
+  ]
+}`,
+    "Rules:",
+    "- Emphasize that backtests and in-sample performance are not evidence of future outperformance.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseFinanceRealityCheckOutput(
+  rawText: string,
+): FinanceRealityCheck | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = financeRealityCheckSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Regulation Watch (Finance: N§3 & N§4)
+// -----------------------------------------------------------------------------
+
+export function buildRegulationWatchRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a financial regulatory compliance intelligence analyst for Personal News (${material.industryName}).`,
+    "Analyze the regulatory enforcement action, rule proposal, or guidance in this story.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "regulator": "Regulatory agency (e.g. SEC, FINRA, Federal Reserve, CFPB, CFTC, ECB).",
+  "actionTitle": "Official name or subject of the rule, circular, consent order, or enforcement action.",
+  "summary": "Core factual summary of the regulatory action and rationale.",
+  "affectedInstitutions": [
+    "Specific market participants impacted (e.g. Broker-Dealers, Registered Investment Advisers, Bank Holding Companies)."
+  ],
+  "keyRequirements": [
+    "Actionable compliance requirements, disclosure mandates, or governance rules."
+  ],
+  "effectiveDate": "Effective date, comment deadline, or implementation transition period.",
+  "enforcementContext": "Statutory basis, penalties, or historical context surrounding this enforcement."
+}`,
+    "Rules:",
+    "- Cite specific rules, statutes, or release numbers when present in the text.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseRegulationWatchOutput(
+  rawText: string,
+): RegulationWatch | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = regulationWatchSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Finance Concepts for Learners (Finance: N§3)
+// -----------------------------------------------------------------------------
+
+export function buildFinanceConceptExplainerRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a financial literacy and market concepts educator for Personal News (${material.industryName}).`,
+    "Identify the foundational financial concept underlying this news development and explain it clearly for learners.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "conceptName": "The underlying financial instrument, mechanism, or economic principle (e.g. In-Sample Overfitting, Yield Curve Inversion, Liquidity Coverage Ratio).",
+  "plainEnglishDefinition": "Clear, accessible explanation of how this concept works without unnecessary Wall Street jargon.",
+  "applicationInStory": "How exactly this concept applies to the events and companies described in the story.",
+  "commonPitfalls": [
+    "Common misunderstandings or false assumptions beginners make regarding this concept."
+  ],
+  "keyTakeaways": [
+    "Key principles for evaluating financial news involving this concept."
+  ]
+}`,
+    "Rules:",
+    "- Ensure absolute conceptual precision while remaining accessible.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseFinanceConceptExplainerOutput(
+  rawText: string,
+): FinanceConceptExplainer | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = financeConceptExplainerSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Skills and Career Trends (Industry: N§3)
+// -----------------------------------------------------------------------------
+
+export function buildSkillsCareerTrendsRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a workforce intelligence and industry transformation analyst for Personal News (${material.industryName}).`,
+    "Analyze how the industrial, technological, and corporate shifts in this story impact skills and career paths.",
+    `Produce a JSON object matching this schema:
+{
+  "industryShift": "The macroeconomic, supply chain, automation, or technology shift underway.",
+  "emergingSkills": [
+    "High-demand technical, operational, or analytical capabilities growing in importance."
+  ],
+  "decliningOrAtRiskSkills": [
+    "Legacy competencies or routines being automated, displaced, or downsized."
+  ],
+  "affectedOccupations": [
+    {
+      "role": "Job title or profession (e.g. Process Engineer, Semiconductor Yield Analyst, Assembly Technician)",
+      "impact": "How daily work, required toolchains, or employment demand is evolving."
+    }
+  ],
+  "trainingRecommendations": [
+    "Practical certifications, curriculum areas, or hands-on experiences workers and students should target."
+  ]
+}`,
+    "Rules:",
+    "- Base skills projections strictly on the verified industrial developments.",
+    "- Output valid raw JSON only.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseSkillsCareerTrendsOutput(
+  rawText: string,
+): SkillsCareerTrends | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = skillsCareerTrendsSchema.safeParse(parsed);
     return res.success ? res.data : null;
   } catch {
     return null;
