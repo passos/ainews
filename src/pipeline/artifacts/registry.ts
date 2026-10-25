@@ -115,7 +115,7 @@ export const ARTIFACT_REGISTRY: Record<
         const isPaperType = a.contentType === "research_paper";
         const hasPaperTag =
           Array.isArray(a.evidenceTags) &&
-          (a.evidenceTags.includes("paper_preprint") ||
+          (a.evidenceTags.includes("preprint") ||
             a.evidenceTags.includes("peer_reviewed"));
         return isArxiv || isPaperType || hasPaperTag;
       });
@@ -153,8 +153,7 @@ export const ARTIFACT_REGISTRY: Record<
         ctx.articles.some(
           (a) =>
             a.contentType === "policy_change" ||
-            a.evidenceTags.includes("policy") ||
-            a.evidenceTags.includes("regulation"),
+            a.evidenceTags.includes("regulatory_finding"),
         )
       );
     },

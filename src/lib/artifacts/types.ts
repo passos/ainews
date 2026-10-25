@@ -102,13 +102,9 @@ export const quizQuestionSchema = z
     answerIndex: z.number().int().min(0),
     explanation: z.string().min(1),
   })
-  .superRefine((data, ctx) => {
-    if (data.answerIndex >= data.options.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "answerIndex must be strictly less than options.length",
-      });
-    }
+  .refine((d) => d.answerIndex < d.options.length, {
+    message: "answerIndex must be strictly less than options.length",
+    path: ["answerIndex"],
   });
 export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 

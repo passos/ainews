@@ -36,7 +36,7 @@ export function LearningMaterialCard({
     if (initialAudience && availableAudiences.includes(initialAudience)) {
       setSelectedAudience(initialAudience);
     }
-  }, [initialAudience]);
+  }, [initialAudience, availableAudiences]);
 
   if (availableAudiences.length === 0) {
     return null;

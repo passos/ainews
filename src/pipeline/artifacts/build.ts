@@ -78,7 +78,7 @@ function parseDeepThreshold(
   } catch {
     // ignore json error
   }
-  return Math.max(selectFallback + 20, 75);
+  return selectFallback;
 }
 
 function defaultDeps(

@@ -388,6 +388,122 @@ describe("generateEventArtifacts", () => {
     expect(audiences).toEqual(["educator", "professional", "student"]);
   });
 
+  it("falls back deepThreshold to thresholds.select when artifacts.deepThreshold is not configured", async () => {
+    await ensureBudget();
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          ctype: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: [],
+        thresholds: { prefilterMinRelevant: 0.3, select: 50 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+    });
+
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, config, created_at) VALUES ('tech-fallback-deep', 'Tech Fallback Deep', 'auto', ?1, 1000) RETURNING id",
+    )
+      .bind(config)
+      .first<{ id: number }>();
+
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://fallback/feed', 'fallback.org', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://fallback/art-1', 'https://fallback/art-1', 'Adaptive Learning Engine', 'Summary', 'shaFallback', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaFallback', 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+
+    // Score is 50, exactly equal to select threshold (50)
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'ctype', '[]', 50, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id)
+      .run();
+
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Fallback Deep Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+
+    const transport = makeFakeTransport((_model, input) => {
+      const inputStr = JSON.stringify(input);
+      if (inputStr.includes("Story Brief")) {
+        return {
+          whatHappened: "Engine published.",
+          whatIsNew: "Novel architecture.",
+          whatEvidenceExists: "Benchmarks.",
+          whatToWatchNext: "Adoption.",
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("learning materials") ||
+        inputStr.includes("conceptExplainer")
+      ) {
+        return {
+          audience: "student",
+          conceptExplainer: "Adaptive tutor basics.",
+          glossary: [{ term: "Tutor", definition: "Teaching agent." }],
+          quiz: [
+            {
+              question: "How does it adapt?",
+              options: ["Pacing", "Color"],
+              answerIndex: 0,
+              explanation: "Adjusts to pace.",
+            },
+          ],
+          discussionQuestions: ["Will this help?"],
+          activities: ["Try problems."],
+        };
+      }
+      return {
+        audience: "student",
+        overview: "Overview.",
+        keyPoints: ["Point 1"],
+        implications: ["Implication 1"],
+        glossary: [{ term: "Term", definition: "Def" }],
+      };
+    });
+
+    const res = await generateEventArtifacts(testEnv, event!.id, 1000, {
+      transport,
+    });
+    expect(res.status).toBe("generated");
+    // Story Brief (1) + Audience Explains (3) + Learning Materials (3) = 7
+    expect(res.generatedCount).toBe(7);
+  });
+
   it("generates Research Paper Decoder for arXiv research paper events", async () => {
     await ensureBudget();
     const config = JSON.stringify({
@@ -442,7 +558,7 @@ describe("generateEventArtifacts", () => {
 
     await env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
-       VALUES (?1, 'pv1', '{}', 'research_paper', '{"empirical_evidence":"paper_preprint"}', 88, 0.95, 1, 'cat', 'none', 1, 1000)`,
+       VALUES (?1, 'pv1', '{}', 'research_paper', '{"publication_status":"preprint"}', 88, 0.95, 1, 'cat', 'none', 1, 1000)`,
     )
       .bind(art!.id)
       .run();
