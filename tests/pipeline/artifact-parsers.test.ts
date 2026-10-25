@@ -8,6 +8,9 @@ import {
   parsePolicyImpactExplorerOutput,
   parseRegulationWatchOutput,
   parseSkillsCareerTrendsOutput,
+  parseIndustryImpactReportOutput,
+  parseSupplyChainRippleMapOutput,
+  type ArtifactEventMaterial,
 } from "../../src/pipeline/artifacts/prompts";
 
 describe("Artifact Output Parsers (Issue #20)", () => {
@@ -296,6 +299,474 @@ describe("Artifact Output Parsers (Issue #20)", () => {
         parseSkillsCareerTrendsOutput(
           JSON.stringify({ industryShift: "Missing other fields" }),
         ),
+      ).toBeNull();
+    });
+  });
+
+  describe("parseIndustryImpactReportOutput (Issue #21)", () => {
+    const valid = {
+      summary:
+        "Foundry capacity shift causes ripple effects across edge compute.",
+      affectedIndustries: [
+        {
+          industry: "Semiconductor Packaging",
+          impact: "CoWoS advanced packaging lines face lead time expansion.",
+          transmissionPath:
+            "Foundry front-end wafer orders exceed packaging capacity.",
+          basis: "evidence_based",
+          citation: {
+            claimId: 101,
+            sourceDomain: "semianalysis.com",
+            quote: "Advanced packaging wait times grew to 24 weeks.",
+          },
+        },
+        {
+          industry: "Automotive Electronics",
+          impact: "Legacy microcontroller migration accelerates.",
+          transmissionPath:
+            "Price adjustments on mature nodes force OEM redesigns.",
+          basis: "speculative",
+          citation: null,
+        },
+      ],
+      affectedOccupations: [
+        {
+          role: "Hardware Systems Architect",
+          impact:
+            "Must evaluate multi-chiplet alternatives to single monolithic dies.",
+          timeframe: "short_term",
+          basis: "evidence_based",
+          citation: {
+            claimId: 102,
+          },
+        },
+      ],
+      decisionImplications: [
+        {
+          decisionMaker: "Supply Chain Director",
+          recommendationOrTradeoff:
+            "Dual-source secondary packaging partners to hedge against yield bottlenecks.",
+          basis: "speculative",
+          citation: null,
+        },
+      ],
+    };
+
+    const mockMaterial: ArtifactEventMaterial = {
+      eventId: 42,
+      eventTitle: "3nm Wafer Packaging Dynamics",
+      industryName: "Industry",
+      industrySlug: "industry",
+      articles: [
+        {
+          id: 201,
+          title: "Semiconductor Supply Shifts",
+          sourceName: "Tech Report",
+          sourceDomain: "semianalysis.com",
+          publishedAt: Date.now(),
+          summary: "Packaging delays impact shipment schedules.",
+          bodyText:
+            "Advanced packaging wait times grew to 24 weeks according to industry disclosures.",
+        },
+      ],
+      verifiedClaims: [
+        {
+          id: 101,
+          claimText: "Advanced packaging wait times grew to 24 weeks.",
+          claimType: "fact",
+          consensusStatus: "verified",
+        },
+        {
+          id: 102,
+          claimText: "Architects are transitioning to multi-chiplet designs.",
+          claimType: "interpretation",
+          consensusStatus: "verified",
+        },
+      ],
+    };
+
+    it("parses valid JSON with citations successfully", () => {
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(valid),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.claimId).toBe(101);
+      expect(res?.affectedIndustries[1].basis).toBe("speculative");
+    });
+
+    it("parses markdown code-fenced JSON successfully", () => {
+      const fenced = "```json\n" + JSON.stringify(valid) + "\n```";
+      const res = parseIndustryImpactReportOutput(fenced, mockMaterial);
+      expect(res).not.toBeNull();
+      expect(res?.summary).toBe(valid.summary);
+    });
+
+    it("returns null on malformed JSON or empty string", () => {
+      expect(
+        parseIndustryImpactReportOutput("not a json", mockMaterial),
+      ).toBeNull();
+      expect(parseIndustryImpactReportOutput("", mockMaterial)).toBeNull();
+    });
+
+    it("returns null when basis is evidence_based but citation is missing or empty (M1 defense)", () => {
+      const invalidNoCitation = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face delays.",
+            transmissionPath: "Capacity shortage.",
+            basis: "evidence_based",
+            citation: null, // invalid!
+          },
+        ],
+      };
+      expect(
+        parseIndustryImpactReportOutput(
+          JSON.stringify(invalidNoCitation),
+          mockMaterial,
+        ),
+      ).toBeNull();
+
+      const invalidEmptyCitation = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face delays.",
+            transmissionPath: "Capacity shortage.",
+            basis: "evidence_based",
+            citation: {}, // missing claimId and quote!
+          },
+        ],
+      };
+      expect(
+        parseIndustryImpactReportOutput(
+          JSON.stringify(invalidEmptyCitation),
+          mockMaterial,
+        ),
+      ).toBeNull();
+    });
+
+    it("downgrades phantom/unverified claim citations to speculative (M4 defense)", () => {
+      const phantomPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS advanced packaging lines face lead time expansion.",
+            transmissionPath:
+              "Foundry front-end wafer orders exceed packaging capacity.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 99999, // phantom claimId not in mockMaterial!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(phantomPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      // Must be safely downgraded to speculative and citation cleared
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("validates direct article quote if claimId is omitted but articleId and quote match", () => {
+      const quotePayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              articleId: 201,
+              quote: "Advanced packaging wait times grew to 24 weeks",
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(quotePayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.articleId).toBe(201);
+    });
+
+    it("downgrades disputed or unverified claims to speculative (P2 defense)", () => {
+      const disputedMaterial: ArtifactEventMaterial = {
+        ...mockMaterial,
+        verifiedClaims: [
+          {
+            id: 103,
+            claimText: "Disputed packaging throughput claim.",
+            claimType: "prediction",
+            consensusStatus: "disputed", // Disputed!
+          },
+        ],
+      };
+
+      const payload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Packaging",
+            impact: "Throughput claims are challenged.",
+            transmissionPath: "Vendor debate.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 103,
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(payload),
+        disputedMaterial,
+      );
+      expect(res).not.toBeNull();
+      // Disputed claims cannot support evidence_based badge; must be downgraded
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("sanitizes hallucinated quote attached to a valid claimId (P1 defense)", () => {
+      const payload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face lead time expansion.",
+            transmissionPath: "Wafer volume exceeds packaging.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 101, // Valid claim!
+              articleId: 201,
+              quote: "Completely fabricated quote never present in body", // Fake quote!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(payload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.claimId).toBe(101);
+      // Fabricated quote must be stripped so it is not shown under Verified badge
+      expect(res?.affectedIndustries[0].citation?.quote).toBeUndefined();
+      expect(res?.affectedIndustries[0].citation?.articleId).toBeUndefined();
+    });
+
+    it("rejects quotes that only exist in AI summary or title and not raw bodyText (P1 defense)", () => {
+      const summaryQuotePayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              articleId: 201,
+              // This sentence is in article.summary but NOT in raw bodyText
+              quote: "Packaging delays impact shipment schedules.",
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(summaryQuotePayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      // Must be downgraded because summary is not raw proof
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("rejects whitespace or trivial quotes (P1 defense)", () => {
+      const trivialPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              articleId: 201,
+              quote: "   ",
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(trivialPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("speculative");
+      expect(res?.affectedIndustries[0].citation).toBeNull();
+    });
+
+    it("clears phantom claimId when fallback quote matches an actual article (Seat 1 P2 defense)", () => {
+      const fallbackPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Packaging lines delay shipment.",
+            transmissionPath: "Wait times increase.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 99999, // Phantom claimId!
+              quote: "Advanced packaging wait times grew to 24 weeks", // Real quote!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(fallbackPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      // Phantom claimId must be cleared so UI does not display [Claim #99999]
+      expect(res?.affectedIndustries[0].citation?.claimId).toBeUndefined();
+      expect(res?.affectedIndustries[0].citation?.articleId).toBe(201);
+      expect(res?.affectedIndustries[0].citation?.sourceDomain).toBe(
+        "semianalysis.com",
+      );
+    });
+
+    it("clears model-fabricated sourceDomain when claim is verified without verified quote (Seat 1 P2 defense)", () => {
+      const fakeDomainPayload = {
+        ...valid,
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "CoWoS lines face lead time expansion.",
+            transmissionPath: "Capacity shortage.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 101,
+              sourceDomain: "fabricated-authority.test", // Hallucinated domain!
+            },
+          },
+        ],
+      };
+
+      const res = parseIndustryImpactReportOutput(
+        JSON.stringify(fakeDomainPayload),
+        mockMaterial,
+      );
+      expect(res).not.toBeNull();
+      expect(res?.affectedIndustries[0].basis).toBe("evidence_based");
+      expect(res?.affectedIndustries[0].citation?.claimId).toBe(101);
+      // Hallucinated sourceDomain must be stripped
+      expect(res?.affectedIndustries[0].citation?.sourceDomain).toBeUndefined();
+    });
+  });
+
+  describe("parseSupplyChainRippleMapOutput (Issue #21)", () => {
+    const valid = {
+      focalNode: "Foundry 3nm wafer fabrication expansion",
+      upstreamRipples: [
+        {
+          target: "EUV Photolithography Optics",
+          effect:
+            "High-NA optics mirrors delivery schedules tighten by 3 months.",
+          transmissionChannel: "Fab tooling order acceleration.",
+          isHypothesis: true,
+          confidence: "high",
+        },
+      ],
+      downstreamRipples: [
+        {
+          target: "Hyperscale Server Motherboards",
+          effect:
+            "Transition to PCIe 6.0 retimers faces component allocation constraints.",
+          transmissionChannel:
+            "Accelerated ASIC production pulls forward interconnect inventory.",
+          isHypothesis: true,
+          confidence: "medium",
+        },
+      ],
+      keyHypotheses: [
+        "Supplier capacity can ramp within 6 months without compounding lead times.",
+      ],
+    };
+
+    it("parses valid JSON with isHypothesis: true successfully", () => {
+      const res = parseSupplyChainRippleMapOutput(JSON.stringify(valid));
+      expect(res).toEqual(valid);
+      expect(res?.upstreamRipples[0].isHypothesis).toBe(true);
+      expect(res?.downstreamRipples[0].isHypothesis).toBe(true);
+    });
+
+    it("parses markdown code-fenced JSON successfully", () => {
+      const fenced = "```json\n" + JSON.stringify(valid) + "\n```";
+      const res = parseSupplyChainRippleMapOutput(fenced);
+      expect(res).toEqual(valid);
+    });
+
+    it("returns null on malformed JSON or missing required fields", () => {
+      expect(parseSupplyChainRippleMapOutput("not json")).toBeNull();
+      expect(
+        parseSupplyChainRippleMapOutput(
+          JSON.stringify({ focalNode: "Incomplete" }),
+        ),
+      ).toBeNull();
+    });
+
+    it("rejects when isHypothesis is false or omitted (M2 mutation defense)", () => {
+      const invalidFalse = {
+        ...valid,
+        upstreamRipples: [
+          {
+            target: "EUV Photolithography Optics",
+            effect: "High-NA optics mirrors delivery schedules tighten.",
+            transmissionChannel: "Fab tooling order acceleration.",
+            isHypothesis: false, // Must be true!
+            confidence: "high",
+          },
+        ],
+      };
+      expect(
+        parseSupplyChainRippleMapOutput(JSON.stringify(invalidFalse)),
+      ).toBeNull();
+
+      const invalidOmitted = {
+        ...valid,
+        downstreamRipples: [
+          {
+            target: "Hyperscale Server Motherboards",
+            effect: "Transition to PCIe 6.0 retimers faces constraints.",
+            transmissionChannel: "Accelerated ASIC production.",
+            // isHypothesis omitted!
+            confidence: "medium",
+          },
+        ],
+      };
+      expect(
+        parseSupplyChainRippleMapOutput(JSON.stringify(invalidOmitted)),
       ).toBeNull();
     });
   });

@@ -12,18 +12,22 @@ import { PolicyImpactCard } from "../src/components/artifacts/PolicyImpactCard";
 import { RegulationWatchCard } from "../src/components/artifacts/RegulationWatchCard";
 import { SkillsCareerTrendsCard } from "../src/components/artifacts/SkillsCareerTrendsCard";
 import { StoryBriefCard } from "../src/components/artifacts/StoryBriefCard";
+import { IndustryImpactCard } from "../src/components/artifacts/IndustryImpactCard";
+import { SupplyChainRippleCard } from "../src/components/artifacts/SupplyChainRippleCard";
 import type {
   AudienceExplain,
   ClassroomDiscussionBuilder,
   EducationEvidenceChecker,
   FinanceConceptExplainer,
   FinanceRealityCheck,
+  IndustryImpactReport,
   LearningMaterial,
   PolicyImpactExplorer,
   RegulationWatch,
   ResearchPaperDecoder,
   SkillsCareerTrends,
   StoryBrief,
+  SupplyChainRippleMap,
 } from "../src/lib/artifacts/types";
 import { quizQuestionSchema } from "../src/lib/artifacts/types";
 
@@ -415,5 +419,123 @@ describe("SkillsCareerTrendsCard", () => {
     expect(html).toContain(
       "Focus on system architecture and domain validation skills.",
     );
+  });
+
+  describe("IndustryImpactCard (Issue #21)", () => {
+    it("renders summary, industries, badges, quotes and decisions", () => {
+      const report: IndustryImpactReport = {
+        summary: "Leading foundries transition to high-NA EUV tooling.",
+        affectedIndustries: [
+          {
+            industry: "Semiconductor Packaging",
+            impact: "Advanced substrate lead times lengthen to 24 weeks.",
+            transmissionPath:
+              "Front-end wafer starts outpace packaging capacity.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 789,
+              quote: "Wait times grew to 24 weeks.",
+            },
+          },
+          {
+            industry: "Automotive Microcontrollers",
+            impact: "Foundries reallocate legacy lines.",
+            transmissionPath: "Fab conversion programs.",
+            basis: "speculative",
+            citation: null,
+          },
+        ],
+        affectedOccupations: [
+          {
+            role: "Packaging Design Engineer",
+            impact: "Adopting 2.5D interposer routing tools.",
+            timeframe: "short_term",
+            basis: "evidence_based",
+            citation: { claimId: 790 },
+          },
+        ],
+        decisionImplications: [
+          {
+            decisionMaker: "Procurement VP",
+            recommendationOrTradeoff:
+              "Secure substrate allocation 12 months ahead.",
+            basis: "evidence_based",
+            citation: {
+              claimId: 791,
+              sourceDomain: "semi.org",
+              quote: "Lead times hit 52 weeks.",
+            },
+          },
+        ],
+      };
+
+      const html = renderToStaticMarkup(
+        createElement(IndustryImpactCard, { report }),
+      );
+
+      expect(html).toContain("Industry Impact Report");
+      expect(html).toContain(
+        "Leading foundries transition to high-NA EUV tooling.",
+      );
+      expect(html).toContain("Semiconductor Packaging");
+      expect(html).toContain("有依据 / Verified");
+      expect(html).toContain("[Claim #789]");
+      expect(html).toContain("Wait times grew to 24 weeks.");
+      expect(html).toContain("Automotive Microcontrollers");
+      expect(html).toContain("推测 / Speculative");
+      expect(html).toContain("Packaging Design Engineer");
+      expect(html).toContain("[Claim #790]");
+      expect(html).toContain("Procurement VP");
+      expect(html).toContain("[Claim #791]");
+      expect(html).toContain("(semi.org)");
+      expect(html).toContain("Lead times hit 52 weeks.");
+      expect(html).toContain("Secure substrate allocation 12 months ahead.");
+    });
+  });
+
+  describe("SupplyChainRippleCard (Issue #21)", () => {
+    it("renders hypothesis warning banner, focal node, upstream and downstream ripples", () => {
+      const ripple: SupplyChainRippleMap = {
+        focalNode: "Foundry 3nm wafer fabrication expansion",
+        upstreamRipples: [
+          {
+            target: "Photolithography Optics",
+            effect: "High-NA mirrors delivery schedules tighten by 3 months.",
+            transmissionChannel: "Fab tooling order acceleration.",
+            isHypothesis: true,
+            confidence: "high",
+          },
+        ],
+        downstreamRipples: [
+          {
+            target: "Server Motherboard Integrators",
+            effect: "Component allocation constraints on PCIe retimers.",
+            transmissionChannel: "Accelerated ASIC production.",
+            isHypothesis: true,
+            confidence: "medium",
+          },
+        ],
+        keyHypotheses: [
+          "Supplier capacity can ramp within 6 months without compounding lead times.",
+        ],
+      };
+
+      const html = renderToStaticMarkup(
+        createElement(SupplyChainRippleCard, { ripple }),
+      );
+
+      expect(html).toContain("Supply-Chain Ripple Map");
+      // Must contain the hypothesis warning banner
+      expect(html).toContain("供应链上下游波及效应均为推演模型与传导假说");
+      expect(html).toContain("Foundry 3nm wafer fabrication expansion");
+      expect(html).toContain("Photolithography Optics");
+      expect(html).toContain("High-NA mirrors delivery schedules tighten");
+      expect(html).toContain("Hypothesis (high)");
+      expect(html).toContain("Server Motherboard Integrators");
+      expect(html).toContain("Hypothesis (medium)");
+      expect(html).toContain(
+        "Supplier capacity can ramp within 6 months without compounding lead times.",
+      );
+    });
   });
 });

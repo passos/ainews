@@ -4,23 +4,27 @@ import {
   type EducationEvidenceChecker,
   type FinanceConceptExplainer,
   type FinanceRealityCheck,
+  type IndustryImpactReport,
   type LearningMaterial,
   type PolicyImpactExplorer,
   type RegulationWatch,
   type ResearchPaperDecoder,
   type SkillsCareerTrends,
   type StoryBrief,
+  type SupplyChainRippleMap,
   audienceExplainSchema,
   classroomDiscussionBuilderSchema,
   educationEvidenceCheckerSchema,
   financeConceptExplainerSchema,
   financeRealityCheckSchema,
+  industryImpactReportSchema,
   learningMaterialSchema,
   policyImpactExplorerSchema,
   regulationWatchSchema,
   researchPaperDecoderSchema,
   skillsCareerTrendsSchema,
   storyBriefSchema,
+  supplyChainRippleMapSchema,
 } from "../../lib/artifacts/types";
 import type { TextRequest } from "../../providers/adapters";
 import { WRITE_THINKING } from "../analyze/prompts";
@@ -36,6 +40,8 @@ export const FINANCE_REALITY_CHECK_PROMPT_VERSION = "finance-reality-check-v1";
 export const REGULATION_WATCH_PROMPT_VERSION = "regulation-watch-v1";
 export const FINANCE_CONCEPT_PROMPT_VERSION = "finance-concept-v1";
 export const SKILLS_CAREER_PROMPT_VERSION = "skills-career-v1";
+export const INDUSTRY_IMPACT_PROMPT_VERSION = "industry-impact-v1";
+export const SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION = "supply-chain-ripple-v1";
 
 export const BRIEF_MAX_OUTPUT_TOKENS = 1500;
 export const EXPLAIN_MAX_OUTPUT_TOKENS = 2000;
@@ -53,6 +59,14 @@ export interface ArtifactArticleMaterial {
   bodyText?: string | null;
 }
 
+export interface ArtifactVerifiedClaim {
+  id: number;
+  claimText: string;
+  claimType: string;
+  consensusStatus: string;
+  realityCheck?: string;
+}
+
 export interface ArtifactEventMaterial {
   eventId: number;
   eventTitle: string;
@@ -60,6 +74,7 @@ export interface ArtifactEventMaterial {
   industrySlug: string;
   disclaimer?: string | null;
   articles: ArtifactArticleMaterial[];
+  verifiedClaims?: ArtifactVerifiedClaim[];
 }
 
 function formatArticlesContext(
@@ -86,6 +101,18 @@ function formatArticlesContext(
       return parts.join("\n");
     })
     .join("\n\n---\n\n");
+}
+
+function formatVerifiedClaimsContext(claims?: ArtifactVerifiedClaim[]): string {
+  if (!claims || claims.length === 0) {
+    return "No verified claims recorded for this event yet.";
+  }
+  return claims
+    .map(
+      (c) =>
+        `- [Claim ID: ${c.id}] (${c.claimType}, consensus: ${c.consensusStatus}${c.realityCheck ? `, reality: ${c.realityCheck}` : ""}): "${c.claimText}"`,
+    )
+    .join("\n");
 }
 
 function extractJsonText(rawText: string): string {
@@ -753,6 +780,285 @@ export function parseSkillsCareerTrendsOutput(
     const jsonStr = extractJsonText(rawText);
     const parsed = JSON.parse(jsonStr);
     const res = skillsCareerTrendsSchema.safeParse(parsed);
+    return res.success ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Industry Impact Report (Newsren §2.4)
+// -----------------------------------------------------------------------------
+
+export function buildIndustryImpactReportRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a senior cross-industry intelligence analyst for Personal News (${material.industryName}).`,
+    "Produce an Industry Impact Report evaluating how this story affects specific industries, occupations, and decision makers.",
+    "CRITICAL EDITORIAL RULE: You must clearly distinguish between evidence-grounded facts and analytical speculation.",
+    "- If an impact is supported by verified facts, statements, or benchmarks in the reports, mark basis as 'evidence_based' and cite a specific Claim ID (from Verified Claims) or an article ID and direct quote.",
+    "- If an impact is a logical extrapolation or scenario projection, mark basis as 'speculative' and omit/clear citation.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "summary": "Executive summary of the cross-industry transmission mechanism and macro significance.",
+  "affectedIndustries": [
+    {
+      "industry": "Specific industry sector (e.g. Semiconductor Foundry, Cloud Infrastructure, Automotive OEM).",
+      "impact": "Concrete operational, technical, or commercial consequence.",
+      "transmissionPath": "How the change propagates into this sector.",
+      "basis": "evidence_based" or "speculative",
+      "citation": {
+        "claimId": 123 (optional: reference to Claim ID from verified claims),
+        "articleId": 456 (optional: reference to Article ID),
+        "sourceDomain": "domain.com" (optional),
+        "quote": "Direct quote from source" (optional)
+      }
+    }
+  ],
+  "affectedOccupations": [
+    {
+      "role": "Specific job title or profession (e.g. Silicon Layout Engineer, Curriculum Coordinator).",
+      "impact": "Day-to-day workflow change, tooling shift, or labor demand trend.",
+      "timeframe": "immediate" or "short_term" or "long_term",
+      "basis": "evidence_based" or "speculative",
+      "citation": null (or citation object if evidence_based)
+    }
+  ],
+  "decisionImplications": [
+    {
+      "decisionMaker": "Role or executive persona (e.g. Enterprise Procurement Officer, CTO, University Dean).",
+      "recommendationOrTradeoff": "Key strategic recommendation, trade-off, or risk to evaluate.",
+      "basis": "evidence_based" or "speculative",
+      "citation": null (or citation object if evidence_based)
+    }
+  ]
+}`,
+    "Rules:",
+    "- Never invent benchmark numbers, regulatory mandates, or vendor commitments. Speculative impacts must be labeled 'speculative'.",
+    "- Output valid raw JSON only, without markdown code fences or commentary.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+    "\nVerified Claims and Quotes (for citation anchoring):",
+    formatVerifiedClaimsContext(material.verifiedClaims),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseIndustryImpactReportOutput(
+  rawText: string,
+  material?: ArtifactEventMaterial,
+): IndustryImpactReport | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = industryImpactReportSchema.safeParse(parsed);
+    if (!res.success) {
+      return null;
+    }
+    const data = res.data;
+
+    // Semantic citation verification: if material is provided, verify evidence citations
+    if (material) {
+      const claimLookup = new Map(
+        (material.verifiedClaims || []).map((c) => [c.id, c]),
+      );
+      const articleLookup = new Map(material.articles.map((a) => [a.id, a]));
+
+      const verifyAndDowngrade = <
+        T extends {
+          basis: "evidence_based" | "speculative";
+          citation?: {
+            claimId?: number;
+            articleId?: number;
+            sourceDomain?: string;
+            quote?: string;
+          } | null;
+        },
+      >(
+        item: T,
+      ): T => {
+        if (item.basis === "evidence_based") {
+          let verified = false;
+          const sanitizedCitation = item.citation ? { ...item.citation } : null;
+
+          if (sanitizedCitation?.claimId !== undefined) {
+            const matchedClaim = claimLookup.get(sanitizedCitation.claimId);
+            // Must exist and must have consensusStatus 'verified'
+            // Disputed or unverified claims cannot support evidence_based
+            if (matchedClaim && matchedClaim.consensusStatus === "verified") {
+              verified = true;
+              // If model additionally provided an attached quote, verify that it's in actual bodyText
+              let quoteVerified = false;
+              if (sanitizedCitation.quote) {
+                const trimmedQuote = sanitizedCitation.quote.trim();
+                if (trimmedQuote.length >= 5) {
+                  const targetArticles = sanitizedCitation.articleId
+                    ? [articleLookup.get(sanitizedCitation.articleId)].filter(
+                        Boolean,
+                      )
+                    : material.articles;
+                  for (const art of targetArticles) {
+                    if (
+                      art?.bodyText &&
+                      art.bodyText
+                        .toLowerCase()
+                        .includes(trimmedQuote.toLowerCase())
+                    ) {
+                      quoteVerified = true;
+                      sanitizedCitation.articleId = art.id;
+                      sanitizedCitation.sourceDomain = art.sourceDomain;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (!quoteVerified) {
+                // Do not display hallucinated quote, articleId, or sourceDomain alongside verified claim ID
+                delete sanitizedCitation.quote;
+                delete sanitizedCitation.articleId;
+                delete sanitizedCitation.sourceDomain;
+              }
+            } else {
+              // Invalid or disputed claimId: clear it so quote fallback does not carry a ghost claimId
+              delete sanitizedCitation.claimId;
+            }
+          }
+
+          // If not verified via claim, verify via direct raw bodyText quote
+          if (
+            !verified &&
+            sanitizedCitation?.quote &&
+            sanitizedCitation.quote.trim().length >= 5
+          ) {
+            const trimmedQuote = sanitizedCitation.quote.trim();
+            const targetArticles = sanitizedCitation.articleId
+              ? [articleLookup.get(sanitizedCitation.articleId)].filter(Boolean)
+              : material.articles;
+            for (const art of targetArticles) {
+              // Quote MUST come from actual raw bodyText, not AI summary or title
+              if (
+                art?.bodyText &&
+                art.bodyText.toLowerCase().includes(trimmedQuote.toLowerCase())
+              ) {
+                verified = true;
+                delete sanitizedCitation.claimId;
+                sanitizedCitation.articleId = art.id;
+                sanitizedCitation.sourceDomain = art.sourceDomain;
+                break;
+              }
+            }
+          }
+
+          if (!verified) {
+            // Phantom, disputed, or unverified citation: safely downgrade to speculative
+            return {
+              ...item,
+              basis: "speculative",
+              citation: null,
+            };
+          }
+
+          return {
+            ...item,
+            citation: sanitizedCitation,
+          };
+        }
+        return item;
+      };
+
+      data.affectedIndustries = data.affectedIndustries.map(verifyAndDowngrade);
+      data.affectedOccupations =
+        data.affectedOccupations.map(verifyAndDowngrade);
+      data.decisionImplications =
+        data.decisionImplications.map(verifyAndDowngrade);
+    }
+
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Supply-Chain Ripple Map (Newsren §3 Industry)
+// -----------------------------------------------------------------------------
+
+export function buildSupplyChainRippleMapRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are an industrial supply chain modeling specialist for Personal News (${material.industryName}).`,
+    "Generate a Supply-Chain Ripple Map modeling potential upstream component/equipment and downstream assembly/distribution ramifications.",
+    "CRITICAL EDITORIAL RULE: In accordance with Newsren §3, supply chain ripple consequences MUST be presented strictly as hypotheses, NOT established certainties.",
+    "Every item in upstreamRipples and downstreamRipples MUST set isHypothesis: true.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "focalNode": "The central industrial/corporate shift or transition being analyzed (e.g. Foundry 3nm node ramp-up).",
+  "upstreamRipples": [
+    {
+      "target": "Upstream tier-1 / tier-2 supplier sector or input commodity (e.g. Photolithography Optics, Wafer Substrates).",
+      "effect": "Hypothesized volume, pricing, or supply lead time implication.",
+      "transmissionChannel": "How demand or supply shock transmits upstream.",
+      "isHypothesis": true,
+      "confidence": "high" or "medium" or "low"
+    }
+  ],
+  "downstreamRipples": [
+    {
+      "target": "Downstream OEM, integrator, or end-market (e.g. Hyperscale Datacenters, Smartphone Assembly).",
+      "effect": "Hypothesized margin, product cadence, or substitution pressure.",
+      "transmissionChannel": "How output shock or cost propagates downstream.",
+      "isHypothesis": true,
+      "confidence": "high" or "medium" or "low"
+    }
+  ],
+  "keyHypotheses": [
+    "Core working hypothesis about inventory buffers or substitution elasticities."
+  ]
+}`,
+    "Rules:",
+    "- All ripple impacts MUST be presented as hypotheses (isHypothesis must be true).",
+    "- Output valid raw JSON only, without markdown code fences or conversational filler.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nVerified Source Reports:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+export function parseSupplyChainRippleMapOutput(
+  rawText: string,
+): SupplyChainRippleMap | null {
+  try {
+    const jsonStr = extractJsonText(rawText);
+    const parsed = JSON.parse(jsonStr);
+    const res = supplyChainRippleMapSchema.safeParse(parsed);
     return res.success ? res.data : null;
   } catch {
     return null;
