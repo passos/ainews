@@ -316,3 +316,117 @@ it("caps converted markdown by UTF-8 bytes", async () => {
   ))!.arrayBuffer();
   expect(body.byteLength).toBeLessThanOrEqual(MAX_BODY_BYTES);
 });
+
+function failFirstDiffWrite(): D1Database {
+  let failed = false;
+  return {
+    batch: (statements: D1PreparedStatement[]) => env.DB.batch(statements),
+    prepare(sql: string) {
+      const statement = env.DB.prepare(sql);
+      if (!sql.includes("INSERT INTO event_artifacts")) return statement;
+      return {
+        bind(...values: unknown[]) {
+          const bound = statement.bind(...values);
+          return {
+            async run() {
+              if (!failed) {
+                failed = true;
+                throw new Error("transient diff write failure");
+              }
+              return bound.run();
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
+it("review probe: UTF-8 complete two-byte boundary stays within body cap", async () => {
+  const converted = "é".repeat(MAX_BODY_BYTES / 2) + "x";
+  const fetchHtml = async (url: string) =>
+    url.includes("robots.txt")
+      ? new Response("User-agent: *\nAllow: /")
+      : new Response("<html>Paper</html>", {
+          headers: { "Content-Type": "text/html" },
+        });
+  await trackEventPrimarySources(
+    {
+      db: env.DB,
+      bodies: env.BODIES,
+      fetch: fetchHtml as typeof fetch,
+      toMarkdown: async () => converted,
+    },
+    env,
+    eventId,
+    ["arxiv.org"],
+    1000,
+  );
+  const row = await env.DB.prepare(
+    "SELECT id,body_sha FROM articles WHERE canonical_url=?",
+  )
+    .bind(target)
+    .first<{ id: number; body_sha: string }>();
+  const body = await (await env.BODIES.get(
+    `bodies/${row!.id}/${row!.body_sha}.md`,
+  ))!.arrayBuffer();
+  expect(body.byteLength).toBeLessThanOrEqual(MAX_BODY_BYTES);
+  expect(new TextDecoder().decode(body)).not.toContain("\uFFFD");
+});
+
+it("review probe: no-claims retry repairs failed diff sync", async () => {
+  const noClaims = {
+    generateText: async () => ({ text: '{"claims":[]}', finishReason: "STOP" }),
+  } as unknown as ModelClient;
+  const enabled = { ...env, MODEL_CALLS_ENABLED: "true" } as PipelineEnv;
+  await expect(
+    generateEventEvidence(enabled, eventId, 1000, {
+      db: failFirstDiffWrite(),
+      bodies: env.BODIES,
+      models: noClaims,
+    }),
+  ).rejects.toThrow("transient diff write failure");
+  await generateEventEvidence(enabled, eventId, 1001, {
+    db: env.DB,
+    bodies: env.BODIES,
+    models: noClaims,
+  });
+  await generateEventArtifacts(env as PipelineEnv, eventId, 1001, {
+    db: env.DB,
+    bodies: env.BODIES,
+    models,
+  });
+  const diff = await env.DB.prepare(
+    "SELECT id FROM event_artifacts WHERE event_id=? AND type='revision_diff'",
+  )
+    .bind(eventId)
+    .first();
+  expect(diff).not.toBeNull();
+});
+
+it("review probe: claim approval retry repairs failed diff sync", async () => {
+  await env.DB.prepare("UPDATE events SET revision=2 WHERE id=?")
+    .bind(eventId)
+    .run();
+  const claim = await env.DB.prepare(
+    "INSERT INTO claims(event_id,claim_text,claim_type,consensus_status,status,input_revision,prompt_version,model,created_at) VALUES(?,'Reviewed result','fact','verified','pending_review',2,'v1','mock',1000) RETURNING id",
+  )
+    .bind(eventId)
+    .first<{ id: number }>();
+  await syncRevisionDiff(env.DB, eventId, 2, "pending_review", 1000);
+  const data = {
+    claimId: claim!.id,
+    decision: "approved" as const,
+    expectedRevision: 2,
+  };
+  await expect(reviewClaim(failFirstDiffWrite(), data)).rejects.toThrow(
+    "transient diff write failure",
+  );
+  await reviewClaim(env.DB, data);
+  const diff = await env.DB.prepare(
+    "SELECT content FROM event_artifacts WHERE event_id=? AND type='revision_diff'",
+  )
+    .bind(eventId)
+    .first<{ content: string }>();
+  expect(JSON.parse(diff!.content).newClaims).toContain("Reviewed result");
+});

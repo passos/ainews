@@ -116,6 +116,7 @@ export async function generateEventEvidence(
   overrides?: Partial<EvidenceDeps>,
 ): Promise<EvidenceGenerationResult> {
   const deps = defaultEvidenceDeps(env, overrides, commitNow);
+  const now = deps.now();
 
   // Invariant: respect MODEL_CALLS_ENABLED safety switch
   if (!isEnabled(env, "MODEL_CALLS_ENABLED")) {
@@ -197,6 +198,22 @@ export async function generateEventEvidence(
     .first<{ id: number }>();
 
   if (existingClaim) {
+    // If claims are already complete, ensure the deterministic revision_diff artifact exists
+    const existingDiff = await deps.db
+      .prepare(
+        `SELECT id FROM event_artifacts
+         WHERE event_id = ?1 AND type = 'revision_diff' AND input_revision = ?2`,
+      )
+      .bind(eventId, inputRevision)
+      .first<{ id: number }>();
+
+    if (!existingDiff) {
+      const isFinance = event.industry_slug === FINANCE_SLUG;
+      const isAuto = !isFinance && event.industry_publish_mode === "auto";
+      const diffStatus = isAuto ? "published" : "pending_review";
+      await syncRevisionDiff(deps.db, eventId, inputRevision, diffStatus, now);
+    }
+
     return { status: "skipped", eventId, reason: "already_exists" };
   }
 
@@ -352,7 +369,6 @@ export async function generateEventEvidence(
 
   // 5. Parse output and verify quotes
   const parsed = parseClaimsOutput(res.text);
-  const now = deps.now();
 
   // If output failed to parse, fail as recoverable skipped (do not write sentinel)
   if (!parsed) {
@@ -419,6 +435,21 @@ export async function generateEventEvidence(
     .bind(eventId, inputRevision)
     .first<{ id: number }>();
   if (concurrentCheck) {
+    const existingDiff = await deps.db
+      .prepare(
+        `SELECT id FROM event_artifacts
+         WHERE event_id = ?1 AND type = 'revision_diff' AND input_revision = ?2`,
+      )
+      .bind(eventId, inputRevision)
+      .first<{ id: number }>();
+
+    if (!existingDiff) {
+      const isFinance = event.industry_slug === FINANCE_SLUG;
+      const isAuto = !isFinance && event.industry_publish_mode === "auto";
+      const diffStatus = isAuto ? "published" : "pending_review";
+      await syncRevisionDiff(deps.db, eventId, inputRevision, diffStatus, now);
+    }
+
     return { status: "skipped", eventId, reason: "already_exists" };
   }
 

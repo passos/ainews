@@ -50,17 +50,9 @@ function truncateUtf8Bytes(str: string, maxBytes: number): string {
   const bytes = new TextEncoder().encode(str);
   if (bytes.byteLength <= maxBytes) return str;
   let end = maxBytes;
-  while (end > 0 && (bytes[end - 1] & 0xc0) === 0x80) {
-    end--;
-  }
-  if (end > 0) {
-    const lead = bytes[end - 1];
-    let charLen = 1;
-    if ((lead & 0xe0) === 0xc0) charLen = 2;
-    else if ((lead & 0xf0) === 0xe0) charLen = 3;
-    else if ((lead & 0xf8) === 0xf0) charLen = 4;
-    if (end - 1 + charLen > maxBytes) {
-      end = end - 1;
+  if ((bytes[end] & 0xc0) === 0x80) {
+    while (end > 0 && (bytes[end] & 0xc0) === 0x80) {
+      end--;
     }
   }
   return new TextDecoder("utf-8").decode(bytes.subarray(0, end));

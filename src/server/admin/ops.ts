@@ -1278,24 +1278,39 @@ export async function reviewClaim(
     .bind(targetStatus, data.claimId, data.expectedRevision)
     .run();
 
-  const success = res.meta.changes === 1;
-  if (success && data.decision === "approved") {
-    const claim = await database
-      .prepare(`SELECT event_id FROM claims WHERE id = ?1`)
-      .bind(data.claimId)
-      .first<{ event_id: number }>();
-    if (claim) {
-      await syncRevisionDiff(
-        database,
-        claim.event_id,
-        data.expectedRevision,
-        "published",
-        Date.now(),
-      );
-    }
+  const changes = res.meta.changes ?? 0;
+
+  // Retrieve current claim state to support idempotent retries / diff synchronization
+  const claim = await database
+    .prepare(
+      `SELECT event_id, status FROM claims
+       WHERE id = ?1
+         AND input_revision = ?2
+         AND EXISTS (
+           SELECT 1 FROM events e
+           WHERE e.id = claims.event_id
+             AND e.revision = ?2
+         )`,
+    )
+    .bind(data.claimId, data.expectedRevision)
+    .first<{ event_id: number; status: string }>();
+
+  if (!claim) {
+    return false;
   }
 
-  return success;
+  if (claim.status === "published" && data.decision === "approved") {
+    await syncRevisionDiff(
+      database,
+      claim.event_id,
+      data.expectedRevision,
+      "published",
+      Date.now(),
+    );
+    return true;
+  }
+
+  return changes === 1 || claim.status === targetStatus;
 }
 
 // -----------------------------------------------------------------------------
