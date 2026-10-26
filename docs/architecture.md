@@ -54,8 +54,33 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 | 路由 | SSR 模式 | 数据 |
 |---|---|---|
 | `/`、`/s/$section`、`/e/$eventId`、`/digest/$section/$date`、`/w/$watch` | 完整 SSR，次要区块流式 | loader 调 `publication/` 的 server function |
-| `/rss/*.xml` | server route，纯文本 | `publication/` |
+| `/a/$articleId` | 完整 SSR | loader 调 `publication/` 的 server function（D1 + R2 `BODIES`，不调模型，不占预算） |
+| `/rss/*.xml` | server route，纯文本 | `publication/`；板块 feed 的条目 `<link>` 是 `{SITE_URL}/a/{id}`，描述里带原始链接，guid 不变 |
 | `/admin/*` | `ssr: 'data-only'` | `admin/` 的 server function，先过 Access 中间件 |
+
+文章阅读页 `/a/$articleId`：
+
+- **已批准**只用 `approvedArticleWhere` 判断，不另写条件；不满足 → 404。显示的正文版本是通过这个条件的那一行的 `articles.body_sha`（就是审核记录绑定的版本），R2 键 `bodies/{article_id}/{body_sha}.md`，不按"最新的 R2 对象"找。
+- **显示范围**由信源的 `content_display`（第 9 节）决定，任何情况下都不显示超出范围的正文：
+  - `full`：全文。只用于公共领域或允许转载的信源（政府来源、arXiv）；商业媒体用 `excerpt`。管理员确认对方允许转载后，才在后台把信源改成 `full`。
+  - `excerpt`：从开头取完整的顶层块，合计不超过正文的 25%，也不超过 300 词；一块都放不下就不显示正文，不在段落中间截断。正文（或摘要）后面接 `Continue reading the original ↗`。
+  - `summary`：只显示摘要，不读 R2。
+  - `articles.body_kind` 不是 `full` 时（R2 里存的是 feed 摘要），按没有正文处理，不读 R2。
+  - R2 没有对象或读取出错：显示摘要和原始链接，状态码仍是 200。
+- 页头和页底都有原始链接 `Read the original at {source} ↗`。首页、板块页、事件页的文章卡片，标题链到 `/a/$id`，卡片上保留原始链接。
+- `<link rel="canonical">` 指向原文 URL（URL 为空时不输出）；`<title>` 是 `{文章标题} — {SITE_NAME}`。读者可见的文字只用英文。
+- Finance 文章页显示免责声明，有更正时显示更正（第 7 节）。
+- **渲染**：只在服务端把 markdown 转成 HTML，基于现有的 markdown-it（`lib/` 的 markdown 净化），不加新依赖；markdown-it 不进客户端包，`components/**` 和 `routes/**` 拿到的是 HTML 字符串。
+- **净化是唯一的防线**：CSP 的 `script-src` 带 `'unsafe-inline'`（`src/server/edge.ts`），挡不住注入的内联脚本。
+  - 输出的 HTML 只能来自 markdown-it 自己生成的标记，加上表格外面的横向滚动容器。
+  - 原始 HTML 一律不原样输出：`script`、`style`、`iframe`、`form` 等危险块整块删除；其他标签去掉，标签里的文字按纯文本转义输出。
+  - 链接只允许 `http`/`https`，外链 `rel="nofollow noopener noreferrer"`（与现有规则同值）。
+  - 图片只允许 `https`，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`；其他图片只留 alt 文字。
+- **排版**：正文宽度约 68 字符；标题、引用、代码、表格都有样式，表格和代码块在自己的容器里横向滚动；亮色和暗色都适用；375px 下页面不出现横向滚动。
+- **证据锚点**：Inspect evidence 里每条引文都带一个链接，原来的原文链接同时保留。
+  - 引文在阅读页的显示范围内：链到 `/a/{id}#:~:text=…`，在站内高亮。
+  - 引文在显示范围外（`excerpt` 截掉的部分、`summary` 信源、没有正文）：链到原文 URL，同样带 `#:~:text=…`，旁边标 `Quote is in the full article at {source}`。
+  - 文本片段由引文去掉 markdown 记号后生成。
 
 server function 的请求路径是 `/_serverFn/*`，不在 Access 保护的 `/admin*` 之下，公开页面也用它，所以不能整段交给 Access。后台 server function 的鉴权：先读 `Cf-Access-Jwt-Assertion` 请求头，没有就读 `CF_Authorization` cookie，两者做同样的完整校验（#4）。Zero Trust 应用要关闭 "Cookie Path Attribute"，否则 cookie 只在 `/admin` 下发送。
 
@@ -182,7 +207,7 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 | 表 | 关键约束 |
 |---|---|
 | `industries` | `slug` 唯一；`publish_mode`、`disclaimer`、`primary_domains`、提示词与门槛（JSON，带版本） |
-| `sources` | `(industry_id, feed_url)` 唯一；`kind rss\|html`、`fetch_rung`、`jina_enabled`、健康指标、`status active\|paused\|candidate` |
+| `sources` | `(industry_id, feed_url)` 唯一；`kind rss\|html`、`fetch_rung`、`jina_enabled`、健康指标、`status active\|paused\|candidate`；`content_display full\|excerpt\|summary`（非空，默认 `excerpt`，用 `ALTER TABLE ADD COLUMN` 加，不加表级 CHECK，因为加 CHECK 会生成重建表的迁移；取值闭集在写入和读取两端各校验一次，读出未知值按 `excerpt`） |
 | `articles` | `canonical_url` 唯一；`stage`、原文发布时间、抓取时间、`fetch_rung`、`body_sha` |
 | `analyses` | `article_id` + `prompt_version` 唯一；五维分数、内容类型、证据标签、总分 |
 | `reviews` | `(article_id, body_sha)` 唯一；`body_sha` 不能为空，没有正文时用摘要文本的 hash |
