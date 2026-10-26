@@ -254,8 +254,10 @@ W1（#80–#86、#92、#95）在本轮做完并部署。除标明"使用者原�
 
 ## 站点与语言
 
-- **站名改为 Daily**（使用者原话，2026-10-26："整个网站名称由 Personal News 改为 Daily"）。名称只在 `src/lib/site.ts` 的
+- **站名改为 Daily**（使用者原话，2026-10-26："整个网站名称由 Personal News 改为 Daily"）。读者看到的站名只在 `src/lib/site.ts` 的
   `SITE_NAME` 定义一次，抓取 UA 是 `DailyBot/1.0 (+https://news.ioenv.com)`。（#89，PR #91）
+  - 模型提示词里还有 17 处 "Personal News"（`src/pipeline/artifacts/prompts.ts` 14 处，`digest/prompt.ts` 2 处，`evidence/prompts.ts` 1 处），
+    读者看不到，**这次不改**：改提示词文字会改变 prompt hash，已有产物都要付费重新生成。下次因为别的原因改这几份提示词时，顺手一起换掉。
 - **读者看得到的文字一律用英文**（使用者要求）。CI 会扫描 `src/components`、`src/routes`、`src/lib`、`src/server/publication`，
   注释以外的字符串和页面文字里不能出现中文。后台页面不在扫描范围内。（#95，PR #96）
 - **UI 采用墨水屏风格**：主色是灰和白；版式借鉴 fastcade landing page（5:4 不对称首屏、3px 分隔线、灰色色带、直角），
