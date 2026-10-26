@@ -362,8 +362,19 @@ export async function evaluateEventWatches(
       await sha256Hex(`${watch.question}:${watch.criteria}`)
     ).slice(0, 8);
 
+    // watchNew depends on the hit history and watch.created_at, so it is an
+    // input of the judge and write calls and belongs in their ledger keys.
+    const newSha = (
+      await sha256Hex(
+        watchNew
+          .map((a) => `${a.id}:${a.body_sha}`)
+          .sort()
+          .join(","),
+      )
+    ).slice(0, 16);
+
     // Ledger keys bound to watch configuration hash and content input SHA
-    const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
+    const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}:${newSha}`;
 
     const newReportingText = watchNew
       .map((a) => `[New Article] ${a.title}\n${a.summary ?? ""}`)
@@ -416,7 +427,7 @@ export async function evaluateEventWatches(
 
     if (isHit) {
       hitCount++;
-      const writeKey = `watch:summary:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
+      const writeKey = `watch:summary:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}:${newSha}`;
       const summaryReq = buildWatchSummaryPrompt(
         watch.question,
         watch.criteria,
