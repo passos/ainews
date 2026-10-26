@@ -191,11 +191,7 @@ async function keyOf(
   sha = SHA,
   generation = 0,
 ) {
-  // Phase 1 (#81): the format analysisVersion() must produce, written out so
-  // the existing tests do not depend on the new export.
-  const version = await promptVersion(config);
-  const analysed = generation === 0 ? version : `${version}:r${generation}`;
-  return `${slot}:${id}:${sha.slice(0, 16)}:${analysed}`;
+  return `${slot}:${id}:${sha.slice(0, 16)}:${analysisVersion(await promptVersion(config), generation)}`;
 }
 
 /** A write ledger row in a state `acquire` does not hand out again. */

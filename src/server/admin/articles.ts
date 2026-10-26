@@ -26,9 +26,9 @@ export const changeArticleIndustry = createServerFn({ method: "POST" })
 
 export const reanalyzeArticle = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
-  .validator((data: { articleId: number }) => data)
+  .validator((data: { articleId: number; expectedStage: string }) => data)
   .handler(async ({ data }) =>
-    ops.reanalyzeArticle(env.DB, env.Q_INGEST, data.articleId),
+    ops.reanalyzeArticle(env.DB, env.Q_INGEST, data),
   );
 
 export const retractArticle = createServerFn({ method: "POST" })

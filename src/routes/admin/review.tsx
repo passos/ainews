@@ -73,7 +73,9 @@ function AdminReviewPage() {
     setSubmittingId(articleId);
     setErrorMessage(null);
     try {
-      await reanalyzeArticle({ data: { articleId } });
+      await reanalyzeArticle({
+        data: { articleId, expectedStage: "body_ready" },
+      });
       await router.invalidate();
     } catch (err) {
       setErrorMessage(
@@ -271,7 +273,7 @@ function AdminReviewPage() {
                   onClick={() => handleReanalyze(item.id)}
                   className="rounded border px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
                 >
-                  Clear & Reanalyze
+                  Reanalyze
                 </button>
               </div>
             ))}

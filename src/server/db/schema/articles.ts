@@ -54,6 +54,8 @@ export const articles = sqliteTable(
     titleOverride: text("title_override"),
     /** Admin override of the public summary; wins over the analysis (#10). */
     summaryOverride: text("summary_override"),
+    /** +1 each time an analysed article goes back to body_ready (#81). Part of the analyze/write ledger keys and analyses.prompt_version from 1 on. */
+    analysisGeneration: integer("analysis_generation").notNull().default(0),
   },
   (t) => [
     // Backfill scans: "articles stuck in stage X since before T".

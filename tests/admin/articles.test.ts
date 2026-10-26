@@ -267,11 +267,13 @@ describe("reanalyzeArticle (#81)", () => {
       .run();
     await env.DB.prepare(
       `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, estimated_micros, budget_day, created_at, updated_at)
-       VALUES ('analyze:' || ?1 || ':abc:v1', 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, NULL, NULL, 0, 0),
-              ('write:' || ?1 || ':abc:v1', 'write', 'm', 'gateway', 'failed', 3, 3, NULL, NULL, NULL, 0, 0),
-              ('write:' || ?1 || ':old:v1', 'write', 'm', 'gateway', 'in_flight', 1, 0, 1, 500, '2026-10-26', 0, 0)`,
+       VALUES (?1, 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, NULL, NULL, 0, 0),
+              (?2, 'write', 'm', 'gateway', 'failed', 3, 3, NULL, NULL, NULL, 0, 0),
+              (?3, 'write', 'm', 'gateway', 'in_flight', 1, 0, 1, 500, '2026-10-26', 0, 0)`,
     )
-      .bind(id)
+      // Template literals, not SQL `||`: D1 binds a JS number as a real, so
+      // `'a:' || ?1` would yield "a:1.0" and never match a production key.
+      .bind(`analyze:${id}:abc:v1`, `write:${id}:abc:v1`, `write:${id}:old:v1`)
       .run();
     await env.DB.prepare(
       "INSERT INTO budgets (day, channel, cap_micros, reserved_micros) VALUES ('2026-10-26', 'gateway', 1900000, 500)",
@@ -279,9 +281,9 @@ describe("reanalyzeArticle (#81)", () => {
     const ledger = () =>
       env.DB.prepare(
         `SELECT logical_key, status, attempt, failures FROM llm_calls
-         WHERE logical_key LIKE '%:' || ?1 || ':%' ORDER BY logical_key`,
+         WHERE logical_key LIKE ?1 ORDER BY logical_key`,
       )
-        .bind(id)
+        .bind(`%:${id}:%`)
         .all()
         .then((r) => r.results);
     const before = await ledger();
@@ -412,6 +414,92 @@ describe("reanalyzeArticle (#81)", () => {
         }),
       ),
     ).toBe(404);
+    expect(sent).toEqual([]);
+  });
+
+  // Defect witnesses (#81): red on the code before the fix for the defect
+  // itself, not for a missing interface. No analysis_generation reads here.
+  it("defect witness: reanalysis keeps the earlier llm_calls and analyses rows", async () => {
+    const { id: artId } = await seed81({
+      stage: "analyzed",
+      bodySha: "sha-w1",
+    });
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+       VALUES (?1, 'v1', '{}', 'news', '{}', 80, 1, 0),
+              (?1, 'primary_tracker', '{}', 'news', '{}', 0, 0, 0)`,
+    )
+      .bind(artId)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES (?1, 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              (?2, 'write', 'm', 'gateway', 'in_flight', 1, 0, 1, 0, 0)`,
+    )
+      .bind(`analyze:${artId}:w1:v1`, `write:${artId}:w1:v1`)
+      .run();
+    const rows = async () => ({
+      calls: (
+        await env.DB.prepare(
+          `SELECT logical_key, status FROM llm_calls
+           WHERE logical_key LIKE ?1 ORDER BY logical_key`,
+        )
+          .bind(`%:${artId}:%`)
+          .all()
+      ).results,
+      analyses: (
+        await env.DB.prepare(
+          "SELECT prompt_version FROM analyses WHERE article_id = ?1 ORDER BY prompt_version",
+        )
+          .bind(artId)
+          .all()
+      ).results,
+    });
+    const before = await rows();
+    expect(before.calls).toHaveLength(2);
+    expect(before.analyses).toHaveLength(2);
+
+    await reanalyzeArticle(env.DB, env.Q_INGEST, {
+      articleId: artId,
+      expectedStage: "analyzed",
+    });
+
+    expect(await rows()).toEqual(before);
+  });
+
+  it("defect witness: the stage write is conditional on the stage the admin saw", async () => {
+    // The admin saw the article as analyzed; it has since moved to grouped.
+    const { id: artId, eventId } = await seed81({
+      stage: "grouped",
+      bodySha: "sha-w2",
+      inEvent: true,
+    });
+    const changes: number[] = [];
+    const watched = hookBatch(async (_n, run) => {
+      const results = await run();
+      for (const r of results) changes.push(r.meta.changes);
+      return results;
+    });
+    const { sent, q } = queue();
+
+    // Old or new signature, refused or not: only the writes are checked.
+    await statusOf(
+      reanalyzeArticle(watched, q, {
+        articleId: artId,
+        expectedStage: "analyzed",
+      }),
+    );
+
+    expect(changes.length).toBeGreaterThan(0);
+    expect(changes).toEqual(changes.map(() => 0));
+    expect(
+      await env.DB.prepare(
+        "SELECT stage, stage_updated_at, requeue_count FROM articles WHERE id = ?1",
+      )
+        .bind(artId)
+        .first(),
+    ).toEqual({ stage: "grouped", stage_updated_at: 0, requeue_count: 3 });
+    expect(await revisionOf(eventId!)).toBe(1);
     expect(sent).toEqual([]);
   });
 });
