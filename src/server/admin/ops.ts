@@ -7,6 +7,7 @@ import {
   type ContentDisplay,
 } from "../../lib/content-display";
 import { getDb } from "../db/client";
+import { APPROVED_ARTICLE_SQL } from "../publication/articles";
 import {
   conditionalReviewRevisionBumpStatement,
   revisionBumpStatement,
@@ -587,6 +588,61 @@ export async function decideReview(
          DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
       )
       .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
+    // Issue #83: financial_facts.superseded_by follows the amendment's review.
+    // Both run after the reviews write, so they see the new decision.
+    // (a) Not approved now: facts that point at this filing's facts point at
+    // what those facts point at (a newer approved amendment, or NULL).
+    database
+      .prepare(
+        `UPDATE financial_facts
+         SET superseded_by = (
+           SELECT s.superseded_by FROM financial_facts s
+           WHERE s.id = financial_facts.superseded_by
+         )
+         WHERE NOT EXISTS (
+             SELECT 1 FROM articles a WHERE a.id = ?1 AND ${APPROVED_ARTICLE_SQL}
+           )
+           AND superseded_by IN (
+             SELECT nf.id FROM financial_facts nf
+             JOIN filings fl ON fl.id = nf.filing_id
+             WHERE fl.article_id = ?1
+           )`,
+      )
+      .bind(data.articleId),
+    // (b) Approved amendment (form contains "/A"): earlier facts with the same
+    // company, concept, unit and period end point at its newest such fact.
+    database
+      .prepare(
+        `UPDATE financial_facts
+         SET superseded_by = (
+           SELECT nf.id FROM financial_facts nf
+           JOIN filings fl ON fl.id = nf.filing_id
+           WHERE fl.article_id = ?1
+             AND instr(fl.form, '/A') > 0
+             AND nf.company_id = financial_facts.company_id
+             AND nf.concept = financial_facts.concept
+             AND nf.unit = financial_facts.unit
+             AND nf.period_end = financial_facts.period_end
+             AND nf.id > financial_facts.id
+           ORDER BY nf.id DESC LIMIT 1
+         )
+         WHERE EXISTS (
+             SELECT 1 FROM articles a WHERE a.id = ?1 AND ${APPROVED_ARTICLE_SQL}
+           )
+           AND superseded_by IS NULL
+           AND EXISTS (
+             SELECT 1 FROM financial_facts nf
+             JOIN filings fl ON fl.id = nf.filing_id
+             WHERE fl.article_id = ?1
+               AND instr(fl.form, '/A') > 0
+               AND nf.company_id = financial_facts.company_id
+               AND nf.concept = financial_facts.concept
+               AND nf.unit = financial_facts.unit
+               AND nf.period_end = financial_facts.period_end
+               AND nf.id > financial_facts.id
+           )`,
+      )
+      .bind(data.articleId),
   ]);
 }
 
