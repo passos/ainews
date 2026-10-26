@@ -1,24 +1,36 @@
 // scripts/probe-slots-lib.ts (#117): the site list and the cost cap. Pure:
 // no transport, nothing is sent (runBatch gets a fake probe).
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  ARTIFACT_SCHEMAS,
   B1_IDS,
   buildSites,
   decide,
   planSites,
-  saveRejection,
   PROBE_CAP_MICROS,
+  probeSite,
   refusal,
+  rejectionIssues,
   runBatch,
+  runPlanned,
+  saveRejection,
   splitBatches,
   totalMaxMicros,
 } from "../scripts/probe-slots-lib";
 import type { PlannedSite, ProbeResult } from "../scripts/probe-slots-lib";
 import { ARTIFACT_REGISTRY } from "../src/pipeline/artifacts/registry";
+import { costMicros } from "../src/providers/budget";
+import type { ModelTransport } from "../src/providers/transport";
 import { DEFAULT_PRICES, DEFAULT_SLOTS } from "../src/providers/defaults";
 import { realFixture } from "./fixtures/analysis/real-shape";
 
@@ -240,7 +252,7 @@ describe("probe-slots runBatch", () => {
         return r;
       },
       (line) => lines.push(line),
-      cap,
+      cap ?? PROBE_CAP_MICROS,
     );
     return { code, sent, lines };
   }
@@ -279,28 +291,140 @@ describe("probe-slots runBatch", () => {
 });
 
 describe("probe-slots rejection report", () => {
-  const site = buildSites(fixtures).find((s) =>
-    s.id.startsWith("artifact.learning_material"),
-  )!;
+  const plan = planSites(buildSites(fixtures), DEFAULT_SLOTS, DEFAULT_PRICES);
+  const byId = (id: string) => plan.find((s) => s.id === id)!;
+  const learning = byId("artifact.learning_material.student");
+  const badQuiz =
+    '```json\n{"audience":"student","conceptExplainer":"x","glossary":[],' +
+    '"quiz":[{"question":"q","options":["a","b"],"answerIndex":5,' +
+    '"explanation":"e"}],"discussionQuestions":[],"activities":[]}\n```';
+  const tmp = () => mkdtempSync(join(tmpdir(), "probe-rej-"));
+  const read = (file: string) => JSON.parse(readFileSync(file, "utf8"));
 
-  it("saves the raw text and the zod issues outside the repo", () => {
-    const text =
-      '```json\n{"audience":"student","conceptExplainer":"x","glossary":[],' +
-      '"quiz":[{"question":"q","options":["a","b"],"answerIndex":5,' +
-      '"explanation":"e"}],"discussionQuestions":[],"activities":[]}\n```';
-    expect(site.accepts(text)).toBe(false);
-    const dir = mkdtempSync(join(tmpdir(), "probe-rej-"));
-    const saved = JSON.parse(
-      readFileSync(saveRejection(dir, site, text), "utf8"),
-    );
-    expect(saved.rawText).toBe(text);
+  it("saves the raw text and the zod issues", () => {
+    expect(learning.accepts(badQuiz)).toBe(false);
+    const saved = read(saveRejection(tmp(), learning, badQuiz));
+    expect(saved.rawText).toBe(badQuiz);
     expect(saved.issues).toMatchObject([{ path: ["quiz", 0, "answerIndex"] }]);
-    const bad = saveRejection(dir, site, "not json");
-    expect(JSON.parse(readFileSync(bad, "utf8")).issues).toMatchObject([
-      { code: "invalid_json" },
-    ]);
-    expect(() => saveRejection("scripts/rej", site, text)).toThrow(
-      /inside the repo/,
+    const bad = read(saveRejection(tmp(), learning, "not json"));
+    expect(bad.issues).toMatchObject([{ code: "invalid_json" }]);
+  });
+
+  it("has a schema for every artifact type but earnings_decoder", () => {
+    const types = Object.keys(ARTIFACT_REGISTRY).sort();
+    expect(
+      [...Object.keys(ARTIFACT_SCHEMAS), "earnings_decoder"].sort(),
+    ).toEqual(types);
+    for (const [type, schema] of Object.entries(ARTIFACT_SCHEMAS)) {
+      expect(schema.safeParse({}).success, type).toBe(false);
+      const site = plan.find((s) => s.id.startsWith(`artifact.${type}`))!;
+      expect(rejectionIssues("{}", site.diagnosis), type).not.toEqual([]);
+    }
+    const earnings = plan.find((s) => s.id.startsWith("artifact.earnings"))!;
+    expect(read(saveRejection(tmp(), earnings, "{}")).issues).toBe(
+      "unavailable: production enriches before parse",
     );
+  });
+
+  it("explains a rejection of the non-artifact JSON sites too", () => {
+    for (const id of ["analyze.write", "evidence.claims", "ask.round1"]) {
+      const site = byId(id);
+      expect(rejectionIssues("{", site.diagnosis), id).toMatchObject([
+        { code: "invalid_json" },
+      ]);
+      expect(rejectionIssues("{}", site.diagnosis), id).not.toEqual([]);
+    }
+    expect(
+      read(saveRejection(tmp(), byId("digest.daily"), "x")).issues,
+    ).toMatch(/^unavailable: /);
+  });
+
+  it("writes only under the system temp dir", () => {
+    const outside = join(process.cwd(), "scripts", "rej-test");
+    expect(() => saveRejection(outside, learning, badQuiz)).toThrow(/temp dir/);
+    expect(existsSync(outside)).toBe(false);
+    // A symlink in the temp dir that points out of it is followed by realpath.
+    const link = join(tmp(), "link");
+    symlinkSync(process.cwd(), link);
+    expect(() => saveRejection(join(link, "x"), learning, badQuiz)).toThrow(
+      /temp dir/,
+    );
+    // A name that merely starts with two dots is a normal name.
+    const dots = join(tmp(), "..rejections");
+    expect(saveRejection(dots, learning, badQuiz)).toContain("..rejections");
+    expect(() =>
+      saveRejection(join(tmp(), "..", ".."), learning, badQuiz),
+    ).toThrow(/temp dir/);
+  });
+});
+
+describe("probe-slots probeSite and runPlanned", () => {
+  const plan = planSites(buildSites(fixtures), DEFAULT_SLOTS, DEFAULT_PRICES);
+  const write = plan.find((s) => s.id === "analyze.write")!;
+  const transport = (reply: unknown, sent: string[] = []): ModelTransport => ({
+    async run(model) {
+      sent.push(model);
+      return reply;
+    },
+  });
+  const price = DEFAULT_PRICES[write.model];
+  const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  const dir = () => mkdtempSync(join(tmpdir(), "probe-run-"));
+
+  it("keeps finishReason, thinking tokens and cost when the reply has no content", async () => {
+    const reply = {
+      candidates: [{ finishReason: "MAX_TOKENS" }],
+      usageMetadata: { promptTokenCount: 100, thoughtsTokenCount: 2000 },
+    };
+    const r = await probeSite(write, transport(reply), dir(), log);
+    expect(r).toEqual({
+      finishReason: "MAX_TOKENS",
+      outputTokens: 0,
+      thinkingTokens: 2000,
+      cost: costMicros(price, 100, 2000),
+      accepted: false,
+    });
+    const batch = { name: "B1" as const, sites: [write], totalMax: 1_000_000 };
+    lines.length = 0;
+    const code = await runPlanned(batch, transport(reply), dir(), log);
+    expect(code).toBe(1);
+    expect(lines.join("\n")).toMatch(
+      /MAX_TOKENS \| 0 \| 2000 \| \d+ \| REJECTED[\s\S]*finishReason MAX_TOKENS, cost so far [1-9]/,
+    );
+  });
+
+  it("caps a run at the batch's own estimated max, not the default cap", async () => {
+    const small = (id: string): PlannedSite => ({
+      ...write,
+      id,
+      maxMicros: 1000,
+    });
+    const batch = {
+      name: "B1" as const,
+      sites: [small("first"), small("second")],
+      totalMax: 2000,
+    };
+    const reply = {
+      candidates: [
+        { finishReason: "STOP", content: { parts: [{ text: "{}" }] } },
+      ],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1000 },
+    };
+    const sent: string[] = [];
+    lines.length = 0;
+    const code = await runPlanned(batch, transport(reply, sent), dir(), log);
+    expect(code).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(lines.join("\n")).toMatch(/STOP before second/);
+  });
+
+  it("refuses a reject dir outside the temp dir before sending anything", async () => {
+    const sent: string[] = [];
+    const batch = { name: "B1" as const, sites: [write], totalMax: 1_000_000 };
+    await expect(
+      runPlanned(batch, transport({}, sent), process.cwd(), log),
+    ).rejects.toThrow(/temp dir/);
+    expect(sent).toEqual([]);
   });
 });

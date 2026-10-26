@@ -25,36 +25,29 @@
 // AI_GATEWAY_ID, CLOUDFLARE_API_TOKEN).
 // --only (with --batch) sends just the listed site ids of that batch.
 // When the production parser rejects a reply, the raw text and the zod issues
-// go to <reject-dir>/<site id>.json (default: the system temp dir; a directory
-// inside the repo is refused before anything is sent).
+// go to <reject-dir>/<site id>.<time>.json (default: <system temp dir>/
+// probe-slots-rejections; a directory outside the temp dir is refused before
+// anything is sent).
 //
 // Model ids: DEFAULT_SLOTS (src/providers/defaults.ts), as probe-write.ts.
 // Production reads the `models.slots` setting, seeded with the same values.
 // Prices: DEFAULT_PRICES (src/providers/defaults.ts, read from the model
 // pages on 2026-10-22).
 import type { TextRequest } from "../src/providers/adapters.ts";
-import {
-  buildTextInput,
-  parseTextOutput,
-  record,
-} from "../src/providers/adapters.ts";
-import { costMicros } from "../src/providers/budget.ts";
 import { DEFAULT_PRICES, DEFAULT_SLOTS } from "../src/providers/defaults.ts";
-import type { ModelTransport } from "../src/providers/transport.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildSites,
   decide,
   FIXTURE_BODY_CHARS,
-  outsideRepo,
   planSites,
   PROBE_CAP_MICROS,
-  runBatch,
-  saveRejection,
+  runPlanned,
   splitBatches,
+  tempDirOnly,
 } from "./probe-slots-lib.ts";
-import type { Batch, PlannedSite, ProbeResult } from "./probe-slots-lib.ts";
+import type { Batch } from "./probe-slots-lib.ts";
 import { envFileArg, loadFixtures, withBindingTransport } from "./trial.ts";
 
 const args = process.argv.slice(2);
@@ -124,42 +117,6 @@ function printPlan(shown: Batch[]): void {
   }
 }
 
-/** Token counts as the model reported them; the envelope is unwrapped. */
-function usageMetadata(raw: unknown): Record<string, unknown> {
-  const body = record(raw, "response");
-  const inner =
-    "state" in body && "result" in body ? record(body.result, "result") : body;
-  return record(inner.usageMetadata, "usageMetadata");
-}
-
-async function probe(
-  site: PlannedSite,
-  transport: ModelTransport,
-  rejectDir: string,
-): Promise<ProbeResult> {
-  const raw = await transport.run(
-    site.model,
-    buildTextInput(site.model, site.request),
-  );
-  const { text, usage, finishReason } = parseTextOutput(site.model, raw);
-  const meta = usageMetadata(raw);
-  const accepted = site.accepts(text);
-  if (!accepted) {
-    console.log(`rejected ${site.id}: ${saveRejection(rejectDir, site, text)}`);
-  }
-  return {
-    finishReason: finishReason ?? "?",
-    outputTokens: Number(meta.candidatesTokenCount ?? 0),
-    thinkingTokens: Number(meta.thoughtsTokenCount ?? 0),
-    cost: costMicros(
-      DEFAULT_PRICES[site.model],
-      usage.inputTokens,
-      usage.outputTokens,
-    ),
-    accepted,
-  };
-}
-
 async function main(): Promise<number> {
   const decision = decide(args, batches);
   switch (decision.kind) {
@@ -175,15 +132,13 @@ async function main(): Promise<number> {
       return 2;
     case "run": {
       printPlan([decision.batch]);
-      const sites = decision.batch.sites;
-      const rejectDir = outsideRepo(
+      // Fail before the env file is read; runPlanned checks it again.
+      const rejectDir = tempDirOnly(
         flagValue("--reject-dir") ?? join(tmpdir(), "probe-slots-rejections"),
       );
       return await withBindingTransport(envFileArg(args), (transport) =>
-        runBatch(
-          sites,
-          (site) => probe(site, transport, rejectDir),
-          (line) => console.log(line),
+        runPlanned(decision.batch, transport, rejectDir, (line) =>
+          console.log(line),
         ),
       );
     }

@@ -81,7 +81,7 @@ export function buildWriteRequest(
 // top (#55): a model that writes one character too many has been billed, and
 // a null here sends a selected article on without a summary. The prompt text
 // stays as it is, so promptVersion does not change.
-const writeOutputSchema = z.strictObject({
+export const writeOutputSchema = z.strictObject({
   title: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1).max(800),
 });
