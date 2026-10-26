@@ -247,6 +247,17 @@ export async function getSource(database: D1Database, id: number) {
   return rows[0] ?? null;
 }
 
+/**
+ * System placeholder sources are reserved: no admin write creates or sets a
+ * `system:` feed URL. Same match as SQL `feed_url LIKE 'system:%'` (LIKE
+ * ignores ASCII case).
+ */
+function assertNotSystemFeed(feedUrl: string): void {
+  if (feedUrl.toLowerCase().startsWith("system:")) {
+    throw new Response("System feed URLs are reserved", { status: 400 });
+  }
+}
+
 export async function createSource(
   database: D1Database,
   data: {
@@ -261,6 +272,7 @@ export async function createSource(
     jinaEnabled?: number;
   },
 ) {
+  assertNotSystemFeed(data.feedUrl);
   const d = getDb(database);
   const res = await d
     .insert(sources)
@@ -281,11 +293,6 @@ export async function createSource(
   return res[0]?.id;
 }
 
-/** Same match as SQL `feed_url LIKE 'system:%'` (LIKE ignores ASCII case). */
-function isSystemFeedUrl(feedUrl: string): boolean {
-  return feedUrl.toLowerCase().startsWith("system:");
-}
-
 export async function updateSource(
   database: D1Database,
   data: {
@@ -299,10 +306,7 @@ export async function updateSource(
     jinaEnabled?: number;
   },
 ) {
-  // System placeholder sources are reserved: no edit creates or changes one.
-  if (isSystemFeedUrl(data.feedUrl)) {
-    throw new Response("System feed URLs are reserved", { status: 400 });
-  }
+  assertNotSystemFeed(data.feedUrl);
   const res = await database
     .prepare(
       `UPDATE sources
@@ -403,6 +407,8 @@ export async function approveCandidate(
       status: 400,
     });
   }
+
+  assertNotSystemFeed(candidate.feedUrl);
 
   if (candidate.kind !== "rss") {
     throw new Response(
