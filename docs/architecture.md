@@ -75,7 +75,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
   - 输出的 HTML 只能来自 markdown-it 自己生成的标记，加上表格外面的横向滚动容器。
   - 原始 HTML 一律不原样输出：`script`、`style`、`iframe`、`form` 等危险块整块删除；其他标签去掉，标签里的文字按纯文本转义输出。
   - 链接只允许 `http`/`https`，外链 `rel="nofollow noopener noreferrer"`（与现有规则同值）。
-  - 图片只允许 `https`，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`；其他图片只留 alt 文字。
+  - 图片只允许 `https`，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`；其他图片只留 alt 文字。只有 `full` 模式输出图片；`excerpt` 模式只输出文字块，图片只留 alt 文字，不算进 25% 和 300 词。理由：摘录模式下不转载商业媒体的图片。
 - **排版**：正文宽度约 68 字符；标题、引用、代码、表格都有样式，表格和代码块在自己的容器里横向滚动；亮色和暗色都适用；375px 下页面不出现横向滚动。
 - **证据锚点**：Inspect evidence 里每条引文都带一个链接，原来的原文链接同时保留。
   - 引文在阅读页的显示范围内：链到 `/a/{id}#:~:text=…`，在站内高亮。
