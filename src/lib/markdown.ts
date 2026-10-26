@@ -69,7 +69,8 @@ type Token = ReturnType<typeof articleMd.parse>[number];
 
 // Inline cleanup, after parsing: an inline <script> / <style> (and the like)
 // is dropped with its content, as html_block does; a link with a non-http(s)
-// target loses its tags and keeps its text.
+// target loses its tags and keeps its text. Image alt text (image.children)
+// is cleaned the same way.
 function cleanInline(children: Token[]): Token[] {
   const out: Token[] = [];
   for (let i = 0; i < children.length; i++) {
@@ -101,6 +102,7 @@ function cleanInline(children: Token[]): Token[] {
       if (close !== -1) children.splice(close, 1);
       continue;
     }
+    if (t.type === "image" && t.children) t.children = cleanInline(t.children);
     out.push(t);
   }
   return out;
@@ -127,9 +129,9 @@ type ArticleEnv = {
   images?: boolean;
 };
 
-// The default rule computes `alt` from the child tokens; renderToken would
-// output an empty alt.
-const defaultImage = articleMd.renderer.rules.image!;
+// Alt text, in both modes, is inlineText of the cleaned children: the same
+// visible text the excerpt counts, with raw HTML dropped. (The default rule
+// would use renderInlineAsText, which keeps raw HTML text.)
 articleMd.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const src = String(token.attrGet("src") ?? "");
@@ -137,12 +139,12 @@ articleMd.renderer.rules.image = (tokens, idx, options, env, self) => {
     (env as ArticleEnv | undefined)?.images === false ||
     !/^https:\/\//i.test(src)
   ) {
-    // Same visible text the excerpt counts: raw HTML in the alt is dropped.
     return escapeHtml(inlineText(token.children ?? []));
   }
+  token.attrSet("alt", inlineText(token.children ?? []));
   token.attrSet("loading", "lazy");
   token.attrSet("referrerpolicy", "no-referrer");
-  return defaultImage(tokens, idx, options, env, self);
+  return self.renderToken(tokens, idx, options);
 };
 
 // Tables scroll inside their own container.
@@ -227,10 +229,10 @@ export function renderArticleExcerpt(src: string): string | null {
     const current = blocks[blocks.length - 1];
     if (current) current.words += tokenWords(t);
   });
-  const total = blocks.reduce((n, b) => n + b.words, 0);
+  const counted = blocks.reduce((n, b) => n + b.words, 0);
   const cap = Math.min(
     EXCERPT_MAX_WORDS,
-    Math.floor(total * EXCERPT_MAX_SHARE),
+    Math.floor(counted * EXCERPT_MAX_SHARE),
   );
 
   let used = 0;
@@ -248,6 +250,11 @@ export function renderArticleExcerpt(src: string): string | null {
     env,
   );
   // Licensing is a hard rule: whatever the counting above got wrong, the
-  // words a reader would see must fit the cap, or no excerpt is shown.
+  // words a reader would see must fit the cap, or no excerpt is shown. The
+  // cap's base is the whole body rendered the same way, counted on the HTML,
+  // not the counter above: an inflated count cannot raise the cap.
+  const total = htmlWords(
+    articleMd.renderer.render(tokens, articleMd.options, env),
+  );
   return excerptWithinCap(htmlWords(html), total) ? html : null;
 }
