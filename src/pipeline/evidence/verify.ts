@@ -7,7 +7,7 @@ const md = new MarkdownIt({ html: false, linkify: false });
 function computeLineOffsets(str: string): number[] {
   const offsets = [0];
   for (let i = 0; i < str.length; i++) {
-    if (str[i] === "\n") {
+    if (str[i] === "\n" || (str[i] === "\r" && str[i + 1] !== "\n")) {
       offsets.push(i + 1);
     }
   }
