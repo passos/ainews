@@ -6,7 +6,13 @@ import {
   renderArticleMarkdown,
   renderMarkdown,
 } from "../src/lib/markdown";
-import { PAYLOADS, cap, visibleWords } from "./helpers/excerpt";
+import {
+  PAYLOADS,
+  TAG_HEAVY,
+  cap,
+  htmlVisibleWords,
+  visibleWords,
+} from "./helpers/excerpt";
 
 describe("renderMarkdown", () => {
   it("escapes a script tag", () => {
@@ -290,5 +296,45 @@ describe("excerptWithinCap", () => {
     expect(excerptWithinCap(300, 2000)).toBe(true);
     expect(excerptWithinCap(301, 2000)).toBe(false);
     expect(excerptWithinCap(500, 2000)).toBe(false);
+  });
+});
+
+describe("renderArticleExcerpt review round 2", () => {
+  const tail = paras(10, 20);
+
+  it("counts image alt text when choosing blocks (P2-1)", () => {
+    // A 30-word alt, then ten 20-word paragraphs: W = 230, cap 57. The
+    // image block (30) and paragraph 1 (20) fit. Not counting the alt
+    // would choose 3 blocks that show 70 words, over the cap.
+    const alt = Array.from({ length: 30 }, () => "alt").join(" ");
+    const out = renderArticleExcerpt(
+      `![${alt}](https://i.example/p.png)\n\n${tail}`,
+    );
+    expect(out).not.toBeNull();
+    expect(out).toContain("P1MARK");
+  });
+
+  const scriptAlt = "![a <script>alert(1)</script> b](https://i.example/p.png)";
+
+  it("drops a script inside image alt text, full mode (P2-2)", () => {
+    const html = renderArticleMarkdown(scriptAlt);
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("<script");
+  });
+
+  it("drops a script inside image alt text, excerpt mode (P2-2)", () => {
+    const html = renderArticleExcerpt(`${scriptAlt}\n\n${tail}`);
+    expect(html).not.toBeNull();
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("<script");
+  });
+
+  it("caps the excerpt by the words of the rendered body (P2-3)", () => {
+    const full = renderArticleMarkdown(TAG_HEAVY.src, { images: false });
+    const total = htmlVisibleWords(full);
+    expect(total).toBe(TAG_HEAVY.w);
+    expect(
+      htmlVisibleWords(renderArticleExcerpt(TAG_HEAVY.src)),
+    ).toBeLessThanOrEqual(cap(total));
   });
 });

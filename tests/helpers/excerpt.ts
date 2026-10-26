@@ -69,3 +69,33 @@ export const LONG_ALT = {
 };
 
 export const PAYLOADS = { CR_ONLY, REF_DEFS, INFLATED, LONG_ALT };
+
+/**
+ * Visible words of rendered HTML, counted on the HTML alone: block tags
+ * separate words, inline tags do not. Independent of the excerpt's token
+ * counter.
+ */
+export function htmlVisibleWords(html: string | null): number {
+  if (!html) return 0;
+  return html
+    .replace(
+      /<\/?(?:p|h[1-6]|ul|ol|li|blockquote|pre|hr|br|div|table|thead|tbody|tr|th|td)\b[^>]*>/gi,
+      " ",
+    )
+    .replace(/<[^>]*>/g, "")
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+/**
+ * Five plain 20-word paragraphs, then one paragraph of 100 words with two
+ * raw inline tags after each word. The tags render as nothing: real W = 200,
+ * cap 50. A counter that counted the tags would see W = 400, cap 100.
+ */
+export const TAG_HEAVY = {
+  src: [
+    ...Array.from({ length: 5 }, (_, i) => words(`TAG${i + 1}MARK`, 20)),
+    Array.from({ length: 100 }, () => "w <i> <b>").join(" "),
+  ].join("\n\n"),
+  w: 200,
+};
