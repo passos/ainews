@@ -267,6 +267,22 @@ describe("financial_facts.superseded_by follows amendment review (Issue #83)", (
     expect(await supersededBy(o1)).toBe(a1);
   });
 
+  it("re-approving an amendment does not move earlier facts past it", async () => {
+    await resetPipeline();
+    const ctx = await seedBase();
+    const { o1, a1, b1, aArticleId, bArticleId } = await seedTwoAmendments(ctx);
+
+    await decide(aArticleId, "approved");
+    await decide(bArticleId, "approved");
+    await decide(aArticleId, "approved");
+    expect(await supersededBy(o1)).toBe(a1);
+    expect(await supersededBy(a1)).toBe(b1);
+
+    await decide(bArticleId, "rejected");
+    expect(await supersededBy(a1)).toBeNull();
+    expect(await supersededBy(o1)).toBe(a1);
+  });
+
   it("re-ingest of an approved amendment with a changed body keeps the original hidden and the amendment non-public until re-approved", async () => {
     await resetPipeline();
     await env.DB.prepare(
