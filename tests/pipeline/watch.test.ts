@@ -1407,6 +1407,38 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     expect((await marker(eventId))!.revision).toBe(1);
   });
 
+  it("keys the judge call on the articles it actually sees (hit history changes the key)", async () => {
+    // Same event, same revision, same watch. A hit on B lands between the
+    // two evaluations, so the second call judges A only: its ledger key
+    // must differ, or the ledger would serve the first call's answer.
+    const eventId = await seedEvent(1, 1, 2000);
+    await seedApproved(eventId, 1, "Marker article A", 1000);
+    const b = await seedApproved(eventId, 1, "Marker article B", 2000);
+    const w = await seedWatch("ledger-key-watch");
+    const m = models(0.1);
+
+    await evaluateEventWatches(env, eventId, 2000, { models: m.client });
+    const firstKey = m.judge.mock.calls[0][0] as string;
+
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Marker hit', ?3, 'pending_review')`,
+    )
+      .bind(w, eventId, JSON.stringify({ articleIds: [b] }))
+      .run();
+    // Re-open the same revision (the criteria-key test does the same).
+    await env.DB.prepare(
+      `UPDATE events SET watch_evaluated_revision = 0, watch_evaluated_through = NULL WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+    m.judge.mockClear();
+    await evaluateEventWatches(env, eventId, 2000, { models: m.client });
+
+    expect(m.judge).toHaveBeenCalledTimes(1);
+    expect(m.judge.mock.calls[0][0]).not.toEqual(firstKey);
+  });
+
   it("marks a first-evaluated retraction revision without calling the judge", async () => {
     // Revision 2, never evaluated, newest approval older than updated_at.
     const eventId = await seedEvent(1, 2, 20000);
