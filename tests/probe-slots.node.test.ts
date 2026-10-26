@@ -1,6 +1,8 @@
 // scripts/probe-slots-lib.ts (#117): the site list and the cost cap. Pure:
 // no transport, nothing is sent (runBatch gets a fake probe).
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -8,6 +10,7 @@ import {
   buildSites,
   decide,
   planSites,
+  saveRejection,
   PROBE_CAP_MICROS,
   refusal,
   runBatch,
@@ -183,6 +186,24 @@ describe("probe-slots decide", () => {
     });
   });
 
+  it("--only narrows a batch to the listed sites and recomputes its max", () => {
+    const sites = [fake("a", 10), fake("b", 20), fake("c", 40)];
+    const two = [{ name: "B2" as const, sites, totalMax: 70 }];
+    expect(
+      decide(["--yes-spend", "--batch", "B2", "--only", "a,c"], two),
+    ).toMatchObject({
+      kind: "run",
+      batch: { name: "B2", totalMax: 50, sites: [{ id: "a" }, { id: "c" }] },
+    });
+    for (const args of [
+      ["--dry-run", "--only", "a"],
+      ["--dry-run", "--batch", "B2", "--only", "z"],
+      ["--dry-run", "--batch", "B2", "--only"],
+    ]) {
+      expect(decide(args, two).kind, args.join(" ")).toBe("usage");
+    }
+  });
+
   it("refuses a real batch above the cap and runs one at the cap", () => {
     const over = decide(["--yes-spend", "--batch", "B3"], batches);
     expect(over.kind).toBe("refuse");
@@ -254,5 +275,32 @@ describe("probe-slots runBatch", () => {
     const r = await run([ok, ok, ok], 12);
     expect(r.code).toBe(1);
     expect(r.sent).toEqual(["a"]);
+  });
+});
+
+describe("probe-slots rejection report", () => {
+  const site = buildSites(fixtures).find((s) =>
+    s.id.startsWith("artifact.learning_material"),
+  )!;
+
+  it("saves the raw text and the zod issues outside the repo", () => {
+    const text =
+      '```json\n{"audience":"student","conceptExplainer":"x","glossary":[],' +
+      '"quiz":[{"question":"q","options":["a","b"],"answerIndex":5,' +
+      '"explanation":"e"}],"discussionQuestions":[],"activities":[]}\n```';
+    expect(site.accepts(text)).toBe(false);
+    const dir = mkdtempSync(join(tmpdir(), "probe-rej-"));
+    const saved = JSON.parse(
+      readFileSync(saveRejection(dir, site, text), "utf8"),
+    );
+    expect(saved.rawText).toBe(text);
+    expect(saved.issues).toMatchObject([{ path: ["quiz", 0, "answerIndex"] }]);
+    const bad = saveRejection(dir, site, "not json");
+    expect(JSON.parse(readFileSync(bad, "utf8")).issues).toMatchObject([
+      { code: "invalid_json" },
+    ]);
+    expect(() => saveRejection("scripts/rej", site, text)).toThrow(
+      /inside the repo/,
+    );
   });
 });

@@ -1,11 +1,17 @@
 // Pure part of scripts/probe-slots.ts (#117): one text request per `write`
 // and `reason` call site in src/, built with the real prompt builders from
 // the real fixtures, and the maximum cost of each request. No transport, no
-// ledger, no database, so tests/probe-slots.node.test.ts can import it.
+// ledger, no database, so tests/probe-slots.node.test.ts can import it. The
+// only file it writes is the rejection report (saveRejection), outside the repo.
 //
 // Out of scope: the two discover sites (src/pipeline/discover/draft.ts and
 // run.ts, `reason`). DISCOVERY_ENABLED is "false" in production and their
 // prompts are inline in src; a follow-up issue probes them.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ZodType } from "zod";
+import * as T from "../src/lib/artifacts/types.ts";
 import { ARTIFACT_REGISTRY } from "../src/pipeline/artifacts/registry.ts";
 import type { ArtifactEventMaterial } from "../src/pipeline/artifacts/prompts.ts";
 import {
@@ -54,6 +60,89 @@ export interface ProbeSite {
   request: TextRequest;
   /** True if production would accept the text (its own parser). */
   accepts: (text: string) => boolean;
+  /** Why the zod schema rejects the text; only artifact sites have a schema. */
+  schema?: ZodType;
+}
+
+// The zod schema each artifact parser applies (src/pipeline/artifacts/prompts.ts).
+const ARTIFACT_SCHEMAS: Record<string, ZodType> = {
+  story_brief: T.storyBriefSchema,
+  audience_explain: T.audienceExplainSchema,
+  research_paper_decoder: T.researchPaperDecoderSchema,
+  learning_material: T.learningMaterialSchema,
+  policy_impact_explorer: T.policyImpactExplorerSchema,
+  classroom_discussion_builder: T.classroomDiscussionBuilderSchema,
+  education_evidence_checker: T.educationEvidenceCheckerSchema,
+  finance_reality_check: T.financeRealityCheckSchema,
+  regulation_watch: T.regulationWatchSchema,
+  finance_concept_explainer: T.financeConceptExplainerSchema,
+  skills_career_trends: T.skillsCareerTrendsSchema,
+  industry_impact_report: T.industryImpactReportSchema,
+  supply_chain_ripple_map: T.supplyChainRippleMapSchema,
+  earnings_decoder: T.earningsDecoderSchema,
+};
+
+// Same fence handling as extractJsonText (src/pipeline/artifacts/prompts.ts,
+// private there).
+function jsonText(rawText: string): string {
+  const trimmed = rawText.trim();
+  const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fence ? fence[1].trim() : trimmed;
+}
+
+/**
+ * The reasons a parser would reject `text`: a JSON syntax error, or the zod
+ * issues of `schema`. Empty when the schema accepts it (the parser then
+ * rejects for another reason) or there is no schema.
+ */
+export function rejectionIssues(
+  text: string,
+  schema: ZodType | undefined,
+): unknown[] {
+  if (!schema) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText(text));
+  } catch (error) {
+    return [{ code: "invalid_json", message: String(error) }];
+  }
+  const res = schema.safeParse(parsed);
+  return res.success ? [] : res.error.issues;
+}
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+/** The absolute `dir`; throws when it is inside the repo. */
+export function outsideRepo(dir: string): string {
+  const target = resolve(dir);
+  const rel = relative(REPO_ROOT, target);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+    throw new Error(`refusing to write rejections inside the repo: ${target}`);
+  }
+  return target;
+}
+
+/**
+ * Writes the raw model text and the parser issues of one rejected request to
+ * `<dir>/<site id>.json` and returns the path. The raw text is model output
+ * and does not belong in git, hence outsideRepo.
+ */
+export function saveRejection(
+  dir: string,
+  site: Pick<ProbeSite, "id" | "callSite" | "schema">,
+  text: string,
+): string {
+  const target = outsideRepo(dir);
+  mkdirSync(target, { recursive: true });
+  const file = join(target, `${site.id}.json`);
+  const report = {
+    site: site.id,
+    callSite: site.callSite,
+    issues: rejectionIssues(text, site.schema),
+    rawText: text,
+  };
+  writeFileSync(file, JSON.stringify(report, null, 2) + "\n");
+  return file;
 }
 
 export interface PlannedSite extends ProbeSite {
@@ -236,6 +325,7 @@ export function buildSites(fixtures: NamedFixture[]): ProbeSite[] {
         slot: def.slot ?? "write",
         request: def.buildRequest(material, aud),
         accepts: (text) => def.parseOutput(text, aud, material) !== null,
+        schema: ARTIFACT_SCHEMAS[def.type],
       });
     }
   }
@@ -469,6 +559,26 @@ export function decide(
         message: `--batch needs one of ${BATCH_NAMES.join(", ")}.`,
       };
     }
+  }
+  const only = args.indexOf("--only");
+  if (only >= 0) {
+    // A re-run of a few requests of one batch, e.g. after a rejection.
+    const ids = (args[only + 1] ?? "").split(",").filter(Boolean);
+    const unknown = selected
+      ? ids.filter((id) => !selected!.sites.some((s) => s.id === id))
+      : ids;
+    if (!selected || ids.length === 0 || unknown.length > 0) {
+      return {
+        kind: "usage",
+        message:
+          "--only needs --batch and a comma list of site ids of that batch" +
+          (unknown.length > 0 ? ` (unknown: ${unknown.join(", ")}).` : "."),
+      };
+    }
+    selected = batch(
+      selected.name,
+      selected.sites.filter((s) => ids.includes(s.id)),
+    );
   }
   if (dryRun) return { kind: "dry", batches: selected ? [selected] : batches };
   if (!selected) {
