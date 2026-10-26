@@ -40,9 +40,13 @@ cron (every 10 min) ─► Q_INGEST: collect ─► body ─► analyze ─► (
 
 ## Status
 
-M0 is done. M1 is in progress: collection, body fetch, analysis, the seed
-sections and the public site are live. The admin review queue (#9), event
-grouping (#11) and the daily report (#12) are next. See `AGENTS.md` §2–§3.
+Code at baseline `cab0433` includes admin review, events, daily/weekly digests,
+watch and EDGAR earnings features. Funding (#23) and metrics/feedback (#24)
+are pending dependencies at this baseline. Code existence does not establish
+online readiness: use the dated evidence package and the
+[#26 gates](https://github.com/githonllc/ainews/issues/26), with missing evidence
+marked unknown. See [deployment](docs/deploy.md) and
+[source proposals awaiting research and owner approval](docs/source-onboarding.md).
 
 ## Safety switches
 
@@ -84,6 +88,7 @@ always connect to the Cloudflare account, so dev needs a Cloudflare login.
 ## Checks
 
 ```sh
+npx --no-install wrangler types --check
 npm run typecheck
 npm run lint
 npm test          # vitest: `workers` and `node` projects
@@ -94,6 +99,24 @@ npm run test:ssr  # builds with the `test` env, then smoke-tests SSR with vite p
 Tests and `test:ssr` use the `test` env in `wrangler.jsonc`. It has no AI,
 Vectorize or `send_email` binding, so these commands need no Cloudflare
 credentials and never call real services.
+
+The separate HTTP smoke defaults to zero-network planning; exit 0 in a dry run
+only confirms a valid plan. Replace `/ABS/WORKTREE` with your absolute worktree:
+
+```sh
+node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode routes --dry-run
+```
+
+The #26 read-only GET checks are already authorized for this session and need no repeated confirmation (GET requests still have cost). Flag changes, paid model/Jina calls, production writes, source lists/thresholds and public UI screenshots keep their existing explicit approvals. Run routes or launch:
+
+```sh
+npm --prefix /ABS/WORKTREE run smoke -- --base-url https://news.ioenv.com --mode routes --online
+npm --prefix /ABS/WORKTREE run smoke -- --base-url https://news.ioenv.com --mode launch --manifest /ABS/EVIDENCE/public-smoke-manifest.json --online
+```
+
+Supply `--access-origin` if Access redirects anonymous requests. Routes leaves
+content readiness unchecked. Launch needs a complete owner manifest and four
+nonempty sections; it cannot sign off M1–M4. See [limits and evidence](docs/deploy.md).
 
 ## Database
 
@@ -146,20 +169,15 @@ its placeholder id; it only runs locally.
 
 ## Deploy
 
-Merges to `main` deploy automatically: the `deploy` job in
-`.github/workflows/ci.yml` runs after `ci` passes. It applies remote migrations
-and runs `npm run deploy`. It needs the repository secret
-`CLOUDFLARE_API_TOKEN`.
-
-Manual deploy:
-
-```sh
-npx wrangler d1 migrations apply DB --remote
-npm run deploy
-```
-
-Secrets are set with `npx wrangler secret put <NAME>`. `.env.example` lists all
-variable and secret names.
+The existing `.github/workflows/ci.yml` deploy job applies remote migrations
+and runs `npm run deploy` after main CI passes. It needs the repository secret
+`CLOUDFLARE_API_TOKEN`; provision and seed are separate owner operations.
+Follow [the deployment runbook](docs/deploy.md) for local rehearsal, authorized
+remote audits, manual fallback, rollback and individual secret rotation.
+Remote D1 and metadata commands pass an explicit root `--config`; the Vite
+deploy uses a fresh production build whose generated config is verified first.
+It defines approval boundaries, stop conditions and independent verification;
+a successful deploy alone does not establish launch readiness.
 
 ## Repository setup
 
