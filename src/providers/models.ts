@@ -6,7 +6,8 @@
 //
 // Anything that can fail on configuration or input runs before the lease.
 //
-// Slot configuration, prices and budget caps are read from `settings`.
+// Slot configuration, prices, budget caps and tier reserves are read from
+// `settings`. The client's tier sets the gateway floor (src/providers/tiers.ts).
 // Tests inject a fake transport; nothing here touches env.AI directly.
 import { z } from "zod";
 import { isEnabled } from "../lib/flags";
@@ -21,7 +22,13 @@ import {
 } from "./adapters";
 import type { TextRequest, Usage } from "./adapters";
 import { costMicros, settle, utcDay } from "./budget";
-import { SETTING_BUDGET_CAPS, SETTING_PRICES, SETTING_SLOTS } from "./defaults";
+import {
+  DEFAULT_TIER_RESERVES,
+  SETTING_BUDGET_CAPS,
+  SETTING_PRICES,
+  SETTING_SLOTS,
+  SETTING_TIER_RESERVES,
+} from "./defaults";
 import type { Price, Slot, SlotConfig } from "./defaults";
 import { buildJevInput, estimateTokens, parseJevOutput } from "./jev";
 import { parseJinaText } from "./jina";
@@ -36,6 +43,8 @@ import {
   reserveAndMarkSent,
 } from "./ledger";
 import type { SendOutcome } from "./ledger";
+import { tierFloorMicros } from "./tiers";
+import type { Tier, TierReserves } from "./tiers";
 import type { ModelTransport } from "./transport";
 
 export class ModelCallsDisabledError extends Error {
@@ -54,9 +63,15 @@ export class CallInProgressError extends Error {
 }
 
 export class BudgetExceededError extends Error {
-  constructor(channel: string, day: string, micros: number) {
-    super(`budget ${channel} ${day} cannot cover ${micros} micro-USD`);
+  readonly tier: Tier | undefined;
+  constructor(channel: string, day: string, micros: number, tier?: Tier) {
+    super(
+      tier === undefined
+        ? `budget ${channel} ${day} cannot cover ${micros} micro-USD`
+        : `budget ${channel} ${day} tier ${tier} cannot cover ${micros} micro-USD`,
+    );
     this.name = "BudgetExceededError";
+    this.tier = tier;
   }
 }
 
@@ -89,6 +104,8 @@ export interface ModelClientOptions {
   /** Only read for the MODEL_CALLS_ENABLED safety flag. */
   env: Partial<Record<SafetyFlag, string | undefined>>;
   now?: () => number;
+  /** Gateway budget tier of every call of this client (CALL_TIERS). */
+  tier: Tier;
 }
 
 const channelSchema = z.enum(["workers_ai", "gateway", "jina"]);
@@ -104,27 +121,58 @@ const pricesSchema = z.record(
   }),
 );
 const capsSchema = z.record(z.string(), z.number().int().nonnegative());
+const reserveSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+/** `budget.tier_reserves`: exactly the keys "1".."4". */
+export const tierReservesSchema = z
+  .object({
+    "1": reserveSchema,
+    "2": reserveSchema,
+    "3": reserveSchema,
+    "4": reserveSchema,
+  })
+  .strict() satisfies z.ZodType<TierReserves>;
 
 interface SlotSettings extends SlotConfig {
   price: Price;
   capMicros: number;
+  tierReserves: TierReserves;
 }
 
 async function loadSlot(db: D1Database, slot: Slot): Promise<SlotSettings> {
   const { results } = await db
-    .prepare("SELECT key, value FROM settings WHERE key IN (?1, ?2, ?3)")
-    .bind(SETTING_SLOTS, SETTING_PRICES, SETTING_BUDGET_CAPS)
+    .prepare("SELECT key, value FROM settings WHERE key IN (?1, ?2, ?3, ?4)")
+    .bind(
+      SETTING_SLOTS,
+      SETTING_PRICES,
+      SETTING_BUDGET_CAPS,
+      SETTING_TIER_RESERVES,
+    )
     .all<{ key: string; value: string }>();
   const values = new Map(results.map((r) => [r.key, JSON.parse(r.value)]));
   const slots = slotsSchema.parse(values.get(SETTING_SLOTS) ?? {});
   const prices = pricesSchema.parse(values.get(SETTING_PRICES) ?? {});
   const caps = capsSchema.parse(values.get(SETTING_BUDGET_CAPS) ?? {});
+  // Optional: without the row, the default reserves apply.
+  const stored = values.get(SETTING_TIER_RESERVES);
+  const tierReserves =
+    stored === undefined
+      ? DEFAULT_TIER_RESERVES
+      : tierReservesSchema.parse(stored);
   const config = slots[slot];
   if (!config) throw new ModelConfigError(`slot ${slot} is not configured`);
   const price = prices[config.model];
   if (!price) throw new ModelConfigError(`no price for ${config.model}`);
   // A channel without a cap gets 0: fail-closed.
-  return { ...config, price, capMicros: caps[config.channel] ?? 0 };
+  return {
+    ...config,
+    price,
+    capMicros: caps[config.channel] ?? 0,
+    tierReserves,
+  };
 }
 
 interface Parsed<T> {
@@ -163,6 +211,11 @@ export function createModelClient(options: ModelClientOptions) {
     const requestJson = JSON.stringify(input);
     const estimatedInputTokens = estimateTokens(input);
     const estimated = costMicros(price, estimatedInputTokens, maxOutputTokens);
+    // Tiers split the gateway channel only.
+    const floorMicros =
+      channel === "gateway"
+        ? tierFloorMicros(config.tierReserves, options.tier)
+        : 0;
 
     const outcome = await acquire(db, {
       logicalKey: key,
@@ -170,6 +223,7 @@ export function createModelClient(options: ModelClientOptions) {
       model,
       channel,
       now: now(),
+      tier: options.tier,
     });
     switch (outcome.kind) {
       case "completed":
@@ -196,6 +250,7 @@ export function createModelClient(options: ModelClientOptions) {
         budgetDay: day,
         channel,
         capMicros: config.capMicros,
+        floorMicros,
       });
     } catch (error) {
       // Nothing was reserved or sent, or the batch did commit and the row
@@ -212,7 +267,7 @@ export function createModelClient(options: ModelClientOptions) {
       throw error;
     }
     if (send === "over_budget") {
-      throw new BudgetExceededError(channel, day, estimated);
+      throw new BudgetExceededError(channel, day, estimated, options.tier);
     }
     if (send === "lost") throw new CallInProgressError(key);
 

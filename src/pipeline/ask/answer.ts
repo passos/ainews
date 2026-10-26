@@ -8,6 +8,7 @@ import {
   createModelClient,
   type ModelClient,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import { toMarkdown } from "../../providers/tomarkdown";
 import {
   bindingTransport,
@@ -139,6 +140,7 @@ function createDefaultDeps(
   const models =
     overrides.models ??
     createModelClient({
+      tier: CALL_TIERS.adminAsk,
       db: env.DB,
       transport,
       env,

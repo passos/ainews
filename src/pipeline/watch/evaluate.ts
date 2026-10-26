@@ -3,6 +3,7 @@ import {
   createModelClient,
   type ModelClient,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -140,6 +141,7 @@ export async function evaluateEventWatches(
   const models =
     deps.models ??
     createModelClient({
+      tier: CALL_TIERS.watch,
       db,
       transport:
         deps.transport ??

@@ -7,6 +7,7 @@ import {
   createModelClient,
   type ModelClient,
 } from "../../providers/models";
+import { ARTIFACT_TIERS, type Tier } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -120,11 +121,16 @@ function parseDeepThreshold(
   return selectFallback;
 }
 
+type ResolvedDeps = Omit<Required<ArtifactDeps>, "models"> & {
+  /** One client per budget tier; `overrides.models` serves every tier. */
+  modelsFor(tier: Tier): ModelClient;
+};
+
 function defaultDeps(
   env: PipelineEnv,
   overrides: Partial<ArtifactDeps>,
   nowTime: number,
-): Required<ArtifactDeps> {
+): ResolvedDeps {
   const db = overrides.db ?? env.DB;
   const bodies = overrides.bodies ?? env.BODIES;
   const transport =
@@ -135,16 +141,18 @@ function defaultDeps(
           run: () => Promise.reject(new Error("no AI binding")),
         });
   const now = overrides.now ?? (() => nowTime);
-  const models =
-    overrides.models ??
-    createModelClient({
-      db,
-      transport,
-      env,
-      now,
-    });
+  const clients = new Map<Tier, ModelClient>();
+  const modelsFor = (tier: Tier): ModelClient => {
+    if (overrides.models) return overrides.models;
+    let client = clients.get(tier);
+    if (!client) {
+      client = createModelClient({ db, transport, env, now, tier });
+      clients.set(tier, client);
+    }
+    return client;
+  };
 
-  return { db, bodies, models, transport, now };
+  return { db, bodies, modelsFor, transport, now };
 }
 
 /**
@@ -690,7 +698,9 @@ export async function generateEventArtifacts(
       const slot = def.slot ?? "write";
       let res: Awaited<ReturnType<ModelClient["generateText"]>>;
       try {
-        res = await deps.models.generateText(slot, logicalKey, req);
+        res = await deps
+          .modelsFor(ARTIFACT_TIERS[def.type as keyof typeof ARTIFACT_TIERS])
+          .generateText(slot, logicalKey, req);
       } catch (e) {
         // The ledger used up its attempts: this key never succeeds, so the
         // type is done for this revision. Every other error is retryable.

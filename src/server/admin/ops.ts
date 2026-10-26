@@ -1,6 +1,17 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { utcDay } from "../../providers/budget";
+import {
+  DEFAULT_TIER_RESERVES,
+  SETTING_TIER_RESERVES,
+} from "../../providers/defaults";
+import { tierReservesSchema } from "../../providers/models";
+import {
+  TIER_LABELS,
+  tierFloorMicros,
+  type Tier,
+  type TierReserves,
+} from "../../providers/tiers";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { isSystemSource } from "../../lib/source-attribution";
 import {
@@ -901,12 +912,87 @@ export async function getBudgetSummary(database: D1Database, today?: string) {
   const capsSetting = await database
     .prepare("SELECT value FROM settings WHERE key = 'budget.caps'")
     .first<{ value: string }>();
+  const reserves = await loadTierReserves(database);
+  // Gateway only: the tiers split that channel (src/providers/tiers.ts).
+  const { results: tierRows } = await database
+    .prepare(
+      `SELECT tier,
+         COALESCE(SUM(CASE WHEN status IN ('completed', 'failed')
+           THEN cost_micros END), 0) AS spent_micros,
+         COALESCE(SUM(CASE WHEN status IN ('in_flight', 'unknown')
+           AND sent_at IS NOT NULL THEN estimated_micros END), 0)
+           AS reserved_micros,
+         COUNT(*) AS calls
+       FROM llm_calls WHERE channel = 'gateway' AND budget_day = ?1
+       GROUP BY tier ORDER BY tier IS NULL, tier`,
+    )
+    .bind(day)
+    .all<{
+      tier: number | null;
+      spent_micros: number;
+      reserved_micros: number;
+      calls: number;
+    }>();
 
   return {
     day,
     budgets: budgetRows,
     caps: JSON.parse(capsSetting?.value ?? "{}"),
+    /** Null: not configured (the defaults apply) or invalid (see the error). */
+    tierReserves: reserves.stored,
+    tierReservesError: reserves.error,
+    tiers: tierRows.map((r) => {
+      const tier = isTier(r.tier) ? r.tier : null;
+      const effective = reserves.error === null ? reserves.effective : null;
+      return {
+        tier: r.tier,
+        label: tier === null ? "untiered" : TIER_LABELS[tier],
+        reserveMicros:
+          tier === null || tier === 5 || effective === null
+            ? null
+            : effective[String(tier) as keyof TierReserves],
+        floorMicros:
+          tier === null || effective === null
+            ? null
+            : tierFloorMicros(effective, tier),
+        spentMicros: r.spent_micros,
+        reservedMicros: r.reserved_micros,
+        calls: r.calls,
+      };
+    }),
   };
+}
+
+function isTier(value: number | null): value is Tier {
+  return (
+    value === 1 || value === 2 || value === 3 || value === 4 || value === 5
+  );
+}
+
+/** `budget.tier_reserves` as the model client reads it (loadSlot). */
+async function loadTierReserves(database: D1Database): Promise<{
+  stored: TierReserves | null;
+  effective: TierReserves;
+  error: string | null;
+}> {
+  const row = await database
+    .prepare("SELECT value FROM settings WHERE key = ?1")
+    .bind(SETTING_TIER_RESERVES)
+    .first<{ value: string }>();
+  if (!row) {
+    return { stored: null, effective: DEFAULT_TIER_RESERVES, error: null };
+  }
+  try {
+    const stored = tierReservesSchema.parse(JSON.parse(row.value));
+    return { stored, effective: stored, error: null };
+  } catch (e) {
+    // Every model call throws in loadSlot until the value is fixed.
+    return {
+      stored: null,
+      effective: DEFAULT_TIER_RESERVES,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
 }
 
 export async function reconcileUnknownCall(

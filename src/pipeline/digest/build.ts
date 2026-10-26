@@ -3,6 +3,7 @@ import { FINANCE_SLUG } from "../analyze/analyze";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { dayBoundsUtc, weekBoundsUtc } from "../../lib/time";
 import { CallInProgressError, createModelClient } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import type { ModelTransport } from "../../providers/transport";
 import type { DigestMessage, PipelineEnv } from "../messages";
 import { readerSourceName } from "../../lib/source-attribution";
@@ -356,6 +357,7 @@ export async function buildDigest(
   if (isEnabled(env, "MODEL_CALLS_ENABLED") && deps.transport) {
     try {
       const models = createModelClient({
+        tier: CALL_TIERS.digest,
         db: env.DB,
         transport: deps.transport,
         env,

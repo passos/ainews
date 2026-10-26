@@ -1,4 +1,7 @@
-import { CallInProgressError } from "../../providers/models";
+import {
+  BudgetExceededError,
+  CallInProgressError,
+} from "../../providers/models";
 import {
   bindingTransport,
   type ModelTransport,
@@ -79,7 +82,12 @@ export async function handleGenerateBatch(
       }
       msg.ack();
     } catch (e) {
-      if (e instanceof CallInProgressError) {
+      if (e instanceof BudgetExceededError) {
+        // Not retried: the cron due-event scans resend artifacts, evidence
+        // and watch kinds once the budget allows (#116).
+        console.warn({ generate: body, error: e.name, message: e.message });
+        msg.ack();
+      } else if (e instanceof CallInProgressError) {
         console.warn({
           digest: body,
           error: e.name,

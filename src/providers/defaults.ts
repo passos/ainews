@@ -4,6 +4,11 @@
 // only scripts/smoke-models.ts reads these constants directly.
 //
 // No runtime imports here: scripts/smoke-models.ts loads this file in Node.
+//
+// Exception: DEFAULT_TIER_RESERVES is not seeded. Runtime code uses it when
+// `settings` has no `budget.tier_reserves` row (#116).
+
+import type { TierReserves } from "./tiers";
 
 /** `read`: Jina Reader (fetch ladder rung 3, #6), billed on channel `jina`. */
 export type Slot = "judge" | "embed" | "write" | "reason" | "read";
@@ -27,6 +32,7 @@ export interface Price {
 export const SETTING_SLOTS = "models.slots";
 export const SETTING_PRICES = "models.prices";
 export const SETTING_BUDGET_CAPS = "budget.caps";
+export const SETTING_TIER_RESERVES = "budget.tier_reserves";
 
 export const DEFAULT_SLOTS: Record<Slot, SlotConfig> = {
   judge: { model: "typesafe/jev", channel: "gateway" },
@@ -52,4 +58,16 @@ export const DEFAULT_BUDGET_CAPS: Record<string, number> = {
   workers_ai: 100_000,
   gateway: 1_900_000,
   jina: 0,
+};
+
+/**
+ * Micro-USD the gateway keeps free for tiers 1-4 (src/providers/tiers.ts).
+ * Tier N may spend only while the rest of the cap covers the reserves of
+ * tiers 1..N-1. Used when `settings` has no `budget.tier_reserves`.
+ */
+export const DEFAULT_TIER_RESERVES: TierReserves = {
+  "1": 500_000,
+  "2": 400_000,
+  "3": 200_000,
+  "4": 100_000,
 };
