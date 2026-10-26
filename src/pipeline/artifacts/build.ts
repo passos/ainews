@@ -24,6 +24,7 @@ import {
   type FactWithMetadata,
 } from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
+import { documentHost, isSystemSource } from "../source-attribution";
 
 export interface ArtifactDeps {
   db?: D1Database;
@@ -68,17 +69,6 @@ interface ApprovedArticleRow {
   evidence_tags: string | null;
 }
 
-/** Lower-case host of `url` without "www."; "unknown" when it does not parse. */
-function documentHost(url: string): string {
-  try {
-    return (
-      new URL(url).hostname.toLowerCase().replace(/^www\./, "") || "unknown"
-    );
-  } catch {
-    return "unknown";
-  }
-}
-
 /**
  * A placeholder source (no site_domain, or feed_url 'system:…' such as the
  * primary-documents source) names nothing real: use the document's own host
@@ -87,7 +77,7 @@ function documentHost(url: string): string {
 function attributeSource(
   r: ApprovedArticleRow,
 ): ApprovedArticleRow & { source_domain: string } {
-  if (r.source_domain === null || r.source_feed_url.startsWith("system:")) {
+  if (r.source_domain === null || isSystemSource(r.source_feed_url)) {
     const host = documentHost(r.canonical_url);
     return { ...r, source_domain: host, source_name: host };
   }

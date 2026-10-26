@@ -475,6 +475,71 @@ describe("buildDailyDigest", () => {
     expect(items[0].oneLiner).toBe("Fallback Article Summary");
   });
 
+  it("a digest item under a system placeholder source shows the document host", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('placeholder-ind', 'Placeholder Ind', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const indId = ind!.id;
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, status, created_at) VALUES (?1, 'html', 'Primary documents (system)', 'system:primary-documents', 'paused', 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, 'https://www.sec.gov/doc-p', 'https://www.sec.gov/doc-p', 'Primary filing', 'Filing summary', 'analyzed', 'shaP', 1729468800000, 1729468800000, 1729468800000) RETURNING id`,
+    )
+      .bind(indId, source!.id)
+      .first<{ id: number }>();
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Event P', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaP', 'approved', 'editor', ?2)",
+    )
+      .bind(art!.id, Date.parse("2026-10-21T05:00:00Z"))
+      .run();
+
+    const transport: ModelTransport = {
+      run: async () => ({
+        candidates: [
+          {
+            content: { role: "model", parts: [{ text: "{}" }] },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 10 },
+      }),
+    };
+    await buildDailyDigest(
+      { ...env, EMAIL_ENABLED: "false", MODEL_CALLS_ENABLED: "true" },
+      {
+        kind: "digest",
+        industryId: indId,
+        digestKind: "daily",
+        periodStart: "2026-10-21",
+      },
+      Date.parse("2026-10-22T01:00:00Z"),
+      { transport },
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT items_json FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(indId)
+      .first<{ items_json: string }>();
+    const items = JSON.parse(row!.items_json);
+    expect(items).toHaveLength(1);
+    expect(items[0].sourceName).toBe("sec.gov");
+  });
+
   it("candidate selection: only events with approved articles in window, sorted by score DESC, excludes events later rejected", async () => {
     const ind = await env.DB.prepare(
       "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('score-filter-ind', 'Score Filter Ind', 'review', 1000) RETURNING id",

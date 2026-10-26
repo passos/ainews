@@ -3712,4 +3712,75 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(requests).toContain("Source: sec.gov (sec.gov)");
     expect(requests).not.toContain("Primary documents (system)");
   });
+
+  /** One approved article on a fresh source; returns the model requests. */
+  async function artifactRequestsFor(source: {
+    name: string;
+    feedUrl: string;
+    siteDomain: string | null;
+    url: string;
+  }): Promise<string> {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES (?1, 'Attribution', 'review', 1000) RETURNING id",
+    )
+      .bind(`attr-${source.feedUrl}`)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at) VALUES (?1, ?2, ?3, ?4, 'html', 'paused', 1000) RETURNING id",
+    )
+      .bind(ind!.id, source.name, source.feedUrl, source.siteDomain)
+      .first<{ id: number }>();
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, ?3, ?3, 'Attributed doc', 'Doc summary', 'shaAttr', 1000, 'analyzed', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id, source.url)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaAttr', 'approved', 'editor', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Attribution Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    const reqs: unknown[] = [];
+    const models = {
+      generateText: async (_slot: string, _key: string, req: unknown) => {
+        reqs.push(req);
+        return { text: "{}", finishReason: "STOP" };
+      },
+    } as unknown as ModelClient;
+    await generateEventArtifacts(testEnv, event!.id, 1000, { models });
+    return JSON.stringify(reqs);
+  }
+
+  it("a source without site_domain uses the document host as source domain", async () => {
+    const requests = await artifactRequestsFor({
+      name: "Lab Notes",
+      feedUrl: "https://lab-notes.example/feed",
+      siteDomain: null,
+      url: "https://www.example-lab.org/paper",
+    });
+    expect(requests).toContain("Source: example-lab.org (example-lab.org)");
+  });
+
+  it("a system source with a site_domain still uses the document host", async () => {
+    const requests = await artifactRequestsFor({
+      name: "System mirror",
+      feedUrl: "system:other",
+      siteDomain: "mirror.example",
+      url: "https://www.sec.gov/Archives/edgar/mirror-doc",
+    });
+    expect(requests).toContain("Source: sec.gov (sec.gov)");
+    expect(requests).not.toContain("System mirror");
+  });
 });
