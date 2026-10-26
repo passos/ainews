@@ -588,59 +588,37 @@ export async function decideReview(
          DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
       )
       .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
-    // Issue #83: financial_facts.superseded_by follows the amendment's review.
-    // Both run after the reviews write, so they see the new decision.
-    // (a) Not approved now: facts that point at this filing's facts point at
-    // what those facts point at (a newer approved amendment, or NULL).
-    database
-      .prepare(
-        `UPDATE financial_facts
-         SET superseded_by = (
-           SELECT s.superseded_by FROM financial_facts s
-           WHERE s.id = financial_facts.superseded_by
-         )
-         WHERE NOT EXISTS (
-             SELECT 1 FROM articles a WHERE a.id = ?1 AND ${APPROVED_ARTICLE_SQL}
-           )
-           AND superseded_by IN (
-             SELECT nf.id FROM financial_facts nf
-             JOIN filings fl ON fl.id = nf.filing_id
-             WHERE fl.article_id = ?1
-           )`,
-      )
-      .bind(data.articleId),
-    // (b) Approved amendment (form contains "/A"): earlier facts with the same
-    // company, concept, unit and period end point at its newest such fact.
+    // Issue #83: financial_facts.superseded_by follows the current reviews.
+    // Runs on every decision, after the reviews write, so it sees the new
+    // decision. For each fact in the same (company, concept, unit, period end)
+    // group as this article's facts, the pointer is recomputed from scratch:
+    // the newest fact with a larger id in an approved amendment (form contains
+    // "/A"), or NULL. It is "the newest approved amendment fact", not "the next
+    // link in a chain", so the result does not depend on decision order. The
+    // only reader, src/pipeline/artifacts/build.ts, checks
+    // `superseded_by IS NULL`, so only NULL vs non-NULL matters there.
     database
       .prepare(
         `UPDATE financial_facts
          SET superseded_by = (
            SELECT nf.id FROM financial_facts nf
            JOIN filings fl ON fl.id = nf.filing_id
-           WHERE fl.article_id = ?1
-             AND instr(fl.form, '/A') > 0
+           JOIN articles a ON a.id = fl.article_id
+           WHERE instr(fl.form, '/A') > 0
              AND nf.company_id = financial_facts.company_id
              AND nf.concept = financial_facts.concept
              AND nf.unit = financial_facts.unit
              AND nf.period_end = financial_facts.period_end
              AND nf.id > financial_facts.id
+             AND ${APPROVED_ARTICLE_SQL}
            ORDER BY nf.id DESC LIMIT 1
          )
-         WHERE EXISTS (
-             SELECT 1 FROM articles a WHERE a.id = ?1 AND ${APPROVED_ARTICLE_SQL}
-           )
-           AND superseded_by IS NULL
-           AND EXISTS (
-             SELECT 1 FROM financial_facts nf
-             JOIN filings fl ON fl.id = nf.filing_id
-             WHERE fl.article_id = ?1
-               AND instr(fl.form, '/A') > 0
-               AND nf.company_id = financial_facts.company_id
-               AND nf.concept = financial_facts.concept
-               AND nf.unit = financial_facts.unit
-               AND nf.period_end = financial_facts.period_end
-               AND nf.id > financial_facts.id
-           )`,
+         WHERE (company_id, concept, unit, period_end) IN (
+           SELECT nf.company_id, nf.concept, nf.unit, nf.period_end
+           FROM financial_facts nf
+           JOIN filings fl ON fl.id = nf.filing_id
+           WHERE fl.article_id = ?1
+         )`,
       )
       .bind(data.articleId),
   ]);
