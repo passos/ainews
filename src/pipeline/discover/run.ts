@@ -241,7 +241,7 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       try {
         const res = await webSearch.search({ query, limit: 10 });
         for (const item of res.items) {
-          const url = item.url.trim();
+          const url = typeof item.url === "string" ? item.url.trim() : "";
           if (url && !discoveredUrls.includes(url)) {
             discoveredUrls.push(url);
           }
