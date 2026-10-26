@@ -56,6 +56,7 @@ interface WatchRow {
   keywords: string;
   industry_id: number | null;
   status: "active" | "paused";
+  created_at: number;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -80,6 +81,18 @@ function matchKeyword(text: string, keyword: string): boolean {
   const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`\\b${escaped}\\b`, "i");
   return regex.test(text);
+}
+
+/** Article ids that a stored hit cites; unreadable rationale cites none. */
+function citedIds(rationale: string): number[] {
+  try {
+    const ids = (JSON.parse(rationale) as { articleIds?: unknown }).articleIds;
+    return Array.isArray(ids)
+      ? ids.filter((id): id is number => typeof id === "number")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -200,17 +213,16 @@ export async function evaluateEventWatches(
   // If an article was retracted, no remaining article has effective_at == updated_at.
   const maxEffectiveAt = Math.max(...articles.map((a) => a.effective_at));
 
-  // Partition articles into new reporting vs prior reporting. It does not
-  // depend on the watch, so it is computed once.
+  // Find the new reporting. It does not depend on the watch, so it is
+  // computed once; each watch then drops what it already knows (Rule 2).
   let newArticles: ApprovedArticleRow[];
-  let priorArticles: ApprovedArticleRow[];
   const through = event.watch_evaluated_through;
 
   if (through !== null) {
     // Everything approved after the last evaluation is new, however many
     // revisions were skipped in between.
+    // Strict >: an approval in the same millisecond as the boundary is missed; >= would re-judge (and pay for) the boundary article.
     newArticles = articles.filter((a) => a.effective_at > through);
-    priorArticles = articles.filter((a) => a.effective_at <= through);
     if (newArticles.length === 0) {
       // No new reporting (e.g. an article left the event). Keep the old
       // boundary: here maxEffectiveAt <= through.
@@ -241,17 +253,13 @@ export async function evaluateEventWatches(
     if (event.revision === 1) {
       if (articles.length > 2) {
         newArticles = articles.slice(-2);
-        priorArticles = articles.slice(0, -2);
       } else {
         newArticles = articles;
-        priorArticles = [];
       }
     } else {
       newArticles = articles.filter((a) => a.effective_at === maxEffectiveAt);
-      priorArticles = articles.filter((a) => a.effective_at < maxEffectiveAt);
       if (newArticles.length === 0) {
         newArticles = [articles[articles.length - 1]];
-        priorArticles = articles.slice(0, -1);
       }
     }
   }
@@ -270,7 +278,7 @@ export async function evaluateEventWatches(
   // 4. Fetch active watches
   const { results: activeWatches } = await db
     .prepare(
-      `SELECT id, slug, question, criteria, keywords, industry_id, status
+      `SELECT id, slug, question, criteria, keywords, industry_id, status, created_at
        FROM watches
        WHERE status = 'active'`,
     )
@@ -295,18 +303,26 @@ export async function evaluateEventWatches(
       continue;
     }
 
-    // Rule 2: Idempotency check - skip if already hit for this revision
-    const alreadyHit = await db
+    // Rule 2: New reporting for this watch. An article that an earlier hit
+    // of this watch already cited (at any revision, any status) is prior
+    // reporting; so is an article approved before the watch existed
+    // (invariant 9). Nothing new left: no model call.
+    const { results: priorHits } = await db
       .prepare(
-        `SELECT 1 FROM watch_hits
-         WHERE watch_id = ?1 AND event_id = ?2 AND event_revision = ?3`,
+        `SELECT rationale FROM watch_hits WHERE watch_id = ?1 AND event_id = ?2`,
       )
-      .bind(watch.id, event.id, event.revision)
-      .first();
-
-    if (alreadyHit) {
+      .bind(watch.id, event.id)
+      .all<{ rationale: string }>();
+    const hitArticleIds = new Set(
+      priorHits.flatMap((h) => citedIds(h.rationale)),
+    );
+    const watchNew = newArticles.filter(
+      (a) => a.effective_at > watch.created_at && !hitArticleIds.has(a.id),
+    );
+    if (watchNew.length === 0) {
       continue;
     }
+    const watchPrior = articles.filter((a) => !watchNew.includes(a));
 
     // Rule 3: Keywords filter (Must have at least one matching keyword; empty keywords are filtered out)
     let kwList: string[] = [];
@@ -349,7 +365,7 @@ export async function evaluateEventWatches(
     // Ledger keys bound to watch configuration hash and content input SHA
     const judgeKey = `watch:judge:${watch.id}:${event.id}:${event.revision}:${inputSha.slice(0, 16)}:${watchSha}:${WATCH_PROMPT_VERSION}`;
 
-    const newReportingText = newArticles
+    const newReportingText = watchNew
       .map((a) => `[New Article] ${a.title}\n${a.summary ?? ""}`)
       .join("\n\n")
       .slice(0, 2000);
@@ -359,8 +375,8 @@ export async function evaluateEventWatches(
       newReportingText,
     ];
 
-    if (priorArticles.length > 0) {
-      const priorReportingText = priorArticles
+    if (watchPrior.length > 0) {
+      const priorReportingText = watchPrior
         .map((a) => `[Prior Article] ${a.title}\n${a.summary ?? ""}`)
         .join("\n\n")
         .slice(0, 2000);
@@ -373,7 +389,7 @@ export async function evaluateEventWatches(
 
     const state = {
       title: derivedTitle,
-      summary: newArticles
+      summary: watchNew
         .map((a) => a.summary ?? "")
         .join(" ")
         .slice(0, 1000),
@@ -405,7 +421,7 @@ export async function evaluateEventWatches(
         watch.question,
         watch.criteria,
         derivedTitle,
-        newArticles,
+        watchNew,
       );
 
       let summaryText: string;
@@ -426,7 +442,7 @@ export async function evaluateEventWatches(
             warning: `Watch summary generation truncated (${summaryRes.finishReason}); discarding partial text and using fallback`,
           });
           summaryText =
-            newArticles[0]?.title ||
+            watchNew[0]?.title ||
             "Material development confirmed by evaluation.";
         }
       } catch (e) {
@@ -438,16 +454,16 @@ export async function evaluateEventWatches(
           error: e.message,
         });
         summaryText =
-          newArticles[0]?.title ||
-          "Material development confirmed by evaluation.";
+          watchNew[0]?.title || "Material development confirmed by evaluation.";
       }
 
-      // Atomic insertion: only commit if event revision hasn't changed concurrently
+      // No revision condition: the hit records a development at this
+      // revision and does not expire when the event moves on (invariant 3).
+      // A later retraction is hidden by the public article guard.
       await db
         .prepare(
           `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
-           WHERE (SELECT revision FROM events WHERE id = ?2) = ?3
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
            ON CONFLICT (watch_id, event_id, event_revision) DO NOTHING`,
         )
         .bind(
@@ -459,7 +475,7 @@ export async function evaluateEventWatches(
           JSON.stringify({
             noul: noulVal,
             promptVersion: WATCH_PROMPT_VERSION,
-            articleIds: newArticles.map((a) => a.id),
+            articleIds: watchNew.map((a) => a.id),
           }),
           watchHitInitialStatus(),
         )
