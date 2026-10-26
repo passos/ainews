@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { z } from "zod";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { isSystemSource } from "../../lib/source-attribution";
@@ -674,7 +675,7 @@ export async function getArticle(database: D1Database, id: number) {
     .select()
     .from(analyses)
     .where(sql`${analyses.articleId} = ${id}`)
-    .orderBy(sql`${analyses.createdAt} DESC`);
+    .orderBy(sql`${analyses.createdAt} DESC, ${analyses.id} DESC`);
 
   const corrs = await d
     .select()
@@ -761,6 +762,29 @@ export async function changeArticleIndustry(
   }
 
   await database.batch(statements);
+}
+
+const REANALYZE_INPUT = z.object({
+  articleId: z.number().int().positive(),
+  expectedStage: z.enum([
+    "collected",
+    "body_ready",
+    "analyzed",
+    "grouped",
+    "dropped",
+  ]),
+});
+
+/**
+ * Validates the reanalyze request. A client bundle loaded before the deploy
+ * sends no `expectedStage`; that must be a 400, not an undefined bind (500).
+ */
+export function parseReanalyzeInput(data: unknown) {
+  const parsed = REANALYZE_INPUT.safeParse(data);
+  if (!parsed.success) {
+    throw new Response("Invalid reanalyze request", { status: 400 });
+  }
+  return parsed.data;
 }
 
 export async function reanalyzeArticle(
