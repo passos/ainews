@@ -2,8 +2,6 @@
 
 所有 issue 都按这份文件实现。改这里的约定要单独开 PR，并同步受影响的 issue。
 
-#75 的融资与匿名反馈条款是 #23／#24 后续功能 PR 必须实现并测试的契约，不表示新表、接口或功能已存在或部署。契约草稿与功能草稿编码、测试可并行；契约 PR 必须先通过独立评审及项目门禁并合并，核实合入 SHA 后，功能 PR 才可在各自评审及门禁通过后合并。实际两路独立评审（含跨家族）未完成前，所有相关 PR 保持 draft；作者自查不能代替独立评审。
-
 需求来源，按优先级：
 
 1. `docs/Newsren_Plan.md`：必须满足的产品需求。下文用 `N§x` 引用它的章节。
@@ -44,7 +42,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 
 - 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics；空字符串 = 不输出 beacon 脚本）。
 - 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。
-- #24 须使用 secret `FEEDBACK_SALT`，不得放入 vars、客户端或应用日志；配置与轮换属于运维，本契约不配置 secret 或修改开关。
+- 匿名反馈用 secret `FEEDBACK_SALT`，不放进 vars、客户端或日志。
 - 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
 
@@ -64,7 +62,7 @@ server function 的请求路径是 `/_serverFn/*`，不在 Access 保护的 `/ad
 
 - search params 一律用 schema 校验（分页、板块、读者档位 `audience=student|educator|professional`）。
 - 只在服务端运行的代码放在 `src/server/**`，用 `createServerFn` 暴露；组件里不出现 `env`。
-- #24 匿名按钮唯一写能力为 `src/server/feedback/api.ts::submitFeedback` POST server function；loader 仍只经 `publication/` 读取，读取不投票，也不查询个体投票记录。
+- 公开站唯一的写入口是 `src/server/feedback/api.ts` 导出的 `submitFeedback`（POST server function，见第 7 节）。loader 仍只经 `publication/` 读取。
 
 ## 3. 目录与依赖规则
 
@@ -76,7 +74,7 @@ src/
   server/
     publication/            唯一的公开读取层：所有公开页面和 RSS 只从这里读
     admin/                  后台 server function + Access 中间件
-    feedback/               #24 待实现：仅 api.ts::submitFeedback 可被公开路由／组件引用
+    feedback/               匿名“有用／没用”投票：公开站唯一的写入口
     db/                     Drizzle schema、查询
   pipeline/                 collect · body · analyze · group · generate · digest · watch · ask · discover · edgar · funding
   providers/                模型客户端、llm_calls 账本、预算、Jina、toMarkdown
@@ -85,12 +83,14 @@ drizzle/migrations/         wrangler d1 migrations 执行
 tests/
 ```
 
-架构依赖规则由 `tests/architecture.test.ts` 守护；以下反馈例外由 #24 实现并补测试，本契约 PR 不放宽现有守门器：
+架构测试（`tests/architecture.test.ts`，规则在 `tests/helpers/import-rules.ts`）强制：
 
-1. **R1**：公开路由／组件不能直接或间接到达 `server/db/**`、`pipeline/**` 或 `providers/**`；`publication/**` 和后台路由也不能到达 `pipeline/**` 或 `providers/**`。保留现有 publication／Access 后台边界；新增反馈例外仅在确切入口 `src/server/feedback/api.ts::submitFeedback` 停止公开调用链的 DB 遍历，绝不对整个 `feedback/` 目录停止遍历。必须另从 feedback 全部文件继续审计到 `pipeline/**`、`providers/**`、`server/admin/**` 的任何路径并禁止它们。
-2. **R2**：`routes/**` 读数据只经过 `server/publication/**` 或 `server/admin/**`。公开路由／组件仅可引用上述确切文件的 `submitFeedback` API，不得引用 feedback 的 ops／identity 或其他内部模块；没有目录前缀白名单。`publication/` 始终只读，反馈不是第二个通用读取层。
-3. **R3**：`routes/**`、`components/**` 禁止读取 env，反馈例外不放宽此规则。
-4. **R4**：server function 只放在 `src/server/**`，每个后台 server function 仍须显式挂 Access 中间件；匿名反馈不授予后台权限，也不得靠伪造 Access 中间件绕过规则。
+1. **R1**：公开代码（`routes/**` 除 `routes/admin/**`，加 `components/**`）不能直接或间接 import `server/db/**`、`pipeline/**`、`providers/**`。`publication/**` 和 `routes/admin/**` 不能到达 `pipeline/**`、`providers/**`。遍历在 `server/admin/**`（有 Access）和 `server/publication/**` 处停止。这保证"读者打开页面不触发模型调用"。
+2. **R2**：`routes/**` 只 import `server/publication/`、`server/admin/`、`components/`、`lib/`、`routes/` 下的文件。
+3. **R3**：`routes/**`、`components/**` 不 import `cloudflare:workers`。
+4. **R4**：`createServerFn` 只出现在 `src/server/**`；`server/admin/**` 的每个 server function 都挂 Access 中间件。
+
+匿名反馈的例外（#24 实现时同时改测试）：公开代码在 `server/feedback/**` 中只能 import `server/feedback/api.ts` 这一个文件，遍历在它那里停止；另从 `server/feedback/**` 的每个文件起审计，不能到达 `pipeline/**`、`providers/**`、`server/admin/**`。R2 的白名单只为这一个文件放开，不放开整个目录。
 
 ## 4. 流水线：确定性步骤与模型步骤
 
@@ -112,8 +112,8 @@ tests/
 | Ask、周报、行业影响、AI 起草板块配置、财报解读 | 推理模型 | `reason` |
 | Watch：算不算实质进展 | 关键词与分类规则先过滤，剩下的用 Jev `noul` | `judge` |
 | 信源发现：相关度 | Jev `score` | `judge` |
-| 融资事实／字段更正提案 | 只从已批准正文提出带原文证据的提案 | `reason` |
-| 融资身份规范化、同轮去重、字段操作；财报数字 | 确定性（稳定实体 + 实际事件键，具体轮次与 stage 统计桶分开；XBRL 数值）；实体／轮次／公告日期缺失或冲突交管理员确认，不按任意日期窗猜测 | — |
+| 融资：从已批准正文提出带原文证据的事实与更正 | 推理模型 | `reason` |
+| 融资身份、同轮去重、字段合并；财报数字 | 确定性（公司 + 具体轮次 + 公告日期；XBRL 数值）。缺失或冲突交管理员确认 | — |
 
 ### 模型槽位（存在 settings 表，后台可改）
 
@@ -155,15 +155,9 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：事件里"已批准文章的集合"变化时，`events.revision + 1`：已批准的文章并入事件，或事件里的文章被批准、被拒绝、被下线。所有板块上线时都是审核模式，大多数文章是先归组、后批准的，所以批准和拒绝的同一个 `batch()` 里也要加 revision（#11 提供语句，#9 调用）。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
+- **融资观察**：模型对一篇正文的每条融资提案存为一行 `funding_observations`，原样保存，不改写。观察的状态是 `unresolved → ready → applied`，或 `rejected`。把观察写进 `funding_rounds` 与把观察改成 `applied` 在同一个 `batch()` 里，用 `WHERE state='ready'` 和 `changes()=1` 串起来，所以队列重试不会重复写入。账本 `completed` 不等于业务完成：观察已存下时，恢复不再调用模型。
+- 管理员只能对 `unresolved`、`ready` 的观察做决议（关联到某一轮、新建一轮或拒绝），已 `applied` 的观察不能改归属。决议带一个递增的 `decision_revision`，用比较交换防止旧页面覆盖新决议。关联错了，用融资记录的更正或拒绝来改。
 - **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{sha256hex(canonical_url)}.html`（#5 写，在插入 `articles` 之前写，每次抓取覆盖写），它是正文抓取第 0 档的原始输入，不是正文版本；#6 按 `canonical_url` 算出键去读，有就用。
-
-### #23 融资观察、身份与恢复契约
-
-- `funding_observations` 须保留 `article_id`、完整 `body_sha`、提取版本、条目序号及原始提案／证据；原始观察不可被重试或身份更正覆盖。人工归属决议追加 revision 历史，不覆盖原始 payload。
-- 应用 receipt 以稳定观察 ID 和决议 revision 识别，不能只按可纠正的公司／轮次键去重；业务落库、receipt、归属更新及更正审计须在同一 D1 `batch()` 原子提交，不删除历史 receipt。
-- 模型账本 `completed` 不等于业务完成；保存的观察与业务完成标记须支持不重新调用模型的恢复。旧正文成功标记不得因提示词升级而清除或自动触发付费重析。
-- `company_key`／`round_key` 须是已确认的稳定实体／实际融资事件键，不是显示名称或 stage 桶。版本更正不重算这些键；既有 active partial unique 继续保证同键最多一条 `superseded_by IS NULL` 记录。
-- 每个融资版本须保存全部输入观察 ID 与各自决议 revision 的完整快照。批准和公开读取都须校验全部快照仍对应最新有效决议及归属；任一项失效就拒绝该版本，另须满足当前正文批准门槛，不能以仍有一个有效来源替代全输入校验。
 
 ## 7. 发布与审核
 
@@ -174,23 +168,18 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - Finance 每个页面显示"仅供参考，不构成投资建议"（N§4）。
 - 发布后的更正写进 `corrections` 表，并在原页面公开显示（N§9 Trust）。
 
-### #23 融资事实、字段更正与发布
+### 融资记录（#23）
 
-- 普通报道事实与原文明确更正分开。缺失字段保留既有值；原文明示的字段 `set`／`clear` 及投资方 `add`／`remove`／`replace` 分别表达，证据随提案保存，不把缺失当清空。
-- 财务事实或实际身份修订须生成待审版本；身份确认不是发布许可，管理员确认后仍须独立通过 Finance 人工审核才可公开。
-- 真实事件可用原文明示公司标识识别，官网 host 只是证据例子，也须支持管理员确认没有官网的稳定实体；不强制 host、外部公司库或额外抓取。
-- 用具体融资轮次和原文明确的公告时间区分事件，不得把报道／抓取日期当公告日期。缺失或冲突先保存观察，再由管理员关联；日期未知可明确确认未知，不伪造日期，不以任意时间窗或相似度阈值代替证据。信息不全的十篇报道可以十条观察人工关联到一轮，不承诺所有输入全自动去重。
-- 公开融资事实须同时满足身份已确认、版本已发布且未被替代、当前已批准正文及最新有效观察归属支持，并通过 §6 全输入快照校验。来源移轮、拆分或撤销后，历史来源不能继续赋予旧轮公开资格。
-- 反例约束：已发布 R 的输入为 A+B，A 改归 S 后，即使拒绝 R 的待审修订、恢复旧 published R，且 B 仍有效，引用 A 旧决议的 R 也不得获批准或公开；必须重新形成符合全部当前输入的待审版本并审核，不能靠 B 复活旧事实。
-- 公开更正仅展示已批准祖先到最终批准版本的差异，不泄漏中间待审字段。
+- 身份：`company_key` 来自规范化的公司名；`round_key` 来自具体轮次名（Pre-Series A 和 Series A 不同）和原文写明的公告日期。不用 stage 统计桶做键，不用报道或抓取日期代替公告日期，不按时间窗或相似度猜。公司名、轮次、公告日期任一缺失或冲突，观察停在 `unresolved`，由管理员确认。
+- 字段：原文写明的字段才更新；缺失的字段保留原值。投资方的增、删、整体替换分开表达。改了金额、币种、估值、投资方或身份，生成待审新版本，旧版本用 `superseded_by` 指向新版本，不就地覆盖。
+- 发布：Finance 固定人工审核，身份确认不等于批准发布。公开记录要求 `status='published'`、`superseded_by IS NULL`，并且 `source_articles` 里**每一篇**来源的当前正文都已批准；任一来源被撤销，这条记录就不公开，直到管理员处理。来源按文章去重，同一篇文章换了正文版本只保留最新一条。
+- 公开的更正历史只显示已发布版本之间的变化，不显示中间待审版本的字段。
 
-### #24 匿名反馈的唯一公开写例外
+### 匿名反馈（#24）
 
-- 唯一公开写 API 为 `src/server/feedback/api.ts::submitFeedback` POST，只收匿名“有用”（1）／“没用”（-1）投票，严格输入为 `{target:"event"|"digest",id:positive-safe-integer,value:1|-1}`，不收文字或额外身份字段。其目标必须为当前可公开读取的事件 Story Brief 或日报；只能为资格校验读取公开目标，只能写 `feedback` 表，不得改文章、审核、产物、账本、预算或其他表。
-- POST 须经过既有全局 Origin 检查，缺失或跨域 Origin 均拒绝；不调用模型、不发队列、不授予后台写权限，不提供 GET 个体投票查询或通用公开 JSON 写 API。公开读取仍经只读 `publication/`，公开反馈结果仅聚合。
-- IP 只取服务端请求头 `CF-Connecting-IP`；不接受 body 的 IP／hash／day、`X-Forwarded-For` 或客户端身份。缺 IP 或 `FEEDBACK_SALT` 时拒写并返回不可用，不退回未加盐哈希。
-- `day` 由服务端按 UTC 生成，`voter_hash = sha256(IP + day + FEEDBACK_SALT)`。原始 IP 不入库或客户端偏好；原始 IP、salt、voter_hash 均不返回客户端或写应用日志，不公开个体投票者信息。
-- 数据库唯一键 `(target_type, target_id, day, voter_hash)` 须原子改票，重复投票只更新 `value`。它代表每网络地址每目标每天一票，不代表识别真实个人，也不承诺防代理刷票；不新增限频服务。读者偏好仍只留浏览器，不上传完整偏好。
+- `submitFeedback` 只收 `{target:"event"|"digest", id:正的安全整数, value:1|-1}`，目标必须当前公开可读。它只写 `feedback` 表，不调用模型，不发队列，不给后台权限，经过既有的 Origin 检查。
+- IP 只取 `CF-Connecting-IP`。`day` 是服务端的 UTC 日期，`voter_hash = sha256(IP + day + FEEDBACK_SALT)`。缺 IP 或 salt 就拒写，不退回不加盐的哈希。原始 IP 和 salt 不入库；原始 IP、salt、`voter_hash` 都不写日志，也不返回客户端。
+- `(target_type, target_id, day, voter_hash)` 唯一，重复投票只改 `value`。这表示"每个网络地址每天每项一票"，不识别真实个人，不防代理刷票。公开只给聚合结果。
 
 ## 8. 抓取梯（0–3 档）
 
@@ -229,9 +218,9 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 | `questions` | Ask，只在后台 |
 | `source_candidates` / `discovery_runs` | 发现 |
 | `companies` / `filings` / `financial_facts` | EDGAR |
-| `funding_rounds` | `company_key` + `round_key` 标识稳定实体／实际融资事件；既有 active partial unique 仅覆盖 `superseded_by IS NULL`；`superseded_by` 保留更正版本链；身份确认、证据元数据及全部观察／决议 revision 输入快照随版本保存 |
-| `funding_observations`（#23 待建） | `(article_id, 完整 body_sha, 提取版本, 条目序号)` 唯一；原始 payload／证据不可变；归属决议保留 revision 历史，应用 receipt 对应稳定观察 ID + 决议 revision |
-| `feedback`（#24 待建） | `target_type`、`target_id`、`day`、`voter_hash`、`value`、`created_at`；类型仅 event／digest，值仅 1／-1；唯一键及目标资格见 §7 |
+| `funding_rounds` | `(company_key, round_key)` 在 `superseded_by IS NULL` 的行里唯一（部分唯一索引）；`superseded_by` 记录更正链；`source_articles` 记来源文章与正文版本 |
+| `funding_observations` | 主键由 `(article_id, body_sha, prompt_version, item_index)` 算出；`payload_json` 不改写；`state`、`resolution_json`、`decision_revision` |
+| `feedback` | `(target_type, target_id, day, voter_hash)` 唯一；`value` 只为 1 或 -1 |
 | `corrections` | 公开更正 |
 | `llm_calls` / `budgets` / `settings` | 见第 6 节 |
 
@@ -240,8 +229,6 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 ### 迁移
 
 从 `COLLECT_ENABLED` 第一次打开起，`articles` 和所有被外键引用的表不再用"重建表"的迁移；加列用 `ALTER TABLE ADD COLUMN`；需要改 CHECK 的，另开 issue 先设计。
-
-#23／#24 新列只用 `ALTER TABLE ADD COLUMN`，新表／索引用 `CREATE TABLE`／`CREATE INDEX`；不改原表 CHECK、不重建 `funding_rounds`、不改既有 active unique 索引。实际迁移由后续功能 PR 提供，本契约 PR 不生成 SQL。
 
 ## 10. 测试、CI 与合并
 
