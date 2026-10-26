@@ -409,3 +409,34 @@ describe("renderArticleExcerpt review round 4", () => {
     );
   });
 });
+
+describe("renderArticleExcerpt review round 5", () => {
+  it("honours /> only for svg|math in a raw HTML block (P2)", () => {
+    const html = renderArticleMarkdown("<div>\na <script/>SECRET b\n</div>");
+    expect(html).not.toContain("SECRET");
+    expect(html).toContain("<p>a</p>");
+  });
+
+  it("keeps text after a self-closing <svg/> in a raw HTML block (P2)", () => {
+    expect(renderArticleMarkdown("<div>\na <svg/>keep b\n</div>")).toContain(
+      "<p>a keep b</p>",
+    );
+  });
+
+  it("does not close a script on a longer tag name (P2)", () => {
+    const html = renderArticleMarkdown(
+      "<div>\na <script>X</scriptx> LEAK </script> b\n</div>",
+    );
+    expect(html).not.toContain("LEAK");
+    expect(html).toContain("<p>a b</p>");
+  });
+
+  it("closes a script on </script followed by whitespace, / or > (P2)", () => {
+    expect(
+      renderArticleMarkdown("<div>\na <script>X</script > b\n</div>"),
+    ).toContain("<p>a b</p>");
+    expect(
+      renderArticleMarkdown("<div>\na <script>X</script/> b\n</div>"),
+    ).toContain("<p>a b</p>");
+  });
+});
