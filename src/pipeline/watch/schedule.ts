@@ -1,4 +1,5 @@
 import { sendGenerate, type PipelineEnv } from "../messages";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 
 export async function enqueueDueWatches(
   env: Pick<PipelineEnv, "DB" | "Q_GENERATE">,
@@ -30,8 +31,7 @@ export async function enqueueDueWatches(
        AND EXISTS (
          SELECT 1 FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
-         JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-         WHERE ea.event_id = e.id
+         WHERE ea.event_id = e.id AND ${APPROVED_ARTICLE_SQL}
        )
      ORDER BY e.updated_at DESC
      LIMIT ?2`,

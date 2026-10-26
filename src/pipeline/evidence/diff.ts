@@ -1,5 +1,6 @@
 import type { RevisionDiff } from "../../lib/artifacts/types";
 import { readerSourceName } from "../../lib/source-attribution";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 
 interface ArticleRow {
   title: string;
@@ -35,8 +36,7 @@ export async function computeRevisionDiff(
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
-         JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-         WHERE ea.event_id = ?1 AND ea.input_revision <= 1
+         WHERE ea.event_id = ?1 AND ea.input_revision <= 1 AND ${APPROVED_ARTICLE_SQL}
          ORDER BY a.id ASC`,
       )
       .bind(eventId)
@@ -76,8 +76,7 @@ export async function computeRevisionDiff(
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
        JOIN sources s ON s.id = a.source_id
-       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       WHERE ea.event_id = ?1 AND ea.input_revision = ?2
+       WHERE ea.event_id = ?1 AND ea.input_revision = ?2 AND ${APPROVED_ARTICLE_SQL}
        ORDER BY a.id ASC`,
     )
     .bind(eventId, revision)

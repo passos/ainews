@@ -6,6 +6,7 @@ import {
   type ModelTransport,
 } from "../../providers/transport";
 import { FINANCE_SLUG } from "../../server/admin/ops";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import type { PipelineEnv } from "../messages";
 import { attributeSource } from "../../lib/source-attribution";
 import { indexArticleChunks, sha256Hex } from "./chunks";
@@ -165,14 +166,13 @@ export async function generateEventEvidence(
            FROM event_articles ea
            JOIN articles a ON a.id = ea.article_id
            JOIN sources s ON s.id = a.source_id
-           JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
            LEFT JOIN analyses an ON an.id = (
              SELECT id FROM analyses
              WHERE article_id = a.id AND selected = 1
              ORDER BY created_at DESC, id DESC
              LIMIT 1
            )
-           WHERE ea.event_id = ?1
+           WHERE ea.event_id = ?1 AND ${APPROVED_ARTICLE_SQL}
            ORDER BY a.id ASC`,
         )
         .bind(eventId),

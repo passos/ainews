@@ -4,6 +4,7 @@ import {
   type ModelTransport,
 } from "../../providers/transport";
 import type { PipelineEnv } from "../messages";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import {
   WATCH_PROMPT_VERSION,
   buildWatchJudgeQuestion,
@@ -115,7 +116,7 @@ export async function evaluateEventWatches(
     return { eventId, eventRevision: 0, evaluatedCount: 0, hitCount: 0 };
   }
 
-  // 2. Fetch approved articles for this event (strictly approvedArticleWhere)
+  // 2. Fetch approved articles for this event (APPROVED_ARTICLE_SQL)
   // An article becomes an approved member of this event when BOTH linked (ea.created_at)
   // and approved (r.created_at). Its effective timestamp is MAX(ea.created_at, r.created_at).
   const { results: articles } = await db
@@ -124,8 +125,8 @@ export async function evaluateEventWatches(
               MAX(ea.created_at, r.created_at) AS effective_at
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
-       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       WHERE ea.event_id = ?1
+       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
+       WHERE ea.event_id = ?1 AND ${APPROVED_ARTICLE_SQL}
        ORDER BY MAX(ea.created_at, r.created_at) ASC, a.id ASC`,
     )
     .bind(eventId)

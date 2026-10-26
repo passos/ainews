@@ -670,6 +670,61 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    // Pins current behavior of the recovery path (ANY_BODY_APPROVED_SQL, #84):
+    // with no body_sha, the review is written for sha256(canonical), which is
+    // not the article's current body, and the article is still linked.
+    // Switching this path to APPROVED_ARTICLE_SQL is an owner decision.
+    it("auto section: recovering an orphan with no body_sha links it on an any-body approval", async () => {
+      const orphan = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, ?1, 'https://arxiv.org/abs/orphan-null', 'https://arxiv.org/abs/orphan-null', 'Orphan', NULL, 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(arxivSourceId)
+        .first<{ id: number }>();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_orphan_null_link",
+        "Preprint at [arXiv](https://arxiv.org/abs/orphan-null).",
+      );
+      const mockFetch = vi.fn();
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: mockFetch as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["arxiv.org"],
+        2000,
+      );
+
+      const review = await env.DB.prepare(
+        `SELECT decision, body_sha FROM reviews WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first<{ decision: string; body_sha: string }>();
+      expect(review?.decision).toBe("approved");
+      expect(review?.body_sha).not.toBeNull();
+      const linked = await env.DB.prepare(
+        `SELECT input_revision FROM event_articles WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first<{ input_revision: number }>();
+      expect(linked?.input_revision).toBe(2);
+      const ev = await env.DB.prepare(
+        `SELECT revision FROM events WHERE id = ?1`,
+      )
+        .bind(eventId)
+        .first<{ revision: number }>();
+      expect(ev!.revision).toBe(2);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("does not insert sources and attributes a fetched page to the matching section source", async () => {
       await seedApprovedReport(
         eventId,

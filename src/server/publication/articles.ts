@@ -24,11 +24,17 @@ const HOME_CORRECTIONS = 5;
  * version, decided "approved". An approval of an older body, a rejection
  * (including a take-down) or no review all mean "not public". The article
  * table must be aliased `a`. Every public read uses this one fragment.
+ * Pipeline code interpolates this string into D1 `prepare()` text. Do not
+ * interpolate `approvedArticleWhere` into a JS template string: it is an
+ * object and becomes `[object Object]`.
  */
-export const approvedArticleWhere: SQL = sql`EXISTS (
+export const APPROVED_ARTICLE_SQL = `EXISTS (
   SELECT 1 FROM reviews r
   WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
 )`;
+
+/** APPROVED_ARTICLE_SQL as a drizzle fragment, for public reads. */
+export const approvedArticleWhere: SQL = sql.raw(APPROVED_ARTICLE_SQL);
 
 // Newest first; id makes the order total, so paging neither repeats nor
 // skips rows. Must stay identical to articles_industry_newest_idx (schema),

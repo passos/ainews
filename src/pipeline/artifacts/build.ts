@@ -1,5 +1,6 @@
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import { FINANCE_SLUG } from "../../server/admin/ops";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { parseAnalysisConfig } from "../analyze/config";
 import { createModelClient, type ModelClient } from "../../providers/models";
 import {
@@ -192,14 +193,13 @@ export async function generateEventArtifacts(
            FROM event_articles ea
            JOIN articles a ON a.id = ea.article_id
            JOIN sources s ON s.id = a.source_id
-           JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
            LEFT JOIN analyses an ON an.id = (
              SELECT id FROM analyses
              WHERE article_id = a.id AND selected = 1
              ORDER BY created_at DESC, id DESC
              LIMIT 1
            )
-           WHERE ea.event_id = ?1
+           WHERE ea.event_id = ?1 AND ${APPROVED_ARTICLE_SQL}
            ORDER BY a.id ASC`,
       )
       .bind(eventId),
@@ -424,10 +424,7 @@ export async function generateEventArtifacts(
            JOIN articles a ON a.id = fl.article_id
            WHERE ff.company_id = ?1
              AND fl.id != ?2
-             AND EXISTS (
-               SELECT 1 FROM reviews r
-               WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-             )
+             AND ${APPROVED_ARTICLE_SQL}
            ORDER BY ff.period_end DESC, ff.id DESC`,
         )
         .bind(filingRow.company_id, filingRow.id)

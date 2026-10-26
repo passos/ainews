@@ -1,4 +1,5 @@
 import { isEnabled } from "../../lib/flags";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { dayBoundsUtc, weekBoundsUtc } from "../../lib/time";
 import { CallInProgressError, createModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
@@ -150,10 +151,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
          LIMIT 1) AS title,
 
@@ -164,10 +162,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS summary,
 
@@ -179,10 +174,7 @@ export async function buildDigest(
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS source,
 
@@ -193,10 +185,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS total_score,
 
@@ -204,19 +193,15 @@ export async function buildDigest(
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )) AS article_count
+           AND ${APPROVED_ARTICLE_SQL}) AS article_count
 
       FROM events e
       WHERE e.industry_id = ?1
         AND EXISTS (
           SELECT 1 FROM event_articles ea
           JOIN articles a ON a.id = ea.article_id
-          JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
           WHERE ea.event_id = e.id
-            AND r.decision = 'approved'
+            AND ${APPROVED_ARTICLE_SQL}
         )
         AND (
           (e.created_at >= ?2 AND e.created_at < ?3)
@@ -226,15 +211,14 @@ export async function buildDigest(
             JOIN articles a ON a.id = ea.article_id
             JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
             WHERE ea.event_id = e.id
-              AND r.decision = 'approved'
+              AND ${APPROVED_ARTICLE_SQL}
               AND r.created_at >= ?2 AND r.created_at < ?3
           )
           OR EXISTS (
             SELECT 1 FROM event_articles ea
             JOIN articles a ON a.id = ea.article_id
-            JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
             WHERE ea.event_id = e.id
-              AND r.decision = 'approved'
+              AND ${APPROVED_ARTICLE_SQL}
               AND ea.created_at >= ?2 AND ea.created_at < ?3
           )
         )
@@ -251,10 +235,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
          LIMIT 1) AS title,
 
@@ -265,10 +246,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS summary,
 
@@ -280,10 +258,7 @@ export async function buildDigest(
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS source,
 
@@ -294,10 +269,7 @@ export async function buildDigest(
            SELECT id FROM analyses WHERE article_id = a.id AND selected = 1 ORDER BY created_at DESC, id DESC LIMIT 1
          )
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )
+           AND ${APPROVED_ARTICLE_SQL}
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS total_score,
 
@@ -305,10 +277,7 @@ export async function buildDigest(
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          WHERE ea.event_id = e.id
-           AND EXISTS (
-             SELECT 1 FROM reviews r
-             WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-           )) AS article_count
+           AND ${APPROVED_ARTICLE_SQL}) AS article_count
 
       FROM events e
       WHERE e.industry_id = ?1
@@ -317,15 +286,14 @@ export async function buildDigest(
           JOIN articles a ON a.id = ea.article_id
           JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
           WHERE ea.event_id = e.id
-            AND r.decision = 'approved'
+            AND ${APPROVED_ARTICLE_SQL}
             AND r.created_at >= ?2 AND r.created_at < ?3
         )
         AND EXISTS (
           SELECT 1 FROM event_articles ea
           JOIN articles a ON a.id = ea.article_id
-          JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha
           WHERE ea.event_id = e.id
-            AND r.decision = 'approved'
+            AND ${APPROVED_ARTICLE_SQL}
         )
       ORDER BY total_score DESC, e.created_at DESC, e.id DESC
       LIMIT ?4`;

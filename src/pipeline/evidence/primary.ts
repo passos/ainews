@@ -1,4 +1,5 @@
 import type { PipelineEnv } from "../messages";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { checkRobots, claimHostSlot, hostAllowed } from "../body/robots";
 import {
   fetchPage,
@@ -12,6 +13,21 @@ import { normalizeUrl } from "../../lib/url";
 import { isEnabled } from "../../lib/flags";
 import { effectivePublishMode } from "../analyze/analyze";
 import { toMarkdown } from "../../providers/tomarkdown";
+
+/**
+ * Looser than APPROVED_ARTICLE_SQL (server/publication/articles.ts): true when
+ * ANY body version of article `a` has an approved review, not only the
+ * current one. Only the recovery path in trackEventPrimarySources uses it:
+ * that path has just written a review for `existing.body_sha || sha256(canonical)`,
+ * which can differ from `a.body_sha`. This is not the definition of
+ * "approved" and must not decide what readers see. Moving that path to
+ * APPROVED_ARTICLE_SQL is a behavior change and an owner decision (#84).
+ * The article table must be aliased `a`.
+ */
+export const ANY_BODY_APPROVED_SQL = `EXISTS (
+  SELECT 1 FROM reviews r
+  WHERE r.article_id = a.id AND r.decision = 'approved'
+)`;
 
 export interface PrimaryTrackerDeps {
   db: D1Database;
@@ -176,8 +192,7 @@ export async function trackEventPrimarySources(
       `SELECT a.id, a.body_sha, a.canonical_url
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
-       JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       WHERE ea.event_id = ?1
+       WHERE ea.event_id = ?1 AND ${APPROVED_ARTICLE_SQL}
        ORDER BY a.id ASC`,
     )
     .bind(eventId)
@@ -287,9 +302,8 @@ export async function trackEventPrimarySources(
       // Check if existing article is approved
       const isApproved = await deps.db
         .prepare(
-          `SELECT 1 FROM reviews r
-           JOIN articles a ON a.id = r.article_id AND r.body_sha = a.body_sha
-           WHERE a.id = ?1 AND r.decision = 'approved'`,
+          `SELECT 1 FROM articles a
+           WHERE a.id = ?1 AND ${APPROVED_ARTICLE_SQL}`,
         )
         .bind(existing.id)
         .first();
@@ -306,10 +320,9 @@ export async function trackEventPrimarySources(
                SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
                WHERE (SELECT revision FROM events WHERE id = ?1) = ?4
                  AND EXISTS (
-                   SELECT 1 FROM reviews r
-                   JOIN articles a ON a.id = r.article_id AND r.body_sha = a.body_sha
+                   SELECT 1 FROM articles a
                    JOIN events e ON e.id = ?1
-                   WHERE a.id = ?2 AND r.decision = 'approved' AND a.industry_id = e.industry_id
+                   WHERE a.id = ?2 AND a.industry_id = e.industry_id AND ${APPROVED_ARTICLE_SQL}
                  )`,
             )
             .bind(eventId, existing.id, now, event.revision),
@@ -386,13 +399,10 @@ export async function trackEventPrimarySources(
                 `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
                  SELECT ?1, ?2, ?3, (SELECT revision + 1 FROM events WHERE id = ?1)
                  WHERE EXISTS (
-                   SELECT 1 FROM reviews
-                   WHERE article_id = ?2 AND decision = 'approved'
-                 )
-                 AND EXISTS (
                    SELECT 1 FROM articles a
                    JOIN events e ON e.id = ?1
                    WHERE a.id = ?2 AND a.industry_id = e.industry_id
+                     AND ${ANY_BODY_APPROVED_SQL}
                  )`,
               )
               .bind(eventId, existing.id, now),
@@ -676,7 +686,6 @@ export async function trackDuePrimarySources(
      JOIN industries i ON i.id = e.industry_id
      JOIN event_articles ea ON ea.event_id = e.id
      JOIN articles a ON a.id = ea.article_id
-     JOIN reviews r ON r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
      LEFT JOIN (
        SELECT event_id, MAX(created_at) AS last_scanned_at
        FROM event_artifacts
@@ -685,6 +694,7 @@ export async function trackDuePrimarySources(
      ) pt ON pt.event_id = e.id
      WHERE json_valid(i.primary_domains) = 1
        AND json_array_length(i.primary_domains) > 0
+       AND ${APPROVED_ARTICLE_SQL}
      GROUP BY e.id
      ORDER BY COALESCE(MAX(pt.last_scanned_at), 0) ASC, e.updated_at DESC
      LIMIT ?1`,
