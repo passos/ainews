@@ -13,6 +13,7 @@
 // crawl slot (also of a redirect hop) sends the message again with a delay.
 import { isEnabled } from "../../lib/flags";
 import { createModelClient } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import type { ModelClient } from "../../providers/models";
 import { jinaTransport } from "../../providers/jina";
 import { prefixTransport } from "../../providers/transport";
@@ -261,6 +262,7 @@ async function fetchRemote(
     let models: ModelClient | null = null;
     body = await readWithJina(env, article, row.jina_enabled === 1, () => {
       models ??= createModelClient({
+        tier: CALL_TIERS.body,
         db: env.DB,
         transport: prefixTransport({
           "jina/": jinaTransport({

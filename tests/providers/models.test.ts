@@ -56,7 +56,12 @@ describe("model client", () => {
     "sends nothing and writes nothing when the flag is %s",
     async (_, flags) => {
       const transport = fakeTransport();
-      const models = createModelClient({ db: env.DB, transport, env: flags });
+      const models = createModelClient({
+        tier: 1,
+        db: env.DB,
+        transport,
+        env: flags,
+      });
 
       await expect(models.generateText("write", "k", REQUEST)).rejects.toThrow(
         ModelCallsDisabledError,
@@ -79,6 +84,7 @@ describe("model client", () => {
   it("returns the stored result for a completed key without a new request", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -97,6 +103,7 @@ describe("model client", () => {
   it("parses typed Jev answers and embeddings", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -145,6 +152,7 @@ describe("model client", () => {
       throw new TransportHttpError(502, "bad gateway");
     });
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -174,6 +182,7 @@ describe("model client", () => {
 
     // A failed key can be retried.
     const ok = createModelClient({
+      tier: 1,
       db: env.DB,
       transport: fakeTransport(),
       env: ENABLED,
@@ -198,6 +207,7 @@ describe("model client", () => {
   it("charges the estimate when the response cannot be parsed", async () => {
     const transport = fakeTransport(() => ({ unexpected: true }));
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -219,6 +229,7 @@ describe("model client", () => {
   it("fails an unsupported model before taking a lease, and the key works once the slot is fixed", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -256,6 +267,7 @@ describe("model client", () => {
   it("readPage refuses a read slot that is not a jina/ model before any request", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -284,6 +296,7 @@ describe("model client", () => {
   it("rejects a Jev input that is still too large before taking a lease", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,
@@ -310,6 +323,7 @@ describe("model client", () => {
     async (maxOutputTokens) => {
       const transport = fakeTransport();
       const models = createModelClient({
+        tier: 1,
         db: env.DB,
         transport,
         env: ENABLED,

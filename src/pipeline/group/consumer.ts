@@ -7,6 +7,7 @@ import {
   createModelClient,
   type ModelClient,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -37,6 +38,7 @@ function defaultDeps(
   const models =
     overrides.models ??
     createModelClient({
+      tier: CALL_TIERS.group,
       db: env.DB,
       transport,
       env,
@@ -93,8 +95,22 @@ export async function handleGroupBatch(
       }
       msg.ack();
     } catch (e) {
-      if (
-        e instanceof BudgetExceededError ||
+      if (e instanceof BudgetExceededError) {
+        // Wait for budget without using up requeues: the article stays
+        // `analyzed` and requeueStuck sends it again (as analyze.ts `touch`).
+        await env.DB.prepare(
+          `UPDATE articles SET stage_updated_at = ?2, requeue_count = 0
+           WHERE id = ?1 AND stage = 'analyzed'`,
+        )
+          .bind(body.articleId, now)
+          .run();
+        console.warn({
+          group: body.articleId,
+          error: e.name,
+          message: e.message,
+        });
+        msg.ack();
+      } else if (
         e instanceof CallInProgressError ||
         e instanceof CallFailedError ||
         e instanceof CallUnknownError

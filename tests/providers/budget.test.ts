@@ -25,6 +25,7 @@ describe("budget reservation", () => {
   it("does not call when the cap cannot cover the estimate, then succeeds after a raise", async () => {
     const transport = fakeTransport();
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,

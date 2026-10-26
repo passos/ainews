@@ -7,6 +7,7 @@ import {
   type ModelClient,
   BudgetExceededError,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -149,6 +150,7 @@ export async function runDiscovery(
   const models =
     overrides.models ??
     createModelClient({
+      tier: CALL_TIERS.discover,
       db: overrides.db ?? env.DB,
       transport,
       env,

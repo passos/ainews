@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isEnabled } from "../../lib/flags";
 import { createModelClient, type ModelClient } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -286,6 +287,7 @@ export async function draftIndustryConfig(
   const models =
     deps.models ??
     createModelClient({
+      tier: CALL_TIERS.discover,
       db: deps.db,
       transport,
       env: deps.env,

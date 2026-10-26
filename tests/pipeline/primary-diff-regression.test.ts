@@ -270,7 +270,12 @@ it("does not classify an old cached vendor response as independent verification"
     }),
   };
   const enabledEnv = { ...env, MODEL_CALLS_ENABLED: "true" };
-  const models = createModelClient({ db: env.DB, env: enabledEnv, transport });
+  const models = createModelClient({
+    tier: 1,
+    db: env.DB,
+    env: enabledEnv,
+    transport,
+  });
   const result = await generateEventEvidence(enabledEnv, eventId, 2000, {
     db: env.DB,
     bodies: env.BODIES,

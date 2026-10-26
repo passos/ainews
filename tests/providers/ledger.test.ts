@@ -33,6 +33,7 @@ const REQUEST = { system: "s", prompt: "p", maxOutputTokens: 16 };
 function client(now = NOW, db: D1Database = env.DB) {
   const transport = fakeTransport();
   const models = createModelClient({
+    tier: 1,
     db,
     transport,
     env: ENABLED,
@@ -75,6 +76,7 @@ async function acquired(key: string): Promise<number> {
     model: "google/gemini-3.8-flash",
     channel: "gateway",
     now: NOW,
+    tier: 1,
   });
   if (outcome.kind !== "acquired") throw new Error(outcome.kind);
   return outcome.attempt;
@@ -90,6 +92,7 @@ function send(key: string, attempt: number, estimatedMicros = 100) {
     budgetDay: TODAY,
     channel: "gateway",
     capMicros: 1_000_000,
+    floorMicros: 0,
   });
 }
 
@@ -408,6 +411,7 @@ describe("llm_calls ledger", () => {
       throw new TransportHttpError(502, "bad gateway");
     });
     const models = createModelClient({
+      tier: 1,
       db: env.DB,
       transport,
       env: ENABLED,

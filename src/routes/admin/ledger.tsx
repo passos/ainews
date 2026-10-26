@@ -242,6 +242,73 @@ function AdminLedgerPage() {
         </div>
       </section>
 
+      {/* Gateway spend by tier (#116) */}
+      <section className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold">
+            Gateway spend by tier ({budgetSummary.day})
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {budgetSummary.tierReservesError !== null
+              ? `budget.tier_reserves is invalid; model calls fail until it is fixed: ${budgetSummary.tierReservesError}`
+              : budgetSummary.tierReserves === null
+                ? "Tier reserves not configured (defaults apply)."
+                : "Tier reserves from settings (budget.tier_reserves)."}
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b bg-muted/50 uppercase text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2.5">Tier</th>
+                <th className="px-3 py-2.5">Label</th>
+                <th className="px-3 py-2.5">Reserve</th>
+                <th className="px-3 py-2.5">Spends while remaining ≥</th>
+                <th className="px-3 py-2.5">Spent</th>
+                <th className="px-3 py-2.5">Reserved</th>
+                <th className="px-3 py-2.5">Calls</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {budgetSummary.tiers.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="p-4 text-center text-muted-foreground"
+                  >
+                    No gateway calls today.
+                  </td>
+                </tr>
+              ) : (
+                budgetSummary.tiers.map((t) => (
+                  <tr key={t.tier ?? "untiered"}>
+                    <td className="px-3 py-2 font-mono">{t.tier ?? "—"}</td>
+                    <td className="px-3 py-2">{t.label}</td>
+                    <td className="px-3 py-2 font-mono">
+                      {t.reserveMicros === null
+                        ? "—"
+                        : `$${(t.reserveMicros / 1_000_000).toFixed(4)}`}
+                    </td>
+                    <td className="px-3 py-2 font-mono">
+                      {t.floorMicros === null
+                        ? "—"
+                        : `$${(t.floorMicros / 1_000_000).toFixed(4)}`}
+                    </td>
+                    <td className="px-3 py-2 font-mono">
+                      ${(t.spentMicros / 1_000_000).toFixed(4)}
+                    </td>
+                    <td className="px-3 py-2 font-mono">
+                      ${(t.reservedMicros / 1_000_000).toFixed(4)}
+                    </td>
+                    <td className="px-3 py-2 font-mono">{t.calls}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Ledger Calls Table */}
       <section className="flex flex-col gap-4 border-t pt-8">
         <div className="flex flex-wrap items-center justify-between gap-4">

@@ -8,7 +8,10 @@ import type {
 } from "../../src/pipeline/messages";
 import { requeueStuck, STUCK_AFTER_MS } from "../../src/pipeline/requeue";
 import type { JevAnswers, JevQuestions } from "../../src/providers/jev";
-import type { ModelClient } from "../../src/providers/models";
+import {
+  BudgetExceededError,
+  type ModelClient,
+} from "../../src/providers/models";
 
 class FakeVectorize {
   async upsert(vectors: Array<{ id: string }>) {
@@ -555,5 +558,52 @@ describe("handleGroupBatch consumer", () => {
     expect(await eventOf(artId)).toBe(yId);
     expect(sent.length).toBe(0);
     expect(acked).toEqual([artId]);
+  });
+});
+
+describe("handleGroupBatch budget refusal (#116)", () => {
+  it("BudgetExceededError keeps the article queued: requeue_count = 0, stage_updated_at = now, acked", async () => {
+    const { artId } = await seedRedeliveryArticle(
+      "c-ind-budget",
+      "budget-refused.test",
+      "sha-budget",
+      true,
+    );
+    await env.DB.prepare("UPDATE articles SET requeue_count = 2 WHERE id = ?1")
+      .bind(artId)
+      .run();
+    const refuse = async () => {
+      throw new BudgetExceededError("gateway", "2026-10-26", 1);
+    };
+    const models = { embed: refuse, judge: refuse } as unknown as ModelClient;
+    const { queue, sent } = createRecordingQGenerate();
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      MODEL_CALLS_ENABLED: "true",
+      Q_GENERATE: queue,
+    };
+
+    const { batch, acked, retried } = createFakeBatch([
+      { kind: "group", articleId: artId },
+    ]);
+    await handleGroupBatch(batch, pipelineEnv, {
+      models,
+      vectors: new FakeVectorize(),
+      now: () => 5000,
+    });
+
+    expect(acked).toEqual([artId]);
+    expect(retried).toEqual([]);
+    expect(sent).toEqual([]);
+    const row = await env.DB.prepare(
+      "SELECT stage, requeue_count, stage_updated_at FROM articles WHERE id = ?1",
+    )
+      .bind(artId)
+      .first();
+    expect(row).toEqual({
+      stage: "analyzed",
+      requeue_count: 0,
+      stage_updated_at: 5000,
+    });
   });
 });

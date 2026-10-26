@@ -785,6 +785,7 @@ describe("races, body versions and retries", () => {
         model: slot === "write" ? "google/gemini-3.8-flash" : "typesafe/jev",
         channel: "gateway",
         now: NOW,
+        tier: 1,
       });
       const t = models(fakeAnswers(config));
       expect(await run(id, t)).toEqual({

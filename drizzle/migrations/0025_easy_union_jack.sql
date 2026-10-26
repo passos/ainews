@@ -1,0 +1,1 @@
+ALTER TABLE `llm_calls` ADD `tier` integer;

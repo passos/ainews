@@ -5,6 +5,7 @@ import {
   createModelClient,
   type ModelClient,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import {
   bindingTransport,
   type ModelTransport,
@@ -101,6 +102,7 @@ export function defaultEvidenceDeps(
   const models =
     overrides?.models ??
     createModelClient({
+      tier: CALL_TIERS.evidence,
       db,
       transport,
       env,

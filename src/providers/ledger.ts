@@ -21,6 +21,11 @@
 // `sent_at` set and records its `(budget_day, channel, estimated_micros)`.
 // Reserving and marking sent commit together; settling happens in the batch
 // that ends the row, and only while the row is still `in_flight`/`unknown`.
+//
+// Budget tiers (#116, src/providers/tiers.ts): a reservation also needs
+// `reserved + spent + estimate + floor <= cap`, where `floor` is the sum of
+// the reserves of the earlier tiers (0 outside `gateway`). The row records
+// the tier of the client that last took the lease.
 import { assertMicros, ensureDay } from "./budget";
 import type { Channel } from "./defaults";
 
@@ -75,6 +80,7 @@ export async function acquire(
     model: string;
     channel: Channel;
     now: number;
+    tier: number;
   },
 ): Promise<AcquireOutcome> {
   const { logicalKey, now } = args;
@@ -82,10 +88,11 @@ export async function acquire(
     db
       .prepare(
         `INSERT OR IGNORE INTO llm_calls
-           (logical_key, slot, model, channel, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?5)`,
+           (logical_key, slot, model, channel, tier, status, created_at,
+            updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?6, 'pending', ?5, ?5)`,
       )
-      .bind(logicalKey, args.slot, args.model, args.channel, now),
+      .bind(logicalKey, args.slot, args.model, args.channel, now, args.tier),
     // The holder of an expired, unsent lease went away: a real failure.
     db
       .prepare(
@@ -102,7 +109,8 @@ export async function acquire(
       .prepare(
         `UPDATE llm_calls
          SET status = 'in_flight', lease_expires_at = ?2, attempt = attempt + 1,
-             sent_at = NULL, model = ?3, channel = ?4, updated_at = ?5
+             sent_at = NULL, model = ?3, channel = ?4, tier = ?7,
+             updated_at = ?5
          WHERE logical_key = ?1 AND status IN ('pending', 'failed')
            AND failures < ?6
          RETURNING attempt`,
@@ -114,6 +122,7 @@ export async function acquire(
         args.channel,
         now,
         MAX_ATTEMPTS,
+        args.tier,
       ),
   ]);
 
@@ -158,8 +167,10 @@ export type SendOutcome = "sent" | "over_budget" | "lost";
 /**
  * In one batch: reserve `estimatedMicros` on the day's budget and record the
  * request as about to go out. Either both happen or neither does.
+ * `floorMicros` must stay free after the reservation (the tier floor);
+ * `capMicros` is the day's real cap, written by ensureDay.
  *   "sent":        reserved and marked sent; the caller sends.
- *   "over_budget": the cap cannot cover the estimate. The row goes back to
+ *   "over_budget": the cap cannot cover estimate + floor. The row goes back to
  *                  `failed`; `failures` does not change.
  *   "lost":        the lease was lost (someone took over); nothing reserved.
  */
@@ -174,11 +185,20 @@ export async function reserveAndMarkSent(
     budgetDay: string;
     channel: Channel;
     capMicros: number;
+    floorMicros: number;
   },
 ): Promise<SendOutcome> {
-  const { logicalKey, attempt, now, estimatedMicros, budgetDay, channel } =
-    args;
+  const {
+    logicalKey,
+    attempt,
+    now,
+    estimatedMicros,
+    budgetDay,
+    channel,
+    floorMicros,
+  } = args;
   assertMicros(estimatedMicros, "estimatedMicros");
+  assertMicros(floorMicros, "floorMicros");
   const [, sent, reserved, rejected] = await db.batch([
     ensureDay(db, { day: budgetDay, channel, capMicros: args.capMicros }),
     // Marks sent only if the row is still this attempt's and the cap has room.
@@ -192,7 +212,7 @@ export async function reserveAndMarkSent(
            AND EXISTS (
              SELECT 1 FROM budgets
              WHERE day = ?6 AND channel = ?7
-               AND reserved_micros + spent_micros + ?5 <= cap_micros)`,
+               AND reserved_micros + spent_micros + ?5 + ?8 <= cap_micros)`,
       )
       .bind(
         logicalKey,
@@ -202,6 +222,7 @@ export async function reserveAndMarkSent(
         estimatedMicros,
         budgetDay,
         channel,
+        floorMicros,
       ),
     // Reserves only if the statement just above marked the row sent:
     // changes() is that statement's row count. The EXISTS repeats the
@@ -210,14 +231,21 @@ export async function reserveAndMarkSent(
       .prepare(
         `UPDATE budgets SET reserved_micros = reserved_micros + ?1
          WHERE day = ?2 AND channel = ?3 AND changes() = 1
-           AND reserved_micros + spent_micros + ?1 <= cap_micros
+           AND reserved_micros + spent_micros + ?1 + ?6 <= cap_micros
            AND EXISTS (
              SELECT 1 FROM llm_calls
              WHERE logical_key = ?4 AND attempt = ?5 AND status = 'in_flight'
                AND sent_at IS NOT NULL AND budget_day = ?2 AND channel = ?3
                AND estimated_micros = ?1)`,
       )
-      .bind(estimatedMicros, budgetDay, channel, logicalKey, attempt),
+      .bind(
+        estimatedMicros,
+        budgetDay,
+        channel,
+        logicalKey,
+        attempt,
+        floorMicros,
+      ),
     // Still ours and not sent: the budget refused. Not a failure.
     db
       .prepare(

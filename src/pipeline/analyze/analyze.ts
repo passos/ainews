@@ -23,6 +23,7 @@ import {
   CallUnknownError,
   createModelClient,
 } from "../../providers/models";
+import { CALL_TIERS } from "../../providers/tiers";
 import type { ModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
 import { sendGroup, type PipelineEnv } from "../messages";
@@ -134,6 +135,7 @@ export async function analyzeArticle(
   // The body version is part of the keys: a new body is judged again.
   const keyPart = `${articleId}:${sha.slice(0, 16)}:${analysed}`;
   const models = createModelClient({
+    tier: CALL_TIERS.analyze,
     db: env.DB,
     transport: deps.transport,
     env,

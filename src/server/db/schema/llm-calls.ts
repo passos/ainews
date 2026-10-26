@@ -15,6 +15,11 @@ export const llmCalls = sqliteTable(
     channel: text("channel", {
       enum: ["workers_ai", "gateway", "jina"],
     }).notNull(),
+    /**
+     * Gateway budget tier 1-5 of the client that last took the lease
+     * (src/providers/tiers.ts). NULL on rows from before #116.
+     */
+    tier: integer("tier"),
     status: text("status", {
       enum: ["pending", "in_flight", "completed", "failed", "unknown"],
     }).notNull(),
