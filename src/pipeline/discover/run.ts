@@ -1,6 +1,7 @@
 import { eq, sql, and, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { isEnabled } from "../../lib/flags";
+import { isSystemSource } from "../../lib/source-attribution";
 import {
   createModelClient,
   type ModelClient,
@@ -300,6 +301,8 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       if (existingFeeds.has(probeRes.feedUrl)) {
         continue;
       }
+      // System placeholder feeds are reserved; never a candidate or source.
+      if (isSystemSource(probeRes.feedUrl)) continue;
 
       let sampleScores: number[] = [];
       let avgScore: number | null = null;

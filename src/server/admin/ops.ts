@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
+import { isSystemSource } from "../../lib/source-attribution";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -249,11 +250,10 @@ export async function getSource(database: D1Database, id: number) {
 
 /**
  * System placeholder sources are reserved: no admin write creates or sets a
- * `system:` feed URL. Same match as SQL `feed_url LIKE 'system:%'` (LIKE
- * ignores ASCII case).
+ * `system:` feed URL (match: `isSystemSource`).
  */
 function assertNotSystemFeed(feedUrl: string): void {
-  if (feedUrl.toLowerCase().startsWith("system:")) {
+  if (isSystemSource(feedUrl)) {
     throw new Response("System feed URLs are reserved", { status: 400 });
   }
 }
