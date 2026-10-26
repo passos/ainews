@@ -364,6 +364,15 @@ describe("renderArticleExcerpt review round 4", () => {
   it("drops text after a self-closing <script/> in alt, full mode (P2)", () => {
     const html = renderArticleMarkdown("![a <script/>SECRET b](https://x/i)");
     expect(html).not.toContain("SECRET");
+    // 没有 </script>：浏览器把后面整段当脚本内容，所以连 " b" 一起丢掉
+    expect(html).toContain('alt="a "');
+  });
+
+  it("drops only the element of a closed <script> in alt (P2)", () => {
+    const html = renderArticleMarkdown(
+      "![a <script>X</script> b](https://x/i)",
+    );
+    expect(html).not.toContain(">X<");
     expect(html).toMatch(/alt="a {1,2}b"/);
   });
 
@@ -378,6 +387,19 @@ describe("renderArticleExcerpt review round 4", () => {
     const html = renderArticleMarkdown("Hello <script/>SECRET world");
     expect(html).not.toContain("SECRET");
     expect(html).toContain("Hello");
+  });
+
+  it("drops an unclosed <script> inside a raw HTML block to the end (P2)", () => {
+    // No </script>: a browser reads the rest as script text.
+    const html = renderArticleMarkdown("<div>Kept <script>alert(1) more</div>");
+    expect(html).toContain("Kept");
+    expect(html).not.toContain("alert(1)");
+  });
+
+  it("drops only the tag of a void element inside a raw HTML block (P2)", () => {
+    const html = renderArticleMarkdown("<div>Name <input> more text</div>");
+    expect(html).not.toContain("<input");
+    expect(html).toContain("more text");
   });
 
   it("keeps the text after a self-closing <svg/> (P2)", () => {

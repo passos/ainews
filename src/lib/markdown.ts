@@ -42,10 +42,41 @@ const DROPPED_INLINE = new RegExp(
   "^<(script|style|iframe|form|object|noscript|template|textarea|select|button|svg|math|frameset)\\b",
   "i",
 );
-const DANGEROUS_ELEMENT = new RegExp(
-  `<(${DANGEROUS})\\b[^>]*>[\\s\\S]*?<\\/\\1\\s*>`,
-  "gi",
-);
+// `/>` closes only these (foreign content). For script, style and the rest
+// HTML ignores it: `<script/>x` makes x script text.
+const SELF_CLOSING_INLINE = /^(svg|math)$/i;
+const DANGEROUS_OPEN = new RegExp(`<(${DANGEROUS})\\b`, "gi");
+// Void elements have no content: only the tag goes.
+const VOID_DANGEROUS = /^(embed|input|frame|link|meta|base)$/i;
+
+/**
+ * Removes dangerous elements with their content from raw HTML, in one linear
+ * pass (a backtracking regex was quadratic on unclosed tags). An open tag
+ * without its `>` or its closing tag drops everything after it, as a browser
+ * reads the rest as raw text.
+ */
+function dropDangerous(html: string): string {
+  let out = "";
+  let pos = 0;
+  DANGEROUS_OPEN.lastIndex = 0;
+  for (let m = DANGEROUS_OPEN.exec(html); m; m = DANGEROUS_OPEN.exec(html)) {
+    out += html.slice(pos, m.index) + " ";
+    const gt = html.indexOf(">", m.index);
+    if (gt === -1) return out;
+    let end = gt + 1;
+    if (!VOID_DANGEROUS.test(m[1]) && html[gt - 1] !== "/") {
+      const close = new RegExp(`</${m[1]}`, "gi");
+      close.lastIndex = end;
+      const c = close.exec(html);
+      const closeGt = c ? html.indexOf(">", c.index) : -1;
+      if (closeGt === -1) return out;
+      end = closeGt + 1;
+    }
+    pos = end;
+    DANGEROUS_OPEN.lastIndex = end;
+  }
+  return out + html.slice(pos);
+}
 
 /** The plain text of a raw HTML block; "" when it is dropped whole. */
 function htmlBlockText(content: string): string {
@@ -58,8 +89,7 @@ function htmlBlockText(content: string): string {
   ) {
     return "";
   }
-  return content
-    .replace(DANGEROUS_ELEMENT, " ")
+  return dropDangerous(content)
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -77,7 +107,10 @@ function cleanInline(children: Token[]): Token[] {
     const t = children[i];
     const open =
       t.type === "html_inline" ? DROPPED_INLINE.exec(t.content) : null;
-    if (open && !/\/>\s*$/.test(t.content)) {
+    if (
+      open &&
+      !(SELF_CLOSING_INLINE.test(open[1]) && /\/>\s*$/.test(t.content))
+    ) {
       const close = new RegExp(`^<\\/${open[1]}\\s*>`, "i");
       while (
         i + 1 < children.length &&
@@ -180,7 +213,10 @@ export function excerptWithinCap(
   );
 }
 
-const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
+// A word has a letter or a digit: lone marks such as U+200B (which \s does
+// not match) are not words.
+const countWords = (text: string) =>
+  text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 
 /** What a reader sees of inline tokens: text, code and image alt text. */
 function inlineText(children: Token[]): string {
