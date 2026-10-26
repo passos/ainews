@@ -85,12 +85,13 @@ tests/
 
 架构测试（`tests/architecture.test.ts`，规则在 `tests/helpers/import-rules.ts`）强制：
 
-1. **R1**：公开代码（`routes/**` 除 `routes/admin/**`，加 `components/**`）不能直接或间接 import `server/db/**`、`pipeline/**`、`providers/**`。`publication/**` 和 `routes/admin/**` 不能到达 `pipeline/**`、`providers/**`。遍历在 `server/admin/**`（有 Access）和 `server/publication/**` 处停止。这保证"读者打开页面不触发模型调用"。
+0. **R0**：每个相对导入都要能解析到文件，R1、R2 才不会漏掉。
+1. **R1**：公开代码（`routes/**` 除 `routes/admin/**`，加 `components/**`）不能直接或间接 import `server/db/**`、`pipeline/**`、`providers/**`。`publication/**` 和 `routes/admin/**` 不能到达 `pipeline/**`、`providers/**`。遍历在 `server/admin/**`（有 Access）处停止；从公开代码起的遍历另在 `server/publication/**` 处停止。这保证"读者打开页面不触发模型调用"。
 2. **R2**：`routes/**` 只 import `server/publication/`、`server/admin/`、`components/`、`lib/`、`routes/` 下的文件。
 3. **R3**：`routes/**`、`components/**` 不 import `cloudflare:workers`。
 4. **R4**：`createServerFn` 只出现在 `src/server/**`；`server/admin/**` 的每个 server function 都挂 Access 中间件。
 
-匿名反馈的例外（#24 实现时同时改测试）：公开代码在 `server/feedback/**` 中只能 import `server/feedback/api.ts` 这一个文件，遍历在它那里停止；另从 `server/feedback/**` 的每个文件起审计，不能到达 `pipeline/**`、`providers/**`、`server/admin/**`。R2 的白名单只为这一个文件放开，不放开整个目录。
+匿名反馈的例外：公开代码在 `server/feedback/**` 中只能 import `server/feedback/api.ts` 这一个文件，遍历在它那里停止；另从 `server/feedback/**` 的每个文件起审计，不能到达 `pipeline/**`、`providers/**`、`server/admin/**`。R2 的白名单只为这一个文件放开，不放开整个目录。
 
 ## 4. 流水线：确定性步骤与模型步骤
 
@@ -155,8 +156,9 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：事件里"已批准文章的集合"变化时，`events.revision + 1`：已批准的文章并入事件，或事件里的文章被批准、被拒绝、被下线。所有板块上线时都是审核模式，大多数文章是先归组、后批准的，所以批准和拒绝的同一个 `batch()` 里也要加 revision（#11 提供语句，#9 调用）。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
-- **融资观察**：模型对一篇正文的每条融资提案存为一行 `funding_observations`，原样保存，不改写。观察的状态是 `unresolved → ready → applied`，或 `rejected`。把观察写进 `funding_rounds` 与把观察改成 `applied` 在同一个 `batch()` 里，用 `WHERE state='ready'` 和 `changes()=1` 串起来，所以队列重试不会重复写入。账本 `completed` 不等于业务完成：观察已存下时，恢复不再调用模型。
-- 管理员只能对 `unresolved`、`ready` 的观察做决议（关联到某一轮、新建一轮或拒绝），已 `applied` 的观察不能改归属。决议带一个递增的 `decision_revision`，用比较交换防止旧页面覆盖新决议。关联错了，用融资记录的更正或拒绝来改。
+- **融资观察**：模型对一篇正文的每条融资提案存为一行 `funding_observations`，原样保存，不改写。观察的状态是 `unresolved → ready → applied`，或 `rejected`；`applied` 只能经“摘除来源”回到 `unresolved`。把观察写进 `funding_rounds` 与把观察改成 `applied` 在同一个 `batch()` 里，用 `WHERE state='ready'` 和 `changes()=1` 串起来，所以队列重试不会重复写入。账本 `completed` 不等于业务完成：观察已存下时，恢复不再调用模型。
+- 管理员只能对 `unresolved`、`ready` 的观察做决议（关联到某一轮、新建一轮或拒绝），已 `applied` 的观察不能直接改归属。决议带一个递增的 `decision_revision`，用比较交换防止旧页面覆盖新决议。
+- **摘除来源**：管理员从一轮里摘掉一篇来源，在同一个 `batch()` 里做三件事：生成或更新这一轮的待审版本（来源列表去掉它，字段由管理员在待审版本里改），把对应观察改回 `unresolved`，`decision_revision + 1`。关联错误和来源被撤销都用这个操作处理。
 - **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{sha256hex(canonical_url)}.html`（#5 写，在插入 `articles` 之前写，每次抓取覆盖写），它是正文抓取第 0 档的原始输入，不是正文版本；#6 按 `canonical_url` 算出键去读，有就用。
 
 ## 7. 发布与审核
@@ -170,15 +172,17 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 
 ### 融资记录（#23）
 
-- 身份：`company_key` 来自规范化的公司名；`round_key` 来自具体轮次名（Pre-Series A 和 Series A 不同）和原文写明的公告日期。不用 stage 统计桶做键，不用报道或抓取日期代替公告日期，不按时间窗或相似度猜。公司名、轮次、公告日期任一缺失或冲突，观察停在 `unresolved`，由管理员确认。
-- 字段：原文写明的字段才更新；缺失的字段保留原值。投资方的增、删、整体替换分开表达。改了金额、币种、估值、投资方或身份，生成待审新版本，旧版本用 `superseded_by` 指向新版本，不就地覆盖。
-- 发布：Finance 固定人工审核，身份确认不等于批准发布。公开记录要求 `status='published'`、`superseded_by IS NULL`，并且 `source_articles` 里**每一篇**来源的当前正文都已批准；任一来源被撤销，这条记录就不公开，直到管理员处理。来源按文章去重，同一篇文章换了正文版本只保留最新一条。
+- 身份：`company_key` 来自规范化的公司名；`round_key` 来自具体轮次名（Pre-Series A 和 Series A 不同）和原文写明的公告日期。不用 stage 统计桶做键，不用报道或抓取日期代替公告日期，不按时间窗或相似度猜。管理员可以把公告日期确认为“未知”，这时 `round_key` 的日期部分写 `unknown`。官网 host 有就存作证据，不进键。
+- 下列观察停在 `unresolved`，由管理员确认，不自动写入：公司名、轮次、公告日期任一缺失；同一 `company_key` 的已有记录里 host 与本观察不同；身份对上的已有记录日期是 `unknown`；金额或币种与已有记录不同，但原文没写明是更正；同一篇文章已经是另一轮的来源。
+- 字段：原文写明的字段才更新；缺失的字段保留原值。投资方的增、删、整体替换分开表达。改了金额、币种、估值、投资方、来源或身份，就写进这一轮的待审版本，不就地改已发布版本。
+- 版本：每一轮最多一个已发布版本和一个待审版本，同时存在。待审版本还没公开，后来的观察直接更新它。批准时在同一个 `batch()` 里把旧的已发布版本的 `superseded_by` 指向待审版本，再把待审版本改成 `published`；拒绝时只把待审版本标成 `rejected`，已发布版本不受影响。待审期间读者继续看到已发布版本。
+- 发布：Finance 固定人工审核，身份确认不等于批准发布。公开记录要求 `status='published'`、`superseded_by IS NULL`，并且 `source_articles` 里**每一篇**来源都满足 `approvedArticleWhere`（含当前正文版本）；任一来源被撤销，这条记录就不公开，直到管理员摘除该来源并批准新版本。来源按文章去重，同一篇文章换了正文版本只保留最新一条。
 - 公开的更正历史只显示已发布版本之间的变化，不显示中间待审版本的字段。
 
 ### 匿名反馈（#24）
 
-- `submitFeedback` 只收 `{target:"event"|"digest", id:正的安全整数, value:1|-1}`，目标必须当前公开可读。它只写 `feedback` 表，不调用模型，不发队列，不给后台权限，经过既有的 Origin 检查。
-- IP 只取 `CF-Connecting-IP`。`day` 是服务端的 UTC 日期，`voter_hash = sha256(IP + day + FEEDBACK_SALT)`。缺 IP 或 salt 就拒写，不退回不加盐的哈希。原始 IP 和 salt 不入库；原始 IP、salt、`voter_hash` 都不写日志，也不返回客户端。
+- `submitFeedback` 只收严格对象 `{target:"event"|"digest", id:正的安全整数, value:1|-1}`，多余字段拒绝。`event` 必须有已发布的 Story Brief，`digest` 必须是已发布的日报（`kind='daily'`）。它只写 `feedback` 表，不调用模型，不发队列，不给后台权限，经过既有的 Origin 检查。
+- IP 只取 `CF-Connecting-IP`。`day` 是服务端的 UTC 日期，`voter_hash = sha256(IP + day + FEEDBACK_SALT)`。缺 IP 或 salt 就拒写，不退回不加盐的哈希。测试在 `env.test` 里给一个假 salt。原始 IP 和 salt 不入库；原始 IP、salt、`voter_hash` 都不写日志，也不返回客户端。
 - `(target_type, target_id, day, voter_hash)` 唯一，重复投票只改 `value`。这表示"每个网络地址每天每项一票"，不识别真实个人，不防代理刷票。公开只给聚合结果。
 
 ## 8. 抓取梯（0–3 档）
@@ -218,9 +222,9 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 | `questions` | Ask，只在后台 |
 | `source_candidates` / `discovery_runs` | 发现 |
 | `companies` / `filings` / `financial_facts` | EDGAR |
-| `funding_rounds` | `(company_key, round_key)` 在 `superseded_by IS NULL` 的行里唯一（部分唯一索引）；`superseded_by` 记录更正链；`source_articles` 记来源文章与正文版本 |
+| `funding_rounds` | 两个部分唯一索引：`(company_key, round_key)` 在 `status='published' AND superseded_by IS NULL` 的行里唯一，在 `status='pending_review'` 的行里也唯一；`superseded_by` 记录已发布版本之间的更正链；`source_articles` 每项记 `articleId`、`bodySha`、`observationId` |
 | `funding_observations` | 主键由 `(article_id, body_sha, prompt_version, item_index)` 算出；`payload_json` 不改写；`state`、`resolution_json`、`decision_revision` |
-| `feedback` | `(target_type, target_id, day, voter_hash)` 唯一；`value` 只为 1 或 -1 |
+| `feedback` | `target_type`、`target_id`、`day`、`voter_hash`、`value`、`created_at`；`(target_type, target_id, day, voter_hash)` 唯一；`value` 只为 1 或 -1 |
 | `corrections` | 公开更正 |
 | `llm_calls` / `budgets` / `settings` | 见第 6 节 |
 
