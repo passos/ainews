@@ -58,10 +58,11 @@ describe("feedResponse", () => {
     );
     expect(xml).not.toContain("<script>");
     expect(xml).not.toContain("<b>tags</b>");
-    expect(xml).toContain("<link>https://news.example/a?x=1&amp;y=2</link>");
+    expect(xml).toContain(`<link>${SITE}/a/${id}</link>`);
+    expect(xml).toContain("Original: https://news.example/a?x=1&amp;y=2");
   });
 
-  it("omits <link> for an item whose url is not http(s)", async () => {
+  it("links the reader page even when the url is not http(s), without Original:", async () => {
     const { technology: t } = await seedSections();
     const bad = await seedArticle({
       ...t,
@@ -81,8 +82,11 @@ describe("feedResponse", () => {
     expect(items).toHaveLength(2);
     const badItem = items.find((i) => i.includes("Bad link"))!;
     const goodItem = items.find((i) => i.includes("Good link"))!;
-    expect(badItem).not.toContain("<link>");
-    expect(goodItem).toContain("<link>https://news.example/good</link>");
+    expect(badItem).toContain(`<link>${SITE}/a/${bad}</link>`);
+    expect(badItem).not.toContain("Original:");
+    expect(goodItem).toContain(`<link>${SITE}/a/${good}</link>`);
+    expect(goodItem).toContain("Original: https://news.example/good");
+    expect(goodItem).toContain(`<guid isPermaLink="false">${good}</guid>`);
   });
 
   it("item: guid is the article id, not a permalink; pubDate is UTC; source named", async () => {

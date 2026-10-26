@@ -2,6 +2,10 @@ import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { isSystemSource } from "../../lib/source-attribution";
+import {
+  DEFAULT_CONTENT_DISPLAY,
+  type ContentDisplay,
+} from "../../lib/content-display";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -223,6 +227,7 @@ export async function listSources(
       lastFailedAt: sources.lastFailedAt,
       lastError: sources.lastError,
       jinaEnabled: sources.jinaEnabled,
+      contentDisplay: sources.contentDisplay,
       createdAt: sources.createdAt,
     })
     .from(sources)
@@ -270,6 +275,7 @@ export async function createSource(
     utcOffset?: string;
     config?: string;
     jinaEnabled?: number;
+    contentDisplay?: ContentDisplay;
   },
 ) {
   const feedUrl = data.feedUrl.trim();
@@ -287,6 +293,7 @@ export async function createSource(
       utcOffset: data.utcOffset ?? "+00:00",
       config: data.config ?? "{}",
       jinaEnabled: data.jinaEnabled ?? 0,
+      contentDisplay: data.contentDisplay ?? DEFAULT_CONTENT_DISPLAY,
       status: "candidate",
       createdAt: Date.now(),
     })
@@ -305,6 +312,7 @@ export async function updateSource(
     utcOffset?: string;
     config?: string;
     jinaEnabled?: number;
+    contentDisplay?: ContentDisplay;
   },
 ) {
   const feedUrl = data.feedUrl.trim();
@@ -313,7 +321,8 @@ export async function updateSource(
     .prepare(
       `UPDATE sources
        SET name = ?1, feed_url = ?2, site_domain = ?3, interval_minutes = COALESCE(?4, interval_minutes),
-           utc_offset = COALESCE(?5, utc_offset), config = COALESCE(?6, config), jina_enabled = COALESCE(?7, jina_enabled)
+           utc_offset = COALESCE(?5, utc_offset), config = COALESCE(?6, config), jina_enabled = COALESCE(?7, jina_enabled),
+           content_display = COALESCE(?9, content_display)
        WHERE id = ?8 AND feed_url NOT LIKE 'system:%'`,
     )
     .bind(
@@ -325,6 +334,7 @@ export async function updateSource(
       data.config ?? null,
       data.jinaEnabled ?? null,
       data.id,
+      data.contentDisplay ?? null,
     )
     .run();
   if (res.meta.changes === 0) {

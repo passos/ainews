@@ -8,16 +8,22 @@ import { SITE_NAME } from "../../lib/site";
 
 const x = escapeXml;
 
-function item(a: ArticleView, disclaimer: string | null): string {
-  const parts = [a.summary, `Source: ${a.sourceName}`, disclaimer]
+function item(a: ArticleView, disclaimer: string | null, base: string): string {
+  // The item links the reader page (#86); the original URL, when it is
+  // http(s), goes in the description. guid stays the article id.
+  const parts = [
+    a.summary,
+    `Source: ${a.sourceName}`,
+    a.url ? `Original: ${a.url}` : null,
+    disclaimer,
+  ]
     .filter(Boolean)
     .join(" ");
   const date = a.publishedAt ?? a.fetchedAt;
   return [
     "<item>",
     `<title>${x(a.title)}</title>`,
-    // No <link> for a non-http(s) URL: the read layer returns null.
-    ...(a.url ? [`<link>${x(a.url)}</link>`] : []),
+    `<link>${x(`${base}/a/${a.id}`)}</link>`,
     `<guid isPermaLink="false">${a.id}</guid>`,
     `<pubDate>${new Date(date).toUTCString()}</pubDate>`,
     `<description>${x(parts)}</description>`,
@@ -112,7 +118,7 @@ export function renderFeed(feed: SectionFeed, siteUrl: string): string {
     `<title>${x(`${SITE_NAME} — ${section.name}`)}</title>`,
     `<link>${x(`${base}/s/${section.slug}`)}</link>`,
     `<description>${x(description)}</description>`,
-    ...articles.map((a) => item(a, section.disclaimer)),
+    ...articles.map((a) => item(a, section.disclaimer, base)),
     "</channel></rss>",
   ].join("\n");
 }

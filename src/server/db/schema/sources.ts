@@ -6,6 +6,10 @@ import {
   text,
   unique,
 } from "drizzle-orm/sqlite-core";
+import {
+  CONTENT_DISPLAYS,
+  DEFAULT_CONTENT_DISPLAY,
+} from "../../../lib/content-display";
 import { industries } from "./industries";
 
 export const sources = sqliteTable(
@@ -52,6 +56,14 @@ export const sources = sqliteTable(
     rungFailCount: integer("rung_fail_count").notNull().default(0),
     /** 0 or 1. */
     jinaEnabled: integer("jina_enabled").notNull().default(0),
+    /**
+     * How much of the body the reader page shows. No table CHECK: adding one
+     * rebuilds the table. The closed set is checked on write (zod) and read
+     * (parseContentDisplay).
+     */
+    contentDisplay: text("content_display", { enum: CONTENT_DISPLAYS })
+      .notNull()
+      .default(DEFAULT_CONTENT_DISPLAY),
     /** Epoch milliseconds. */
     createdAt: integer("created_at").notNull(),
   },

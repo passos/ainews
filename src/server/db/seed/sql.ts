@@ -19,7 +19,7 @@ export function buildSeedSql(now: number = Date.now()): string {
   }
   for (const s of SEED_SOURCES) {
     lines.push(
-      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, interval_minutes, next_fetch_at, config, jina_enabled, created_at) VALUES ((SELECT id FROM industries WHERE slug = ${q(s.industry)}), ${q(s.name)}, ${q(s.feedUrl)}, ${q(s.siteDomain)}, ${q(s.kind)}, 'active', 60, ${now}, ${q(JSON.stringify(s.config))}, 0, ${now}) ON CONFLICT(industry_id, feed_url) DO NOTHING;`,
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, interval_minutes, next_fetch_at, config, jina_enabled, content_display, created_at) VALUES ((SELECT id FROM industries WHERE slug = ${q(s.industry)}), ${q(s.name)}, ${q(s.feedUrl)}, ${q(s.siteDomain)}, ${q(s.kind)}, 'active', 60, ${now}, ${q(JSON.stringify(s.config))}, 0, ${q(s.contentDisplay)}, ${now}) ON CONFLICT(industry_id, feed_url) DO NOTHING;`,
     );
   }
   return lines.join("\n");

@@ -1,0 +1,1 @@
+ALTER TABLE `sources` ADD `content_display` text DEFAULT 'excerpt' NOT NULL;

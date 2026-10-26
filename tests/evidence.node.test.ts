@@ -41,6 +41,7 @@ describe("InspectEvidencePanel", () => {
           verified: true,
           isPrimarySource: true,
           sourceRole: "vendor",
+          inArticle: true,
         },
       ],
     };
@@ -70,6 +71,7 @@ describe("InspectEvidencePanel", () => {
           verified: true,
           isPrimarySource: false,
           sourceRole: "independent",
+          inArticle: false,
         },
       ],
     };
@@ -105,6 +107,60 @@ describe("InspectEvidencePanel", () => {
     expect(html).toContain(
       "Analyst predicts commercial availability by late 2027",
     );
+  });
+});
+
+describe("InspectEvidencePanel quote links", () => {
+  const claim = (inArticle: boolean): ClaimView => ({
+    id: 1,
+    claimText: "A claim",
+    claimType: "fact",
+    consensusStatus: "verified",
+    primarySourcePreferred: false,
+    realityCheck: "unspecified",
+    status: "published",
+    evidence: [
+      {
+        id: 9,
+        articleId: 42,
+        articleTitle: "Cited article",
+        articleUrl: "https://news.example/cited",
+        sourceName: "Wire",
+        sourceDomain: "news.example",
+        bodySha: "sha",
+        stance: "support",
+        quote: "Quoted words here",
+        startOffset: 0,
+        endOffset: 17,
+        verified: true,
+        isPrimarySource: false,
+        sourceRole: "independent",
+        inArticle,
+      },
+    ],
+  });
+  const render = (inArticle: boolean) =>
+    renderToStaticMarkup(
+      createElement(InspectEvidencePanel, {
+        evidence: { eventId: 1, claims: [claim(inArticle)] },
+      }),
+    );
+
+  it("links a quote in the shown range to the reader page with a text fragment", () => {
+    const html = render(true);
+    expect(html).toContain('href="/a/42#:~:text=Quoted%20words%20here"');
+    expect(html).toContain('href="https://news.example/cited"');
+    expect(html).not.toContain("Quote is in the full article");
+  });
+
+  it("links a quote outside the shown range to the original with a text fragment", () => {
+    const html = render(false);
+    expect(html).not.toContain('href="/a/42');
+    expect(html).toContain(
+      'href="https://news.example/cited#:~:text=Quoted%20words%20here"',
+    );
+    expect(html).toContain("Quote is in the full article at Wire");
+    expect(html).toContain('href="https://news.example/cited"');
   });
 });
 

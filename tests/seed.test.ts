@@ -242,6 +242,17 @@ describe("seed sources", () => {
     });
   });
 
+  it("content_display: arXiv cs.AI full, MIT Technology Review excerpt", async () => {
+    await env.DB.exec(buildSeedSql(NOW));
+    const { results } = await env.DB.prepare(
+      "SELECT name, content_display FROM sources ORDER BY id",
+    ).all<{ name: string; content_display: string }>();
+    expect(results).toEqual([
+      { name: "arXiv cs.AI", content_display: "full" },
+      { name: "MIT Technology Review", content_display: "excerpt" },
+    ]);
+  });
+
   it("the seeded arXiv exclude keeps new + cross of the #5 snapshot", async () => {
     await env.DB.exec(buildSeedSql(NOW));
     const [arxiv] = await sourceRows();

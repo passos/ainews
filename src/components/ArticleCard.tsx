@@ -14,7 +14,8 @@ function Time({ ms, label }: { ms: number; label: string }) {
 }
 
 export function ArticleCard({ article: a }: { article: ArticleView }) {
-  // The read layer returns null for anything but an http(s) URL.
+  // The read layer returns null for anything but an http(s) URL. The title
+  // links the reader page (#86), which always exists for a listed article.
   const href = a.url;
   return (
     <article
@@ -22,24 +23,12 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
       className="border-l-[5px] border-sec bg-card py-2.5 pl-3 pr-3"
     >
       <h2 className="font-serif text-lg font-bold leading-snug sm:text-xl">
-        {href ? (
-          <a
-            href={href}
-            rel="noopener noreferrer"
-            aria-label={`${a.title} (opens original at ${a.sourceName})`}
-            className="decoration-sec decoration-2 hover:underline"
-          >
-            {a.title}
-            <span
-              aria-hidden="true"
-              className="ml-1 font-mono text-sm text-sec-ink"
-            >
-              ↗
-            </span>
-          </a>
-        ) : (
-          a.title
-        )}
+        <a
+          href={`/a/${a.id}`}
+          className="decoration-sec decoration-2 hover:underline"
+        >
+          {a.title}
+        </a>
       </h2>
       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[0.72rem] leading-snug">
         <strong className="uppercase tracking-wider text-sec-ink">
@@ -49,6 +38,15 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           <Time ms={a.publishedAt} label="Published" />
         )}
         <Time ms={a.fetchedAt} label="Fetched" />
+        {href && (
+          <a
+            href={href}
+            rel="noopener noreferrer"
+            className="font-bold text-sec-ink decoration-sec decoration-2 hover:underline"
+          >
+            {`Read the original at ${a.sourceName} ↗`}
+          </a>
+        )}
       </p>
       {a.evidence.length > 0 && (
         <ul

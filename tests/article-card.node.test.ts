@@ -22,18 +22,21 @@ const article: ArticleView = {
 };
 
 describe("ArticleCard link", () => {
-  it("links an http(s) url with rel noopener noreferrer", () => {
+  it("links the title to the reader page and keeps the original link", () => {
     const html = renderToStaticMarkup(ArticleCard({ article }));
+    expect(html).toContain('href="/a/1"');
     expect(html).toContain('href="https://news.example/a"');
     expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("Read the original at Wire");
   });
 
-  it("renders no link when the url is null", () => {
+  it("still links the reader page when the url is null", () => {
     const html = renderToStaticMarkup(
       ArticleCard({ article: { ...article, url: null } }),
     );
-    expect(html).not.toContain("href=");
-    expect(html).not.toContain("<a ");
+    expect(html).toContain('href="/a/1"');
+    expect(html).not.toContain("https://news.example");
+    expect(html).not.toContain("Read the original");
     expect(html).toContain("A title");
   });
 
