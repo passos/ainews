@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SITE_NAME } from "../src/lib/site.ts";
 import { buildSmokePlan, runSmoke } from "../scripts/smoke.ts";
 import type { SmokeManifest, SmokeOptions } from "../scripts/smoke.ts";
 
@@ -45,7 +46,7 @@ function funding(cards = 1): string {
   const rounds = cards
     ? `<ul>${Array.from({ length: cards }, (_, i) => `<li><h3>Company ${i + 1}</h3><span>$5,000,000</span></li>`).join("")}</ul>`
     : "<p>No funding rounds match.</p>";
-  return `<!DOCTYPE html><html><head><title>Personal News</title></head><body><header>Personal News</header><main><div data-section="finance"><h1>Funding Round Tracker</h1><aside role="note">${notice}</aside><section aria-label="Trends"><ul><li><a href="/funding?sector=fintech">fintech</a></li></ul></section><section aria-label="Rounds"><h2>Reported rounds</h2>${rounds}</section></div></main></body></html>`;
+  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header><a href="/">${SITE_NAME}</a></header><main><div data-section="finance"><h1>Funding Round Tracker</h1><aside role="note">${notice}</aside><section aria-label="Trends"><ul><li><a href="/funding?sector=fintech">fintech</a></li></ul></section><section aria-label="Rounds"><h2>Reported rounds</h2>${rounds}</section></div></main></body></html>`;
 }
 function html(path: string): string {
   if (path === "/funding") return funding();
@@ -55,7 +56,7 @@ function html(path: string): string {
     : path.startsWith("/s/")
       ? section
       : "Sample story";
-  return `<!DOCTYPE html><html><head><title>Personal News</title></head><body><header>Personal News</header><main>
+  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header><a href="/">${SITE_NAME}</a></header><main>
     ${sections.map((s) => `<a href="/s/${s}">${s}</a>`).join("")}
     <div data-section="${sections.includes(section) ? section : "technology"}"><h1>${heading}</h1>
     <p>${notice}</p><h2>Timeline</h2><h2>Material Developments</h2><p>Criterion for Update:</p>
@@ -71,7 +72,7 @@ function rss(path: string, items = true): string {
     : digest
       ? `${base}/digest/${section}/2024-02-26?kind=weekly`
       : "https://outside.example/article";
-  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Personal News — ${watch ? "Watch: Sample" : section}${digest ? " Digests" : ""}</title><link>${base}${channelLink}</link><description>Approved stories ${notice}</description>${items ? `<item><title>Story</title><guid isPermaLink="false">007</guid><link>${link}</link><description>Summary ${notice}</description><pubDate>Thu, 29 Feb 2024 00:00:00 GMT</pubDate></item>` : ""}</channel></rss>`;
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>${SITE_NAME} — ${watch ? "Watch: Sample" : section}${digest ? " Digests" : ""}</title><link>${base}${channelLink}</link><description>Approved stories ${notice}</description>${items ? `<item><title>Story</title><guid isPermaLink="false">007</guid><link>${link}</link><description>Summary ${notice}</description><pubDate>Thu, 29 Feb 2024 00:00:00 GMT</pubDate></item>` : ""}</channel></rss>`;
 }
 function response(path: string, items = true): Response {
   if (path.includes("__smoke_missing__"))
@@ -696,7 +697,45 @@ test("each_page_guard_rejects_a_minimal_counterexample", async () => {
   const tech = rss("/rss/technology.xml");
   await rejectsBody(
     "/rss/technology.xml",
-    tech.replace("Personal News — technology", "Personal News — education"),
+    tech.replace(`${SITE_NAME} — technology`, `${SITE_NAME} — education`),
+    options,
+    "RSS_TITLE",
+  );
+  // The brand must sit in the masthead link and the <title>, not just
+  // anywhere on the page: "Daily Digest" is ordinary page text.
+  const masthead = `<header><a href="/">${SITE_NAME}</a></header>`;
+  await rejectsBody(
+    "/",
+    html("/")
+      .replace(masthead, '<header><a href="/">Personal News</a></header>')
+      .replace("<main>", "<main><p>Daily Digest</p>"),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/",
+    html("/").replace(
+      masthead,
+      `<header><a href="/">${SITE_NAME} Digest</a></header>`,
+    ),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/",
+    html("/").replace(
+      `<title>${SITE_NAME}</title>`,
+      `<title>${SITE_NAME} Digest</title>`,
+    ),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/rss/technology.xml",
+    tech.replace(
+      `${SITE_NAME} — technology`,
+      `${SITE_NAME} Digest — technology`,
+    ),
     options,
     "RSS_TITLE",
   );

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { SITE_NAME } from "../../src/lib/site";
 import { feedResponse } from "../../src/server/publication/feed";
 import {
   DISCLAIMER,
@@ -31,7 +32,7 @@ describe("feedResponse", () => {
     );
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     expect(xml).toContain('<rss version="2.0">');
-    expect(xml).toContain("<title>Personal News — Technology</title>");
+    expect(xml).toContain(`<title>${SITE_NAME} — Technology</title>`);
     expect(xml).toContain(`<link>${SITE}/s/technology</link>`);
   });
 

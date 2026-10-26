@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseRobots, robotsFromResponse } from "../../src/lib/robots";
 
-const UA = "PersonalNewsBot";
+const UA = "DailyBot";
 
 describe("parseRobots (RFC 9309)", () => {
   it("longest match wins: Disallow /a + Allow /a/b", () => {
@@ -16,7 +16,7 @@ describe("parseRobots (RFC 9309)", () => {
     expect(r.allowed("/p")).toBe(true);
   });
 
-  it("a ClaudeBot-only group does not apply: PersonalNewsBot uses *", () => {
+  it("a ClaudeBot-only group does not apply: DailyBot uses *", () => {
     const r = parseRobots(
       "User-agent: ClaudeBot\nDisallow: /\n\nUser-agent: *\nDisallow: /private\n",
       UA,
@@ -27,7 +27,7 @@ describe("parseRobots (RFC 9309)", () => {
 
   it("our group, matched case-insensitively, replaces *", () => {
     const r = parseRobots(
-      "User-agent: *\nDisallow: /\n\nUser-agent: personalnewsbot\nUser-agent: other\nDisallow: /x\nCrawl-delay: 15\n",
+      "User-agent: *\nDisallow: /\n\nUser-agent: dailybot\nUser-agent: other\nDisallow: /x\nCrawl-delay: 15\n",
       UA,
     );
     expect(r.allowed("/news")).toBe(true);

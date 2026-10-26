@@ -7,6 +7,7 @@ import type {
   DigestView,
   RecentDigestLink,
 } from "../../../server/publication/digests";
+import { SITE_NAME } from "../../../lib/site";
 
 const digestSearchSchema = z.object({
   kind: z.enum(["daily", "weekly"]).optional().catch(undefined),
@@ -61,7 +62,7 @@ export const Route = createFileRoute("/digest/$section/$date")({
   loaderDeps: ({ search }) => ({ kind: search.kind ?? "daily" }),
   loader: ({ params, deps }) => loadDigest(params, deps.kind),
   head: ({ loaderData }) => {
-    if (!loaderData) return { meta: [{ title: "Personal News" }] };
+    if (!loaderData) return { meta: [{ title: SITE_NAME }] };
     const isWeekly = loaderData.data.kind === "weekly";
     const kindLabel = isWeekly ? "Weekly Digest" : "Daily Digest";
     const dateLabel = isWeekly
@@ -70,14 +71,14 @@ export const Route = createFileRoute("/digest/$section/$date")({
     return {
       meta: [
         {
-          title: `${loaderData.data.section.name} ${kindLabel} (${dateLabel}) — Personal News`,
+          title: `${loaderData.data.section.name} ${kindLabel} (${dateLabel}) — ${SITE_NAME}`,
         },
       ],
       links: [
         {
           rel: "alternate",
           type: "application/rss+xml",
-          title: `Personal News — ${loaderData.data.section.name} ${kindLabel}`,
+          title: `${SITE_NAME} — ${loaderData.data.section.name} ${kindLabel}`,
           href: `/rss/digest/${loaderData.data.section.slug}.xml`,
         },
       ],

@@ -4,7 +4,7 @@
  * Sent on every outbound request. It must not contain a crawler name that
  * sites block by name (ClaudeBot, anthropic-ai, CCBot, ChatGPT-User).
  */
-export const USER_AGENT = "PersonalNewsBot/1.0 (+https://news.ioenv.com)";
+export const USER_AGENT = "DailyBot/1.0 (+https://news.ioenv.com)";
 
 export interface LimitedResponse {
   res: Response;

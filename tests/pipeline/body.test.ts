@@ -522,6 +522,22 @@ describe("whitelist, redirects and schemes", () => {
   });
 });
 
+describe("robots.txt user-agent token", () => {
+  it("applies the DailyBot group and ignores the old PersonalNewsBot one", async () => {
+    const w = web({
+      robots: () =>
+        new Response(
+          "User-agent: *\nAllow: /\n\nUser-agent: DailyBot\nDisallow: /daily\n\nUser-agent: PersonalNewsBot\nDisallow: /old\n",
+        ),
+    });
+    const allowed = async (path: string) =>
+      (await checkRobots(env, `https://${SITE}${path}`, NOW, w.fetch, [SITE]))
+        .allowed;
+    expect(await allowed("/daily/1")).toBe(false);
+    expect(await allowed("/old/1")).toBe(true);
+  });
+});
+
 describe("robots.txt cache when the request fails", () => {
   const ROBOTS = `https://${SITE}/robots.txt`;
 

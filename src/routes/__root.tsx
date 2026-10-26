@@ -16,6 +16,7 @@ import { AUDIENCES } from "../lib/reader-prefs";
 import { THEME_INIT_SCRIPT } from "../lib/theme";
 import { getSiteShell } from "../server/publication/site";
 import appCss from "../styles.css?url";
+import { SITE_NAME } from "../lib/site";
 
 // Child routes inherit this. An unknown audience becomes "not set".
 const searchSchema = z.object({
@@ -29,7 +30,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Personal News" },
+      { title: SITE_NAME },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
   }),

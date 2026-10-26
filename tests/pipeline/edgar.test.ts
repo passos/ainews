@@ -58,16 +58,14 @@ describe("EDGAR Client & SEC Compliance", () => {
       "https://data.sec.gov/submissions/CIK0000320193.json",
       {
         DB: env.DB,
-        SEC_USER_AGENT: "Personal News test@example.com",
+        SEC_USER_AGENT: "Daily test@example.com",
       },
       NOW,
       { fetch: fakeFetch },
     );
 
     expect(res.status).toBe(200);
-    expect(capturedHeaders?.get("User-Agent")).toBe(
-      "Personal News test@example.com",
-    );
+    expect(capturedHeaders?.get("User-Agent")).toBe("Daily test@example.com");
   });
 });
 
@@ -356,7 +354,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     const mockEnv = {
       DB: env.DB,
       BODIES: env.BODIES,
-      SEC_USER_AGENT: "Personal News test@example.com",
+      SEC_USER_AGENT: "Daily test@example.com",
       COLLECT_ENABLED: "true",
     };
 
@@ -533,7 +531,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
         "https://data.sec.gov/submissions/CIK0000320193.json",
         {
           DB: env.DB,
-          SEC_USER_AGENT: "Personal News test@example.com",
+          SEC_USER_AGENT: "Daily test@example.com",
         },
         NOW,
         { fetch: fakeFetch, sleep: async () => {} },
@@ -599,7 +597,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     const mockEnv = {
       DB: env.DB,
       BODIES: env.BODIES,
-      SEC_USER_AGENT: "Personal News test@example.com",
+      SEC_USER_AGENT: "Daily test@example.com",
       COLLECT_ENABLED: "true",
     };
 
@@ -681,7 +679,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     const mockEnv = {
       DB: env.DB,
       BODIES: env.BODIES,
-      SEC_USER_AGENT: "Personal News test@example.com",
+      SEC_USER_AGENT: "Daily test@example.com",
       COLLECT_ENABLED: "true",
     };
 
@@ -765,7 +763,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     const mockEnv = {
       DB: env.DB,
       BODIES: env.BODIES,
-      SEC_USER_AGENT: "Personal News test@example.com",
+      SEC_USER_AGENT: "Daily test@example.com",
       COLLECT_ENABLED: "true",
     };
 

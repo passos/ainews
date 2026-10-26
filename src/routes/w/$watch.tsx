@@ -3,6 +3,7 @@ import { Disclaimer } from "../../components/Disclaimer";
 import { FollowButton } from "../../components/FollowButton";
 import { formatUtc } from "../../lib/time";
 import { getWatch } from "../../server/publication/api";
+import { SITE_NAME } from "../../lib/site";
 
 export const Route = createFileRoute("/w/$watch")({
   loader: async ({ params }) => {
@@ -14,8 +15,8 @@ export const Route = createFileRoute("/w/$watch")({
     meta: [
       {
         title: loaderData
-          ? `Watch: ${loaderData.data.watch.question} — Personal News`
-          : "Topic Watch — Personal News",
+          ? `Watch: ${loaderData.data.watch.question} — ${SITE_NAME}`
+          : `Topic Watch — ${SITE_NAME}`,
       },
     ],
     links: loaderData

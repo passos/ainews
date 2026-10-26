@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { parse } from "node-html-parser";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { z } from "zod";
+import { SITE_NAME } from "../src/lib/site.ts";
 
 const sections = ["technology", "education", "industry", "finance"] as const;
 export type SmokeMode = "routes" | "launch";
@@ -175,6 +176,11 @@ function eventLinked(nodes: ReturnType<typeof visible>[], baseUrl: string) {
       ),
   );
 }
+/** The title is the brand alone, or ends with " — <brand>". */
+function brandedTitle(title: string): boolean {
+  const t = title.trim();
+  return t === SITE_NAME || t.endsWith(` — ${SITE_NAME}`);
+}
 function htmlCheck(body: string, path: string, o: SmokeOptions) {
   const baseUrl = o.baseUrl,
     launch = o.mode === "launch";
@@ -185,10 +191,14 @@ function htmlCheck(body: string, path: string, o: SmokeOptions) {
   requireThat(
     main &&
       h1 &&
-      /Personal\s+News/i.test(
-        dom.querySelector("body")?.structuredText ?? "",
-      ) &&
-      /Personal\s+News/i.test(dom.querySelector("title")?.text ?? ""),
+      dom
+        .querySelectorAll("header a[href]")
+        .some(
+          (a) =>
+            localLink(a.getAttribute("href")!, baseUrl) === "/" &&
+            a.text.trim() === SITE_NAME,
+        ) &&
+      brandedTitle(dom.querySelector("title")?.text ?? ""),
     "HTML_SSR",
   );
   const section = path.split("/")[2];
@@ -336,7 +346,7 @@ function rssCheck(body: string, path: string, o: SmokeOptions) {
     .at(-1)!
     .replace(/\.xml$/, "");
   requireThat(
-    c.title.includes("Personal News") &&
+    c.title.startsWith(`${SITE_NAME} — `) &&
       (watch
         ? c.title.includes("Watch:")
         : c.title.toLowerCase().includes(s)) &&

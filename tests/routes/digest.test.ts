@@ -1,6 +1,7 @@
 import { isNotFound } from "@tanstack/react-router";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { SITE_NAME } from "../../src/lib/site";
 import { loadDigest } from "../../src/routes/digest/$section/$date";
 import {
   getDigest,
@@ -419,6 +420,9 @@ describe("tests/routes/digest.test.ts", () => {
     );
     const rssXml = await rssRes.text();
     expect(rssXml).toContain("<title>Weekly Digest — 2026-10-19</title>");
+    expect(rssXml).toContain(
+      `<title>${SITE_NAME} — Technology Digests</title>`,
+    );
     expect(rssXml).toContain(
       "<link>https://news.ioenv.com/digest/technology/2026-10-19?kind=weekly</link>",
     );

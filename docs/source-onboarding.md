@@ -16,7 +16,7 @@
 每候选最多官方目录、robots、feed/列表和两篇正文样本；优先Education、Fed、NIST各一个。不带生产secret、不调用模型、不写生产；出未审域的redirect先记新host再停，不跟随，不无界搜索。
 
 1. 从官方目录取实际RSS/Atom链接；无RSS再验服务器返回HTML列表。记UTC、最终URL、逐跳host、content-type、解析结果、日期字段、更新节奏、样本URL、条款链接。未知query token或凭证URL不粘贴，拒绝猜端点。
-2. 用项目UA `PersonalNewsBot/1.0 (+https://news.ioenv.com)` 核列表及正文robots/crawl-delay；无许可/失败不绕过。现有collect对RSS feed不查robots、对HTML查，不能据此前者就省正文合规核查，本任务不改策略。
+2. 用项目UA `DailyBot/1.0 (+https://news.ioenv.com)` 核列表及正文robots/crawl-delay；无许可/失败不绕过。现有collect对RSS feed不查robots、对HTML查，不能据此前者就省正文合规核查，本任务不改策略。
 3. 两篇正文须不用浏览器/Jina、不越付费墙，满足既有 `isBody` 和2MiB界限，记录body rung。摘要feed不能擅设summaryIsBody；CSS selector必须由真实DOM验证；逐个列正文/跳转host待审。SEC数据继续走已有edgar client。
 4. dossier用 `src/pipeline/collect/config.ts` 的strict SourceConfig校验；owner核名单、板块归属、域、频率、阈值与预计增量费用。先保留既有review和门槛，少量candidate。自动discovery策略不构成人工接源授权。
 

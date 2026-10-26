@@ -1,4 +1,4 @@
-# Personal News 架构契约
+# Daily 架构契约
 
 所有 issue 都按这份文件实现。改这里的约定要单独开 PR，并同步受影响的 issue。
 

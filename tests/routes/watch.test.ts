@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { SITE_NAME } from "../../src/lib/site";
 import {
   getWatchView,
   renderWatchFeed,
@@ -145,7 +146,7 @@ describe("tests/routes/watch.test.ts", () => {
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(xml).toContain('<rss version="2.0"><channel>');
     expect(xml).toContain(
-      "<title>Personal News — Watch: New Reasoning LLM Releases</title>",
+      `<title>${SITE_NAME} — Watch: New Reasoning LLM Releases</title>`,
     );
     expect(xml).toContain(
       "<link>https://news.ioenv.com/w/reasoning-models</link>",

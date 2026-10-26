@@ -4,6 +4,7 @@ import { safeHttpUrl } from "../../lib/url";
 import { industries } from "../db/schema/industries";
 import { watches } from "../db/schema/watches";
 import { approvedArticleWhere, type Db } from "./articles";
+import { SITE_NAME } from "../../lib/site";
 
 export interface WatchHitItem {
   id: number;
@@ -287,7 +288,7 @@ export function renderWatchFeed(
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0"><channel>',
-    `<title>${x(`Personal News — Watch: ${watch.question}`)}</title>`,
+    `<title>${x(`${SITE_NAME} — Watch: ${watch.question}`)}</title>`,
     `<link>${x(link)}</link>`,
     `<description>${x(description)}</description>`,
     itemsXml,
