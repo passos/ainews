@@ -593,7 +593,8 @@ export async function decideReview(
     // decision. For each fact in the same (company, concept, unit, period end)
     // group as this article's facts, the pointer is recomputed from scratch:
     // the newest fact with a larger id in an approved amendment (form contains
-    // "/A"), or NULL. It is "the newest approved amendment fact", not "the next
+    // "/A") of ANOTHER filing (a filing never supersedes its own facts), or
+    // NULL. It is "the newest approved amendment fact", not "the next
     // link in a chain", so the result does not depend on decision order. The
     // only reader, src/pipeline/artifacts/build.ts, checks
     // `superseded_by IS NULL`, so only NULL vs non-NULL matters there.
@@ -610,6 +611,7 @@ export async function decideReview(
              AND nf.unit = financial_facts.unit
              AND nf.period_end = financial_facts.period_end
              AND nf.id > financial_facts.id
+             AND nf.filing_id <> financial_facts.filing_id
              AND ${APPROVED_ARTICLE_SQL}
            ORDER BY nf.id DESC LIMIT 1
          )
