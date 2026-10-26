@@ -3070,4 +3070,70 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     const publicEvidence = await getEventEvidence(getDb(env.DB), event!.id);
     expect(publicEvidence.claims).toHaveLength(0);
   });
+
+  it("a primary document on the placeholder source is marked primary and shows its host", async () => {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, primary_domains, created_at) VALUES ('tech-ph', 'Tech Placeholder', 'auto', '[\"nasa.gov\"]', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, name, kind, status, created_at) VALUES (?1, 'system:primary-documents', 'Primary documents (system)', 'html', 'paused', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const body =
+      "The agency confirmed that the probe entered a stable orbit around the moon on Tuesday.";
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, 'https://www.nasa.gov/probe-orbit', 'https://www.nasa.gov/probe-orbit', 'Probe Orbit', 'NASA summary', 'shaPhEv', 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'shaPhEv', 'approved', 'admin', 1000)",
+    )
+      .bind(art!.id)
+      .run();
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Probe Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    const fakeR2 = new FakeR2();
+    fakeR2.put(`bodies/${art!.id}/shaPhEv.md`, body);
+    const transport = makeFakeTransport(() => ({
+      claims: [
+        {
+          claimText: "The probe entered a stable lunar orbit.",
+          claimType: "fact",
+          citations: [{ articleId: art!.id, quote: body, stance: "support" }],
+        },
+      ],
+    }));
+
+    const res = await generateEventEvidence(testEnv, event!.id, 1000, {
+      transport,
+      bodies: fakeR2 as unknown as R2Bucket,
+      vectors: new FakeVectors() as unknown as Pick<VectorizeIndex, "upsert">,
+    });
+    expect(res.status).toBe("generated");
+
+    const cite = await env.DB.prepare(
+      "SELECT is_primary_source FROM claim_evidence WHERE article_id = ?1",
+    )
+      .bind(art!.id)
+      .first<{ is_primary_source: number }>();
+    expect(cite!.is_primary_source).toBe(1);
+
+    const panel = await getEventEvidence(getDb(env.DB), event!.id);
+    const ev = panel.claims[0].evidence[0];
+    expect(ev.sourceDomain).toBe("nasa.gov");
+    expect(ev.sourceName).toBe("nasa.gov");
+  });
 });

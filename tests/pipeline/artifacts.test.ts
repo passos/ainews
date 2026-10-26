@@ -3770,7 +3770,8 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
       siteDomain: null,
       url: "https://www.example-lab.org/paper",
     });
-    expect(requests).toContain("Source: example-lab.org (example-lab.org)");
+    // Only the domain falls back to the host; a real source keeps its name.
+    expect(requests).toContain("Source: Lab Notes (example-lab.org)");
   });
 
   it("a system source with a site_domain still uses the document host", async () => {

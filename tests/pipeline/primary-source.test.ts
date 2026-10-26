@@ -795,6 +795,45 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       expect(annex!.source_id).toBe(placeholder.id);
     });
 
+    it("a candidate source on the same domain does not own a primary page", async () => {
+      const candidate = await env.DB.prepare(
+        `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+         VALUES (1, 'NASA candidate', 'https://www.nasa.gov/rss/news', 'nasa.gov', 'rss', 'candidate', 1000)
+         RETURNING id`,
+      ).first<{ id: number }>();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_candidate",
+        "Full report at [NASA](https://images.nasa.gov/candidate-doc).",
+      );
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: primaryPageFetch() as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["nasa.gov"],
+        2000,
+      );
+
+      const doc = await env.DB.prepare(
+        `SELECT s.feed_url FROM articles a JOIN sources s ON s.id = a.source_id
+         WHERE a.url = 'https://images.nasa.gov/candidate-doc'`,
+      ).first<{ feed_url: string }>();
+      expect(doc!.feed_url).toBe("system:primary-documents");
+      const status = await env.DB.prepare(
+        `SELECT status FROM sources WHERE id = ?1`,
+      )
+        .bind(candidate!.id)
+        .first<{ status: string }>();
+      expect(status!.status).toBe("candidate");
+    });
+
     it("Finance gets no system approval even when its publish_mode is auto", async () => {
       await env.DB.prepare(
         `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
