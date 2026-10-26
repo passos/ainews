@@ -15,6 +15,15 @@ export const events = sqliteTable(
     createdAt: integer("created_at").notNull(),
     /** Epoch milliseconds. */
     updatedAt: integer("updated_at").notNull(),
+    /** The last revision whose watch evaluation finished (#85). */
+    watchEvaluatedRevision: integer("watch_evaluated_revision")
+      .notNull()
+      .default(0),
+    /**
+     * Epoch milliseconds: the largest `effective_at` of the approved
+     * articles at that evaluation. Articles after it are new reporting.
+     */
+    watchEvaluatedThrough: integer("watch_evaluated_through"),
   },
   (t) => [
     index("events_industry_created_at_idx").on(t.industryId, t.createdAt),

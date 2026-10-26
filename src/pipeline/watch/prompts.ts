@@ -1,7 +1,7 @@
 import type { TextRequest } from "../../providers/adapters";
 import { WRITE_MAX_OUTPUT_TOKENS, WRITE_THINKING } from "../analyze/prompts";
 
-export const WATCH_PROMPT_VERSION = "watch-v1";
+export const WATCH_PROMPT_VERSION = "watch-v2";
 
 export function buildWatchJudgeQuestion(question: string, criteria: string) {
   return {

@@ -1,8 +1,13 @@
-import { createModelClient, type ModelClient } from "../../providers/models";
+import {
+  CallFailedError,
+  createModelClient,
+  type ModelClient,
+} from "../../providers/models";
 import {
   bindingTransport,
   type ModelTransport,
 } from "../../providers/transport";
+import { effectivePublishMode } from "../analyze/analyze";
 import type { PipelineEnv } from "../messages";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import {
@@ -31,6 +36,10 @@ interface EventRow {
   revision: number;
   industry_id: number;
   updated_at: number;
+  watch_evaluated_revision: number;
+  watch_evaluated_through: number | null;
+  industry_slug: string;
+  industry_publish_mode: "auto" | "review";
 }
 
 interface ApprovedArticleRow {
@@ -76,6 +85,42 @@ function matchKeyword(text: string, keyword: string): boolean {
   return regex.test(text);
 }
 
+/**
+ * A hit is public at once only in an auto section that is not Finance; the
+ * section is the event's. Same rule as artifacts (contract §7).
+ */
+export function watchHitInitialStatus(industry: {
+  slug: string;
+  publish_mode: "auto" | "review";
+}): "published" | "pending_review" {
+  return effectivePublishMode(industry) === "auto"
+    ? "published"
+    : "pending_review";
+}
+
+/**
+ * Records that `revision` of the event finished its watch evaluation. The
+ * marker only moves forward. `through` is the new boundary of known
+ * reporting; null keeps the old one. Neither `updated_at` nor `revision`
+ * changes: both are inputs of scheduling and retraction checks.
+ */
+export async function markWatchEvaluated(
+  db: D1Database,
+  eventId: number,
+  revision: number,
+  through: number | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE events
+       SET watch_evaluated_revision = ?2,
+           watch_evaluated_through = COALESCE(?3, watch_evaluated_through)
+       WHERE id = ?1 AND watch_evaluated_revision < ?2`,
+    )
+    .bind(eventId, revision, through)
+    .run();
+}
+
 export async function evaluateEventWatches(
   env: Pick<PipelineEnv, "DB" | "AI" | "AI_GATEWAY_ID" | "MODEL_CALLS_ENABLED">,
   eventId: number,
@@ -105,9 +150,12 @@ export async function evaluateEventWatches(
   // 1. Fetch event
   const event = await db
     .prepare(
-      `SELECT id, title, revision, industry_id, updated_at
-       FROM events
-       WHERE id = ?1`,
+      `SELECT e.id, e.title, e.revision, e.industry_id, e.updated_at,
+              e.watch_evaluated_revision, e.watch_evaluated_through,
+              i.slug AS industry_slug, i.publish_mode AS industry_publish_mode
+       FROM events e
+       JOIN industries i ON i.id = e.industry_id
+       WHERE e.id = ?1`,
     )
     .bind(eventId)
     .first<EventRow>();
@@ -115,6 +163,21 @@ export async function evaluateEventWatches(
   if (!event || event.revision === 0) {
     return { eventId, eventRevision: 0, evaluatedCount: 0, hitCount: 0 };
   }
+
+  // This revision was already evaluated: no model call, no write.
+  if (event.watch_evaluated_revision >= event.revision) {
+    return {
+      eventId,
+      eventRevision: event.revision,
+      evaluatedCount: 0,
+      hitCount: 0,
+    };
+  }
+
+  // Every return below that is a settled outcome marks the revision.
+  // Retryable errors propagate and leave the marker where it is.
+  const markEvaluated = (through: number | null) =>
+    markWatchEvaluated(db, event.id, event.revision, through);
 
   // 2. Fetch approved articles for this event (APPROVED_ARTICLE_SQL)
   // An article becomes an approved member of this event when BOTH linked (ea.created_at)
@@ -133,6 +196,7 @@ export async function evaluateEventWatches(
     .all<ApprovedArticleRow>();
 
   if (!articles || articles.length === 0) {
+    await markEvaluated(null);
     return {
       eventId,
       eventRevision: event.revision,
@@ -145,17 +209,61 @@ export async function evaluateEventWatches(
   // When an article is approved or grouped, event.updated_at matches effective_at.
   // If an article was retracted, no remaining article has effective_at == updated_at.
   const maxEffectiveAt = Math.max(...articles.map((a) => a.effective_at));
-  const isRetractionRevision =
-    event.revision > 1 && maxEffectiveAt < event.updated_at;
 
-  if (isRetractionRevision) {
-    // Retraction of an article cannot constitute a new material development
-    return {
-      eventId,
-      eventRevision: event.revision,
-      evaluatedCount: 0,
-      hitCount: 0,
-    };
+  // Partition articles into new reporting vs prior reporting. It does not
+  // depend on the watch, so it is computed once.
+  let newArticles: ApprovedArticleRow[];
+  let priorArticles: ApprovedArticleRow[];
+  const through = event.watch_evaluated_through;
+
+  if (through !== null) {
+    // Everything approved after the last evaluation is new, however many
+    // revisions were skipped in between.
+    newArticles = articles.filter((a) => a.effective_at > through);
+    priorArticles = articles.filter((a) => a.effective_at <= through);
+    if (newArticles.length === 0) {
+      // No new reporting (e.g. an article left the event). Keep the old
+      // boundary: here maxEffectiveAt <= through.
+      await markEvaluated(null);
+      return {
+        eventId,
+        eventRevision: event.revision,
+        evaluatedCount: 0,
+        hitCount: 0,
+      };
+    }
+  } else {
+    // First evaluation of this event.
+    const isRetractionRevision =
+      event.revision > 1 && maxEffectiveAt < event.updated_at;
+
+    if (isRetractionRevision) {
+      // Retraction of an article cannot constitute a new material development
+      await markEvaluated(maxEffectiveAt);
+      return {
+        eventId,
+        eventRevision: event.revision,
+        evaluatedCount: 0,
+        hitCount: 0,
+      };
+    }
+
+    if (event.revision === 1) {
+      if (articles.length > 2) {
+        newArticles = articles.slice(-2);
+        priorArticles = articles.slice(0, -2);
+      } else {
+        newArticles = articles;
+        priorArticles = [];
+      }
+    } else {
+      newArticles = articles.filter((a) => a.effective_at === maxEffectiveAt);
+      priorArticles = articles.filter((a) => a.effective_at < maxEffectiveAt);
+      if (newArticles.length === 0) {
+        newArticles = [articles[articles.length - 1]];
+        priorArticles = articles.slice(0, -1);
+      }
+    }
   }
 
   // Event title derived from approved articles to prevent unverified titles leaking
@@ -179,6 +287,7 @@ export async function evaluateEventWatches(
     .all<WatchRow>();
 
   if (!activeWatches || activeWatches.length === 0) {
+    await markEvaluated(maxEffectiveAt);
     return {
       eventId,
       eventRevision: event.revision,
@@ -243,27 +352,6 @@ export async function evaluateEventWatches(
 
     evaluatedCount++;
 
-    // Partition articles into new reporting (this revision) vs prior reporting
-    let newArticles: ApprovedArticleRow[];
-    let priorArticles: ApprovedArticleRow[];
-
-    if (event.revision === 1) {
-      if (articles.length > 2) {
-        newArticles = articles.slice(-2);
-        priorArticles = articles.slice(0, -2);
-      } else {
-        newArticles = articles;
-        priorArticles = [];
-      }
-    } else {
-      newArticles = articles.filter((a) => a.effective_at === maxEffectiveAt);
-      priorArticles = articles.filter((a) => a.effective_at < maxEffectiveAt);
-      if (newArticles.length === 0) {
-        newArticles = [articles[articles.length - 1]];
-        priorArticles = articles.slice(0, -1);
-      }
-    }
-
     const watchSha = (
       await sha256Hex(`${watch.question}:${watch.criteria}`)
     ).slice(0, 8);
@@ -304,8 +392,17 @@ export async function evaluateEventWatches(
 
     const questions = buildWatchJudgeQuestion(watch.question, watch.criteria);
 
-    const answers = (await models.judge(judgeKey, state, questions)) as
-      { progress?: { noul: number } } | undefined;
+    let answers: { progress?: { noul: number } } | undefined;
+    try {
+      answers = (await models.judge(judgeKey, state, questions)) as
+        { progress?: { noul: number } } | undefined;
+    } catch (e) {
+      // Out of attempts is a settled outcome for this watch only. Every
+      // other error is retryable and leaves the revision unmarked.
+      if (!(e instanceof CallFailedError)) throw e;
+      console.error({ watchId: watch.id, eventId: event.id, error: e.message });
+      continue;
+    }
 
     const noulVal = answers?.progress?.noul ?? 0;
     // Strict > 1 for percentage scale, otherwise >= 0.5 (so noul = 1.0 is a hit)
@@ -321,20 +418,34 @@ export async function evaluateEventWatches(
         newArticles,
       );
 
-      const summaryRes = await models.generateText(
-        "write",
-        writeKey,
-        summaryReq,
-      );
+      let summaryText: string;
+      try {
+        const summaryRes = await models.generateText(
+          "write",
+          writeKey,
+          summaryReq,
+        );
 
-      let summaryText = summaryRes.text.trim().replace(/^["']|["']$/g, "");
+        summaryText = summaryRes.text.trim().replace(/^["']|["']$/g, "");
 
-      // Guard: Discard partial output on non-STOP finishReason and fallback cleanly
-      if (summaryRes.finishReason !== "STOP") {
-        console.warn({
+        // Guard: Discard partial output on non-STOP finishReason and fallback cleanly
+        if (summaryRes.finishReason !== "STOP") {
+          console.warn({
+            watchId: watch.id,
+            eventId: event.id,
+            warning: `Watch summary generation truncated (${summaryRes.finishReason}); discarding partial text and using fallback`,
+          });
+          summaryText =
+            newArticles[0]?.title ||
+            "Material development confirmed by evaluation.";
+        }
+      } catch (e) {
+        // Out of attempts: record the hit with the fallback summary.
+        if (!(e instanceof CallFailedError)) throw e;
+        console.error({
           watchId: watch.id,
           eventId: event.id,
-          warning: `Watch summary generation truncated (${summaryRes.finishReason}); discarding partial text and using fallback`,
+          error: e.message,
         });
         summaryText =
           newArticles[0]?.title ||
@@ -344,8 +455,8 @@ export async function evaluateEventWatches(
       // Atomic insertion: only commit if event revision hasn't changed concurrently
       await db
         .prepare(
-          `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+          `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
            WHERE (SELECT revision FROM events WHERE id = ?2) = ?3
            ON CONFLICT (watch_id, event_id, event_revision) DO NOTHING`,
         )
@@ -360,10 +471,16 @@ export async function evaluateEventWatches(
             promptVersion: WATCH_PROMPT_VERSION,
             articleIds: newArticles.map((a) => a.id),
           }),
+          watchHitInitialStatus({
+            slug: event.industry_slug,
+            publish_mode: event.industry_publish_mode,
+          }),
         )
         .run();
     }
   }
+
+  await markEvaluated(maxEffectiveAt);
 
   return {
     eventId,

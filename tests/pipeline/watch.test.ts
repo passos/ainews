@@ -1,8 +1,15 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluateEventWatches } from "../../src/pipeline/watch/evaluate";
+import {
+  evaluateEventWatches,
+  markWatchEvaluated,
+} from "../../src/pipeline/watch/evaluate";
 import { enqueueDueWatches } from "../../src/pipeline/watch/schedule";
-import type { ModelClient } from "../../src/providers/models";
+import {
+  BudgetExceededError,
+  CallFailedError,
+  type ModelClient,
+} from "../../src/providers/models";
 
 describe("pipeline: watch evaluation", () => {
   let sourceId: number;
@@ -387,55 +394,6 @@ describe("pipeline: watch evaluation", () => {
     expect(queueMock.sendBatch).toHaveBeenCalled();
   });
 
-  it("enqueueDueWatches filters out events outside the time window", async () => {
-    await env.DB.prepare(
-      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('window-watch', 'Question?', 'Criteria', '["window"]', 1, 'active', 1000, 1000)`,
-    ).run();
-
-    // Event updated 2 hours ago (outside 30m window)
-    const oldEvent = await env.DB.prepare(
-      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
-       VALUES (1, 'Old Event', 1, 1000, 1000 - 2 * 3600 * 1000) RETURNING id`,
-    ).first<{ id: number }>();
-
-    const artRes = await env.DB.prepare(
-      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
-       VALUES (1, ?1, 'https://example.com/art-old', 'https://example.com/art-old', 'Old Title', 'Summary', 'shaOld', 'grouped', 1000, 1000)
-       RETURNING id`,
-    )
-      .bind(sourceId)
-      .first<{ id: number }>();
-
-    await env.DB.prepare(
-      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
-       VALUES (?1, 'shaOld', 'approved', 'admin', 1000)`,
-    )
-      .bind(artRes!.id)
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO event_articles (event_id, article_id, created_at)
-       VALUES (?1, ?2, 1000)`,
-    )
-      .bind(oldEvent!.id, artRes!.id)
-      .run();
-
-    const queueMock = {
-      sendBatch: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const ids = await enqueueDueWatches(
-      {
-        DB: env.DB,
-        Q_GENERATE: queueMock as unknown as Queue,
-      },
-      1000,
-    );
-
-    expect(ids).not.toContain(oldEvent!.id);
-  });
-
   it("partitions articles into new and prior reporting for state contrast and avoids duplicate hits on commentary", async () => {
     // 1. Create event at revision 1
     const eventRes = await env.DB.prepare(
@@ -612,6 +570,13 @@ describe("pipeline: watch evaluation", () => {
       .run();
 
     mockJudge.mockClear();
+    // This test checks the key composition, not re-evaluation: clear the
+    // revision marker so the second call evaluates again.
+    await env.DB.prepare(
+      `UPDATE events SET watch_evaluated_revision = 0, watch_evaluated_through = NULL WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
     await evaluateEventWatches(env, eventId, 1000, { models: mockModels });
     const secondKey = mockJudge.mock.calls[0][0];
 
@@ -926,5 +891,387 @@ describe("pipeline: watch evaluation", () => {
     expect(mockJudge).toHaveBeenCalled();
     const judgeState = mockJudge.mock.calls[0][1] as { body: string };
     expect(judgeState.body).toContain("Late Grouped Breakthrough");
+  });
+});
+
+describe("pipeline: watch hit status and revision marker (#85)", () => {
+  let sourceId: number;
+
+  beforeEach(async () => {
+    // Scheduling assertions count every due event, so start each test
+    // without events from earlier tests in this file.
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM watch_hits`),
+      env.DB.prepare(`DELETE FROM watches`),
+      env.DB.prepare(`DELETE FROM event_articles`),
+      env.DB.prepare(`DELETE FROM events`),
+    ]);
+    await env.DB.prepare(
+      `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
+       VALUES (1, 'tech', 'Tech', 'review', '[]', '{}', 1, 1000)
+       ON CONFLICT DO NOTHING`,
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+       VALUES (1, 'Test Source', 'https://example.com/feed.xml', 'example.com', 'rss', 'active', 1000)
+       ON CONFLICT DO NOTHING`,
+    ).run();
+    sourceId = (await env.DB.prepare(
+      `SELECT id FROM sources WHERE feed_url = 'https://example.com/feed.xml'`,
+    ).first<{ id: number }>())!.id;
+  });
+
+  async function seedIndustry(
+    slug: string,
+    publishMode: "auto" | "review",
+  ): Promise<number> {
+    const row = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, primary_domains, config, config_version, created_at)
+       VALUES (?1, ?1, ?2, '[]', '{}', 1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET publish_mode = excluded.publish_mode
+       RETURNING id`,
+    )
+      .bind(slug, publishMode)
+      .first<{ id: number }>();
+    return row!.id;
+  }
+
+  async function seedEvent(
+    industryId: number,
+    revision: number,
+    updatedAt: number,
+  ): Promise<number> {
+    const row = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (?1, 'Marker Event', ?2, ?3, ?3) RETURNING id`,
+    )
+      .bind(industryId, revision, updatedAt)
+      .first<{ id: number }>();
+    return row!.id;
+  }
+
+  /** An approved article in the event; its effective_at is `at`. */
+  async function seedApproved(
+    eventId: number,
+    industryId: number,
+    title: string,
+    at: number,
+  ): Promise<number> {
+    const url = `https://example.com/marker/${crypto.randomUUID()}`;
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+       VALUES (?1, ?2, ?3, ?3, ?4, 'Summary', 'sha-marker', 'grouped', ?5, ?5)
+       RETURNING id`,
+    )
+      .bind(industryId, sourceId, url, title, at)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, 'sha-marker', 'approved', 'admin', ?2)`,
+    )
+      .bind(art!.id, at)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO event_articles (event_id, article_id, created_at)
+       VALUES (?1, ?2, ?3)`,
+    )
+      .bind(eventId, art!.id, at)
+      .run();
+    return art!.id;
+  }
+
+  async function seedWatch(slug: string, industryId: number | null = null) {
+    const row = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES (?1, 'Marker question?', 'Marker criteria', '["Marker"]', ?2, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(slug, industryId)
+      .first<{ id: number }>();
+    return row!.id;
+  }
+
+  function models(noul: number) {
+    const judge = vi.fn().mockResolvedValue({ progress: { noul } });
+    const generateText = vi
+      .fn()
+      .mockResolvedValue({ text: "Marker progress.", finishReason: "STOP" });
+    return {
+      judge,
+      generateText,
+      client: { judge, generateText } as unknown as ModelClient,
+    };
+  }
+
+  function queue() {
+    const sendBatch = vi.fn().mockResolvedValue(undefined);
+    return {
+      sendBatch,
+      env: { DB: env.DB, Q_GENERATE: { sendBatch } as unknown as Queue },
+    };
+  }
+
+  async function marker(eventId: number) {
+    return env.DB.prepare(
+      `SELECT watch_evaluated_revision AS revision, watch_evaluated_through AS through
+       FROM events WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .first<{ revision: number; through: number | null }>();
+  }
+
+  async function hitStatusFor(industryId: number): Promise<string | null> {
+    const eventId = await seedEvent(industryId, 1, 1000);
+    await seedApproved(eventId, industryId, "Marker article", 1000);
+    await seedWatch(`status-${crypto.randomUUID().slice(0, 8)}`);
+    const m = models(0.9);
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+    const row = await env.DB.prepare(
+      `SELECT status FROM watch_hits WHERE event_id = ?1`,
+    )
+      .bind(eventId)
+      .first<{ status: string }>();
+    return row?.status ?? null;
+  }
+
+  it("stores a Finance hit as pending_review even when the section publish_mode is auto", async () => {
+    const finance = await seedIndustry("finance", "auto");
+    expect(await hitStatusFor(finance)).toBe("pending_review");
+  });
+
+  it("stores a hit in a review section as pending_review", async () => {
+    const review = await seedIndustry("review-section", "review");
+    expect(await hitStatusFor(review)).toBe("pending_review");
+  });
+
+  it("stores a hit in an auto non-Finance section as published", async () => {
+    const auto = await seedIndustry("auto-section", "auto");
+    expect(await hitStatusFor(auto)).toBe("published");
+  });
+
+  it("does not call the judge again for an event revision that was already evaluated", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("s1-watch");
+    const m = models(0.1);
+
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+
+    expect(m.judge).toHaveBeenCalledTimes(1);
+    expect((await marker(eventId))!.revision).toBe(1);
+
+    // The scheduler does not pick the evaluated revision again either.
+    const q = queue();
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([]);
+  });
+
+  it("skips a revision whose marker is current even when no reporting boundary is set", async () => {
+    // A marker without a boundary: the last evaluation found no approved
+    // article. The marker alone must stop a second evaluation.
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("s1b-watch");
+    await env.DB.prepare(
+      `UPDATE events SET watch_evaluated_revision = 1, watch_evaluated_through = NULL WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+    const m = models(0.9);
+
+    const res = await evaluateEventWatches(env, eventId, 1000, {
+      models: m.client,
+    });
+
+    expect(res.evaluatedCount).toBe(0);
+    expect(m.judge).not.toHaveBeenCalled();
+  });
+
+  it("enqueueDueWatches reaches events beyond the first page and outside any time window", async () => {
+    const now = 100_000_000;
+    const old = now - 2 * 3600 * 1000;
+    const created: number[] = [];
+    for (let i = 0; i < 21; i++) {
+      // Distinct updated_at: the newest 20 come first.
+      const eventId = await seedEvent(1, 1, old + i);
+      await seedApproved(eventId, 1, `Marker article ${i}`, old + i);
+      created.push(eventId);
+    }
+    await seedWatch("s2-watch");
+    const m = models(0.1);
+
+    const q = queue();
+    const first = await enqueueDueWatches(q.env, now, 20);
+    expect(first.length).toBe(20);
+    expect(first.every((id) => created.includes(id))).toBe(true);
+
+    for (const eventId of first) {
+      await evaluateEventWatches(env, eventId, now, { models: m.client });
+    }
+
+    const second = await enqueueDueWatches(q.env, now, 20);
+    expect(second).toEqual(created.filter((id) => !first.includes(id)));
+
+    await evaluateEventWatches(env, second[0], now, { models: m.client });
+    expect(await enqueueDueWatches(q.env, now, 20)).toEqual([]);
+  });
+
+  it("enqueueDueWatches enqueues an event again after its revision increases", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("s3-watch");
+    const m = models(0.1);
+    const q = queue();
+
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([eventId]);
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([]);
+
+    await env.DB.prepare(
+      `UPDATE events SET revision = revision + 1 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([eventId]);
+  });
+
+  it("enqueueDueWatches enqueues and evaluate marks events when no watch is active", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    const m = models(0.9);
+    const q = queue();
+
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([eventId]);
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+    expect((await marker(eventId))!.revision).toBe(1);
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(await enqueueDueWatches(q.env, 1000)).toEqual([]);
+  });
+
+  it("treats articles approved across two unevaluated revisions as new reporting", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article A", 1000);
+    await seedWatch("s5-watch");
+    const m = models(0.1);
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+
+    // Two approvals before the next evaluation: revision 1 -> 3.
+    await seedApproved(eventId, 1, "Marker article B", 2000);
+    await seedApproved(eventId, 1, "Marker article C", 3000);
+    await env.DB.prepare(
+      `UPDATE events SET revision = 3, updated_at = 3000 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+
+    m.judge.mockClear();
+    await evaluateEventWatches(env, eventId, 3000, { models: m.client });
+
+    expect(m.judge).toHaveBeenCalledTimes(1);
+    const body = (m.judge.mock.calls[0][1] as { body: string }).body;
+    const [newPart, priorPart = ""] = body.split(
+      "=== PRIOR REPORTING (ALREADY KNOWN) ===",
+    );
+    expect(newPart).toContain("=== NEW REPORTING IN THIS UPDATE ===");
+    expect(newPart).toContain("Marker article B");
+    expect(newPart).toContain("Marker article C");
+    expect(newPart).not.toContain("Marker article A");
+    expect(priorPart).toContain("Marker article A");
+  });
+
+  it("skips a watch whose judge call is exhausted and still marks the revision", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    const w1 = await seedWatch("s6-watch-1");
+    const w2 = await seedWatch("s6-watch-2");
+    const m = models(0.9);
+    m.judge.mockImplementation(async (key: string) => {
+      if (key.startsWith(`watch:judge:${w1}:`)) {
+        throw new CallFailedError(key, "x");
+      }
+      return { progress: { noul: 0.9 } };
+    });
+
+    await expect(
+      evaluateEventWatches(env, eventId, 1000, { models: m.client }),
+    ).resolves.toBeDefined();
+
+    const { results: hits } = await env.DB.prepare(
+      `SELECT watch_id FROM watch_hits WHERE event_id = ?1`,
+    )
+      .bind(eventId)
+      .all<{ watch_id: number }>();
+    expect(hits.map((h) => h.watch_id)).toEqual([w2]);
+    expect((await marker(eventId))!.revision).toBe(1);
+  });
+
+  it("records the hit with the fallback summary when the write call is exhausted", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("s6b-watch");
+    const m = models(0.9);
+    m.generateText.mockImplementation(async (_slot: string, key: string) => {
+      throw new CallFailedError(key, "x");
+    });
+
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+
+    const hit = await env.DB.prepare(
+      `SELECT summary FROM watch_hits WHERE event_id = ?1`,
+    )
+      .bind(eventId)
+      .first<{ summary: string }>();
+    expect(hit?.summary).toBe("Marker article");
+    expect((await marker(eventId))!.revision).toBe(1);
+  });
+
+  it("keeps the marker behind when the judge throws BudgetExceededError", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("s7-watch");
+    const m = models(0.9);
+    m.judge.mockRejectedValue(
+      new BudgetExceededError("gateway", "2026-10-26", 1),
+    );
+
+    await expect(
+      evaluateEventWatches(env, eventId, 1000, { models: m.client }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    expect((await marker(eventId))!.revision).toBe(0);
+  });
+
+  it("markWatchEvaluated never moves the marker backwards", async () => {
+    const eventId = await seedEvent(1, 3, 1000);
+    await env.DB.prepare(
+      `UPDATE events SET watch_evaluated_revision = 3, watch_evaluated_through = 500 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+
+    await markWatchEvaluated(env.DB, eventId, 2, 100);
+    expect(await marker(eventId)).toEqual({ revision: 3, through: 500 });
+
+    // A revision with no new reporting (an article left the event) keeps
+    // the boundary where it was.
+    const ev2 = await seedEvent(1, 1, 2000);
+    await seedApproved(ev2, 1, "Marker article A", 1000);
+    const later = await seedApproved(ev2, 1, "Marker article B", 2000);
+    await seedWatch("s8-watch");
+    const m = models(0.1);
+    await evaluateEventWatches(env, ev2, 2000, { models: m.client });
+    expect(await marker(ev2)).toEqual({ revision: 1, through: 2000 });
+
+    await env.DB.prepare(`DELETE FROM event_articles WHERE article_id = ?1`)
+      .bind(later)
+      .run();
+    await env.DB.prepare(
+      `UPDATE events SET revision = 2, updated_at = 4000 WHERE id = ?1`,
+    )
+      .bind(ev2)
+      .run();
+    m.judge.mockClear();
+    await evaluateEventWatches(env, ev2, 4000, { models: m.client });
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(await marker(ev2)).toEqual({ revision: 2, through: 2000 });
   });
 });

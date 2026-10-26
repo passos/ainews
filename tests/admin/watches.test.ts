@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createWatch,
   listWatches,
+  listPendingWatchHits,
   listWatchHits,
+  reviewWatchHit,
   updateWatch,
 } from "../../src/server/admin/ops";
 
@@ -122,5 +124,63 @@ describe("Admin Watch Operations", () => {
         keywords: [],
       }),
     ).rejects.toThrow("Watch must have at least one keyword");
+  });
+
+  it("reviewWatchHit decides a pending hit once", async () => {
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, created_at)
+       VALUES ('admin-fin', 'Admin Finance', 'review', 1000) RETURNING id`,
+    ).first<{ id: number }>();
+    const watchId = await createWatch(
+      env.DB,
+      {
+        slug: "admin-review-watch",
+        question: "Review question?",
+        criteria: "Review criteria",
+        keywords: ["review"],
+      },
+      1000,
+    );
+    const ev = await env.DB.prepare(
+      `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+       VALUES (?1, 'Review Event', 1, 1000, 1000) RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const hit = await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 3000, 'Pending summary.', '{}') RETURNING id`,
+    )
+      .bind(watchId, ev!.id)
+      .first<{ id: number }>();
+    const hitId = hit!.id;
+
+    const pending = await listPendingWatchHits(env.DB);
+    expect(pending.map((p) => p.id)).toEqual([hitId]);
+    expect(pending[0]).toMatchObject({
+      watchId,
+      watchSlug: "admin-review-watch",
+      eventId: ev!.id,
+      eventTitle: "Review Event",
+      industryName: "Admin Finance",
+      industrySlug: "admin-fin",
+      summary: "Pending summary.",
+    });
+
+    expect(await reviewWatchHit(env.DB, { hitId, decision: "rejected" })).toBe(
+      true,
+    );
+    expect(await reviewWatchHit(env.DB, { hitId, decision: "approved" })).toBe(
+      false,
+    );
+
+    const row = await env.DB.prepare(
+      `SELECT status FROM watch_hits WHERE id = ?1`,
+    )
+      .bind(hitId)
+      .first<{ status: string }>();
+    expect(row!.status).toBe("rejected");
+    expect(await listPendingWatchHits(env.DB)).toEqual([]);
+    expect((await listWatchHits(env.DB, watchId))[0].status).toBe("rejected");
   });
 });

@@ -46,10 +46,26 @@ export const watchHits = sqliteTable(
     hitAt: integer("hit_at").notNull(),
     summary: text("summary").notNull(),
     rationale: text("rationale").notNull(),
+    /**
+     * Only `published` hits reach readers. The default keeps a hit that was
+     * written without a status off the public site. No table CHECK: adding
+     * one would rebuild the table.
+     */
+    status: text("status", {
+      enum: ["published", "pending_review", "rejected"],
+    })
+      .notNull()
+      .default("pending_review"),
   },
   (t) => [
     unique("watch_hits_unique").on(t.watchId, t.eventId, t.eventRevision),
     index("watch_hits_watch_hit_at_idx").on(t.watchId, t.hitAt),
     index("watch_hits_event_idx").on(t.eventId),
+    index("watch_hits_watch_status_hit_at_idx").on(
+      t.watchId,
+      t.status,
+      t.hitAt,
+    ),
+    index("watch_hits_status_hit_at_idx").on(t.status, t.hitAt),
   ],
 );

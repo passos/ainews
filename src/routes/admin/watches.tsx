@@ -1,25 +1,33 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import {
   createWatch,
+  decideWatchHitReview,
+  listPendingWatchHits,
   listWatches,
   listWatchHits,
   updateWatch,
 } from "../../server/admin/watches";
-import type { AdminWatchItem } from "../../server/admin/ops";
+import type { AdminWatchItem, WatchHitStatus } from "../../server/admin/ops";
 
 export const Route = createFileRoute("/admin/watches")({
   ssr: "data-only",
   loader: async () => {
-    const watches = await listWatches();
-    return { watches };
+    const [watches, pendingHits] = await Promise.all([
+      listWatches(),
+      listPendingWatchHits(),
+    ]);
+    return { watches, pendingHits };
   },
   component: AdminWatchesPage,
 });
 
 function AdminWatchesPage() {
-  const { watches: initialWatches } = Route.useLoaderData();
+  const router = useRouter();
+  const { watches: initialWatches, pendingHits } = Route.useLoaderData();
+  const [actingHitId, setActingHitId] = useState<number | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [watches, setWatches] = useState<AdminWatchItem[]>(initialWatches);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedWatch, setSelectedWatch] = useState<AdminWatchItem | null>(
@@ -34,6 +42,7 @@ function AdminWatchesPage() {
       hitAt: number;
       summary: string;
       rationale: string;
+      status: WatchHitStatus;
     }[]
   >([]);
   const [loadingHits, setLoadingHits] = useState(false);
@@ -93,6 +102,24 @@ function AdminWatchesPage() {
       },
     });
     await handleRefresh();
+  }
+
+  async function handleHitDecision(
+    hitId: number,
+    decision: "approved" | "rejected",
+  ) {
+    setActingHitId(hitId);
+    setReviewError(null);
+    try {
+      await decideWatchHitReview({ data: { hitId, decision } });
+      await router.invalidate();
+    } catch (err) {
+      setReviewError(
+        err instanceof Error ? err.message : "Failed to submit hit decision",
+      );
+    } finally {
+      setActingHitId(null);
+    }
   }
 
   async function handleViewHits(w: AdminWatchItem) {
@@ -218,6 +245,71 @@ function AdminWatchesPage() {
           </div>
         </form>
       )}
+
+      {/* Pending hits: nothing reaches readers before it is approved */}
+      <section className="flex flex-col gap-3">
+        <h2 className="font-mono text-sm font-bold uppercase tracking-wider text-foreground">
+          Pending hits ({pendingHits.length})
+        </h2>
+        {reviewError && (
+          <p role="alert" className="font-mono text-xs text-destructive">
+            {reviewError}
+          </p>
+        )}
+        {pendingHits.length === 0 ? (
+          <p className="rounded-lg border p-4 font-mono text-xs text-muted-foreground">
+            No hits wait for review.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {pendingHits.map((h) => (
+              <li
+                key={h.id}
+                className="flex flex-col gap-2 rounded-lg border bg-background p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col gap-1">
+                    <p className="font-semibold text-sm text-foreground">
+                      {h.watchQuestion}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {h.industryName} ·{" "}
+                      <Link
+                        to="/e/$eventId"
+                        params={{ eventId: String(h.eventId) }}
+                        className="underline"
+                      >
+                        {h.eventTitle}
+                      </Link>{" "}
+                      · Revision #{h.eventRevision}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      disabled={actingHitId === h.id}
+                      onClick={() => handleHitDecision(h.id, "approved")}
+                      className="font-mono text-xs"
+                    >
+                      {actingHitId === h.id ? "Saving..." : "Approve"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={actingHitId === h.id}
+                      onClick={() => handleHitDecision(h.id, "rejected")}
+                      className="font-mono text-xs"
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-sm text-foreground">{h.summary}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* Watches List */}
       <div className="overflow-x-auto rounded-lg border">
@@ -357,7 +449,10 @@ function AdminWatchesPage() {
                 >
                   <div className="flex items-center justify-between text-xs font-mono text-muted-foreground border-b pb-1.5">
                     <span className="font-bold text-foreground">
-                      Hit #{h.id} • Revision #{h.eventRevision}
+                      Hit #{h.id} • Revision #{h.eventRevision} •{" "}
+                      <span className="uppercase">
+                        {h.status.replace("_", " ")}
+                      </span>
                     </span>
                     <span>{new Date(h.hitAt).toLocaleString()}</span>
                   </div>
