@@ -148,6 +148,13 @@
       "when": 1793022665488,
       "tag": "0020_legal_speedball",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1793028707433,
+      "tag": "0021_strong_solo",
+      "breakpoints": true
     }
   ]
 }

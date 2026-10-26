@@ -1724,6 +1724,7 @@ export async function listWatchHits(
     hitAt: number;
     summary: string;
     rationale: string;
+    status: WatchHitStatus;
   }[]
 > {
   const { results } = await database
@@ -1735,7 +1736,8 @@ export async function listWatchHits(
         wh.event_revision,
         wh.hit_at,
         wh.summary,
-        wh.rationale
+        wh.rationale,
+        wh.status
       FROM watch_hits wh
       JOIN events e ON e.id = wh.event_id
       WHERE wh.watch_id = ?1
@@ -1750,6 +1752,7 @@ export async function listWatchHits(
       hit_at: number;
       summary: string;
       rationale: string;
+      status: WatchHitStatus;
     }>();
 
   if (!results) return [];
@@ -1762,7 +1765,75 @@ export async function listWatchHits(
     hitAt: r.hit_at,
     summary: r.summary,
     rationale: r.rationale,
+    status: r.status,
   }));
+}
+
+export type WatchHitStatus = "published" | "pending_review" | "rejected";
+
+export interface PendingWatchHit {
+  id: number;
+  watchId: number;
+  watchSlug: string;
+  watchQuestion: string;
+  eventId: number;
+  eventTitle: string;
+  eventRevision: number;
+  industryName: string;
+  industrySlug: string;
+  hitAt: number;
+  summary: string;
+  rationale: string;
+}
+
+/** Watch hits that wait for review, newest first. */
+export async function listPendingWatchHits(
+  database: D1Database,
+): Promise<PendingWatchHit[]> {
+  const { results } = await database
+    .prepare(
+      `SELECT
+        wh.id AS id,
+        wh.watch_id AS watchId,
+        w.slug AS watchSlug,
+        w.question AS watchQuestion,
+        wh.event_id AS eventId,
+        e.title AS eventTitle,
+        wh.event_revision AS eventRevision,
+        i.name AS industryName,
+        i.slug AS industrySlug,
+        wh.hit_at AS hitAt,
+        wh.summary AS summary,
+        wh.rationale AS rationale
+      FROM watch_hits wh
+      JOIN watches w ON w.id = wh.watch_id
+      JOIN events e ON e.id = wh.event_id
+      JOIN industries i ON i.id = e.industry_id
+      WHERE wh.status = 'pending_review'
+      ORDER BY wh.hit_at DESC, wh.id DESC`,
+    )
+    .all<PendingWatchHit>();
+  return results ?? [];
+}
+
+/**
+ * Decides a pending hit once. Not bound to the event's current revision: the
+ * hit records progress at its own revision, and later retractions are
+ * filtered at read time by the article guards in getWatchView.
+ */
+export async function reviewWatchHit(
+  database: D1Database,
+  data: { hitId: number; decision: "approved" | "rejected" },
+): Promise<boolean> {
+  const targetStatus = data.decision === "approved" ? "published" : "rejected";
+  const res = await database
+    .prepare(
+      `UPDATE watch_hits SET status = ?1
+       WHERE id = ?2 AND status = 'pending_review'`,
+    )
+    .bind(targetStatus, data.hitId)
+    .run();
+  return res.meta.changes === 1;
 }
 
 // -----------------------------------------------------------------------------

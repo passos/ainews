@@ -1,11 +1,15 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { SITE_NAME } from "../../src/lib/site";
+import { reviewWatchHit } from "../../src/server/admin/ops";
 import {
+  getActiveWatchesView,
   getWatchView,
+  hasActiveWatches,
   renderWatchFeed,
   watchFeedResponse,
 } from "../../src/server/publication/watches";
+import { loadSiteShell } from "../../src/server/publication/shell";
 import {
   db,
   resetPublication,
@@ -70,8 +74,8 @@ describe("tests/routes/watch.test.ts", () => {
 
     // 4. Record hit
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 2000, 'Independent benchmark shows competitive performance on reasoning tasks.', '{"noul":0.92}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Independent benchmark shows competitive performance on reasoning tasks.', '{"noul":0.92}', 'published')`,
     )
       .bind(watchId, eventId)
       .run();
@@ -118,8 +122,8 @@ describe("tests/routes/watch.test.ts", () => {
     await seedEventArticle(eventId, art, 1000);
     await seedReview(art, "approved");
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 3000, 'Mission update.', '{}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 3000, 'Mission update.', '{}', 'published')`,
     )
       .bind(watch!.id, eventId)
       .run();
@@ -152,8 +156,8 @@ describe("tests/routes/watch.test.ts", () => {
     await seedReview(art, "approved");
 
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 3000, 'OpenAI previews o3 with new ARC-AGI benchmark results.', '{"noul":0.88}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 3000, 'OpenAI previews o3 with new ARC-AGI benchmark results.', '{"noul":0.88}', 'published')`,
     )
       .bind(watchId, eventId)
       .run();
@@ -215,8 +219,8 @@ describe("tests/routes/watch.test.ts", () => {
 
     // A hit row exists
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 1000, 'Summary of retracted info', '{}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 1000, 'Summary of retracted info', '{}', 'published')`,
     )
       .bind(watchId, eventId)
       .run();
@@ -248,8 +252,8 @@ describe("tests/routes/watch.test.ts", () => {
     await seedReview(art, "approved");
 
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 2000, 'Fed lowers federal funds rate target.', '{}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Fed lowers federal funds rate target.', '{}', 'published')`,
     )
       .bind(watchId, eventId)
       .run();
@@ -299,8 +303,8 @@ describe("tests/routes/watch.test.ts", () => {
 
     // Hit was recorded based on [backgroundArt, breakthroughArt]
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 2, 2000, 'Breakthrough claimed.', ?3)`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 2, 2000, 'Breakthrough claimed.', ?3, 'published')`,
     )
       .bind(
         watchId,
@@ -343,8 +347,8 @@ describe("tests/routes/watch.test.ts", () => {
     await seedReview(techArt, "approved");
 
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 3000, 'Tech subsidies rate.', '{}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 3000, 'Tech subsidies rate.', '{}', 'published')`,
     )
       .bind(watchId, techEventId)
       .run();
@@ -365,8 +369,8 @@ describe("tests/routes/watch.test.ts", () => {
     await seedReview(finArt, "approved");
 
     await env.DB.prepare(
-      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 1, 2000, 'Federal Reserve policy adjustment announced.', '{}')`,
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Federal Reserve policy adjustment announced.', '{}', 'published')`,
     )
       .bind(watchId, finEventId)
       .run();
@@ -381,5 +385,133 @@ describe("tests/routes/watch.test.ts", () => {
 
     const rss = renderWatchFeed(view!, "https://news.ioenv.com");
     expect(rss).toContain("investment advice");
+  });
+
+  it("hides pending_review and rejected hits from getWatchView and the watch RSS", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('status-watch', 'Status question?', 'Status criteria', '["status"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const watchId = watchRes!.id;
+    const eventId = await seedEvent(tech.industryId, "Status Event", 3);
+    const art = await seedArticle({
+      ...tech,
+      title: "Status Article",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    for (const [revision, status, summary] of [
+      [1, "published", "Published hit summary"],
+      [2, "pending_review", "Pending hit summary"],
+      [3, "rejected", "Rejected hit summary"],
+    ] as const) {
+      await env.DB.prepare(
+        `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      )
+        .bind(
+          watchId,
+          eventId,
+          revision,
+          1000 + revision,
+          summary,
+          JSON.stringify({ noul: 0.9, articleIds: [art] }),
+          status,
+        )
+        .run();
+    }
+
+    const view = await getWatchView(db(), "status-watch");
+    expect(view!.hits.map((h) => h.summary)).toEqual(["Published hit summary"]);
+    const xml = renderWatchFeed(view!, "https://news.example");
+    expect(xml.split("<item>").length - 1).toBe(1);
+    expect(xml).not.toContain("Pending hit summary");
+    expect(xml).not.toContain("Rejected hit summary");
+  });
+
+  it("shows a Finance hit only after reviewWatchHit approves it", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('fin-review-watch', 'Finance question?', 'Finance criteria', '["rates"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(fin.industryId)
+      .first<{ id: number }>();
+    const eventId = await seedEvent(fin.industryId, "Rate Decision", 1);
+    const art = await seedArticle({
+      ...fin,
+      title: "Central Bank Holds Rates",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+    const hit = await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Rates held.', ?3, 'pending_review') RETURNING id`,
+    )
+      .bind(watchRes!.id, eventId, JSON.stringify({ articleIds: [art] }))
+      .first<{ id: number }>();
+
+    const before = await getWatchView(db(), "fin-review-watch");
+    expect(before!.hits.length).toBe(0);
+
+    expect(
+      await reviewWatchHit(env.DB, { hitId: hit!.id, decision: "approved" }),
+    ).toBe(true);
+
+    const after = await getWatchView(db(), "fin-review-watch");
+    expect(after!.hits.length).toBe(1);
+    expect(after!.hits[0].disclaimer).toContain("Not investment advice");
+  });
+
+  it("getActiveWatchesView returns criteria, section name and disclaimer of active watches only", async () => {
+    expect(await hasActiveWatches(db())).toBe(false);
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('only-paused', 'Paused question?', 'Paused criteria', '["x"]', NULL, 'paused', 500, 500)`,
+    ).run();
+    // A paused watch alone does not show the header link.
+    expect(await hasActiveWatches(db())).toBe(false);
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('paused-watch', 'Paused question?', 'Paused criteria', '["x"]', ?1, 'paused', 1000, 1000),
+              ('fin-active-watch', 'Active question?', 'Active criteria', '["y"]', ?2, 'active', 2000, 2000)`,
+    )
+      .bind(tech.industryId, fin.industryId)
+      .run();
+
+    expect(await hasActiveWatches(db())).toBe(true);
+    const list = await getActiveWatchesView(db());
+    expect(list.map((w) => w.slug)).toEqual(["fin-active-watch"]);
+    expect(list[0].criteria).toBe("Active criteria");
+    expect(list[0].industryName).toBe("Finance");
+    expect(list[0].industryDisclaimer).toContain("Not investment advice");
+  });
+
+  // Ruling 3 (#85): the header shows the Watches link only while an active
+  // watch exists. __root.tsx renders the link from this flag.
+  it("loadSiteShell sets hasWatches only while an active watch exists", async () => {
+    expect((await loadSiteShell()).hasWatches).toBe(false);
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('shell-paused-1', 'Paused?', 'Paused criteria', '["x"]', NULL, 'paused', 500, 500),
+              ('shell-paused-2', 'Paused?', 'Paused criteria', '["x"]', ?1, 'paused', 600, 600)`,
+    )
+      .bind(tech.industryId)
+      .run();
+    expect((await loadSiteShell()).hasWatches).toBe(false);
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('shell-active', 'Active?', 'Active criteria', '["y"]', NULL, 'active', 700, 700)`,
+    ).run();
+    expect((await loadSiteShell()).hasWatches).toBe(true);
   });
 });

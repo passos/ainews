@@ -304,6 +304,8 @@ async function main() {
     "/s/technology": 0,
     "/s/education": 0,
     "/s/industry": 0,
+    // One Finance watch: its disclaimer, once.
+    "/w": 1,
   };
   for (const [path, count] of Object.entries(EXPECTED_NOTES)) {
     const { res, text } = await page(path);
@@ -349,11 +351,39 @@ async function main() {
       fail(`GET /s/technology lacks "${needle}"`);
   }
 
-  // Unapproved articles and their corrections are on no public page.
-  for (const path of ["/", "/s/technology", "/s/finance", "/s/education"]) {
-    const { text } = await page(path);
-    if (text.includes("HIDDEN"))
-      fail(`GET ${path} shows an unapproved article`);
+  // Unapproved articles, their corrections, and watch hits that are not
+  // published are on no public page or feed.
+  for (const path of [
+    "/",
+    "/s/technology",
+    "/s/finance",
+    "/s/education",
+    "/w",
+    "/w/tech-agent-protocols",
+    "/w/finance-enforcement",
+    "/rss/w/tech-agent-protocols.xml",
+    "/rss/w/finance-enforcement.xml",
+  ]) {
+    const { res, text } = await page(path);
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    if (text.includes("HIDDEN")) fail(`GET ${path} shows an unapproved item`);
+  }
+
+  // Topic watches: a header entry while active watches exist, a list page,
+  // and the published hit on the watch page.
+  if (!homePage.text.includes('data-nav="watches"')) {
+    fail('GET / lacks the data-nav="watches" header link');
+  }
+  const watchList = await page("/w");
+  for (const needle of [
+    "When do agent protocols get cheaper to run?",
+    "When does the Fed take a new enforcement action?",
+  ]) {
+    if (!watchList.text.includes(needle)) fail(`GET /w lacks "${needle}"`);
+  }
+  const techWatch = await page("/w/tech-agent-protocols");
+  if (!techWatch.text.includes("Watch fixture: handshake overhead measured")) {
+    fail("GET /w/tech-agent-protocols lacks its published hit");
   }
 
   // Reader page /a/$articleId (#86). Every card links one; unapproved

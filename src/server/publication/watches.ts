@@ -116,6 +116,7 @@ export async function getWatchView(
     JOIN events e ON e.id = wh.event_id
     LEFT JOIN industries i ON i.id = e.industry_id
     WHERE wh.watch_id = ${watchRow.id}
+      AND wh.status = 'published'
     ORDER BY wh.hit_at DESC
     LIMIT 50
   `);
@@ -235,21 +236,43 @@ export async function getWatchView(
   };
 }
 
-export async function getActiveWatchesView(
-  db: Db,
-): Promise<{ id: number; slug: string; question: string }[]> {
+export interface ActiveWatchItem {
+  id: number;
+  slug: string;
+  question: string;
+  criteria: string;
+  industryName: string | null;
+  industryDisclaimer: string | null;
+}
+
+export async function getActiveWatchesView(db: Db): Promise<ActiveWatchItem[]> {
   const rows = await db
     .select({
       id: watches.id,
       slug: watches.slug,
       question: watches.question,
+      criteria: watches.criteria,
+      industryName: industries.name,
+      industryDisclaimer: industries.disclaimer,
     })
     .from(watches)
+    .leftJoin(industries, eq(watches.industryId, industries.id))
     .where(eq(watches.status, "active"))
     .orderBy(desc(watches.createdAt))
     .all();
 
   return rows;
+}
+
+/** Whether the public site has any watch to link to. */
+export async function hasActiveWatches(db: Db): Promise<boolean> {
+  const row = await db
+    .select({ id: watches.id })
+    .from(watches)
+    .where(eq(watches.status, "active"))
+    .limit(1)
+    .get();
+  return row !== undefined;
 }
 
 const x = escapeXml;

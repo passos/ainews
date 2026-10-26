@@ -56,3 +56,25 @@ export const listWatchHits = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     return ops.listWatchHits(env.DB, data.watchId);
   });
+
+export const listPendingWatchHits = createServerFn({ method: "GET" })
+  .middleware([accessMiddleware])
+  .handler(async () => ops.listPendingWatchHits(env.DB));
+
+export const decideWatchHitReview = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .validator(
+    z.object({
+      hitId: z.number().int().positive(),
+      decision: z.enum(["approved", "rejected"]),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const success = await ops.reviewWatchHit(env.DB, data);
+    if (!success) {
+      throw new Response("Watch hit review failed: already decided", {
+        status: 409,
+      });
+    }
+    return { success: true };
+  });

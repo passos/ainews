@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { SITE_NAME } from "../../lib/site";
 import { getDb } from "../db/client";
 import { listSections } from "./articles";
+import { hasActiveWatches } from "./watches";
 
 /** What every page needs: the section list and the Web Analytics token. */
 export async function loadSiteShell() {
@@ -16,5 +17,7 @@ export async function loadSiteShell() {
       name,
     })),
     beaconToken: beaconToken.trim(),
+    // The header links to /w only while an active watch exists.
+    hasWatches: await hasActiveWatches(getDb(env.DB)),
   };
 }

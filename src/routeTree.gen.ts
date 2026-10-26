@@ -25,6 +25,7 @@ import { Route as AdminWatchesRouteImport } from './routes/admin/watches'
 import { Route as EEventIdRouteImport } from './routes/e/$eventId'
 import { Route as RssChar123sectionChar125DotxmlRouteImport } from './routes/rss/{$section}[.]xml'
 import { Route as SSectionRouteImport } from './routes/s/$section'
+import { Route as WIndexRouteImport } from './routes/w/index'
 import { Route as WWatchRouteImport } from './routes/w/$watch'
 import { Route as AdminArticlesArticleIdRouteImport } from './routes/admin/articles/$articleId'
 import { Route as AdminIndustriesIndexRouteImport } from './routes/admin/industries/index'
@@ -116,6 +117,11 @@ const SSectionRoute = SSectionRouteImport.update({
   path: '/s/$section',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WIndexRoute = WIndexRouteImport.update({
+  id: '/w/',
+  path: '/w/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WWatchRoute = WWatchRouteImport.update({
   id: '/w/$watch',
   path: '/w/$watch',
@@ -183,6 +189,7 @@ export interface FileRoutesByFullPath {
   '/s/$section': typeof SSectionRoute
   '/w/$watch': typeof WWatchRoute
   '/admin/': typeof AdminIndexRoute
+  '/w/': typeof WIndexRoute
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
@@ -209,6 +216,7 @@ export interface FileRoutesByTo {
   '/s/$section': typeof SSectionRoute
   '/w/$watch': typeof WWatchRoute
   '/admin': typeof AdminIndexRoute
+  '/w': typeof WIndexRoute
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
@@ -237,6 +245,7 @@ export interface FileRoutesById {
   '/s/$section': typeof SSectionRoute
   '/w/$watch': typeof WWatchRoute
   '/admin/': typeof AdminIndexRoute
+  '/w/': typeof WIndexRoute
   '/admin/articles/$articleId': typeof AdminArticlesArticleIdRoute
   '/admin/industries/$industryId': typeof AdminIndustriesIndustryIdRoute
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
@@ -266,6 +275,7 @@ export interface FileRouteTypes {
     | '/s/$section'
     | '/w/$watch'
     | '/admin/'
+    | '/w/'
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
@@ -292,6 +302,7 @@ export interface FileRouteTypes {
     | '/s/$section'
     | '/w/$watch'
     | '/admin'
+    | '/w'
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
@@ -319,6 +330,7 @@ export interface FileRouteTypes {
     | '/s/$section'
     | '/w/$watch'
     | '/admin/'
+    | '/w/'
     | '/admin/articles/$articleId'
     | '/admin/industries/$industryId'
     | '/admin/sources/$sourceId'
@@ -337,6 +349,7 @@ export interface RootRouteChildren {
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
   WWatchRoute: typeof WWatchRoute
+  WIndexRoute: typeof WIndexRoute
   DigestSectionDateRoute: typeof DigestSectionDateRoute
   RssDigestChar123sectionChar125DotxmlRoute: typeof RssDigestChar123sectionChar125DotxmlRoute
   RssWChar123watchChar125DotxmlRoute: typeof RssWChar123watchChar125DotxmlRoute
@@ -456,6 +469,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SSectionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/w/': {
+      id: '/w/'
+      path: '/w'
+      fullPath: '/w/'
+      preLoaderRoute: typeof WIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/w/$watch': {
       id: '/w/$watch'
       path: '/w/$watch'
@@ -570,6 +590,7 @@ const rootRouteChildren: RootRouteChildren = {
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,
   WWatchRoute: WWatchRoute,
+  WIndexRoute: WIndexRoute,
   DigestSectionDateRoute: DigestSectionDateRoute,
   RssDigestChar123sectionChar125DotxmlRoute:
     RssDigestChar123sectionChar125DotxmlRoute,
