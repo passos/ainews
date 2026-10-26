@@ -131,3 +131,80 @@ CF worker name ainews-app
 
 - 2026-10-23 使用者决定：不用 Sonnet；`reason` 用 Gemini 3.8 Flash（备选 OpenAI gpt-6-luna）。见 #53。
 - 2026-10-23 ainews-design 决定：Q_INGEST 消费并发上限为 2，防止补队积压时突发调用触发网关限流（05:42Z 出现 32 次 2018）。见 #53。
+
+# 第六轮决定（2026-10-26）
+
+使用者原话（2026-10-26）："以需求文档 @docs/Newsren_Plan.md 为准，你来替我做最佳产品和用户体验的决策，我全部采纳你的建议"；
+随后补充："特别注意，你的决策着眼点是产品和用户体验，而不是最容易实现的方案或者成本最低的方案或者风险最小的方案"。
+本轮各条是 **ainews-design 代决**，依据是上面两句授权和 `Newsren_Plan.md`（N）。起因是 2026-10-26 的全面审查：
+15 个 PR 零评审合并，合并的 M2–M4 功能读者在线上几乎看不到。经过两路评审，都是 Anthropic 家族，标 [degraded]。
+
+## 审核与发布（N§6 "Require human approval for publishing initially"，N§4 "Human editorial review for any finance story"）
+
+- 生成内容到达读者之前，仍然必须经过人工批准。不放宽这条，改的是批准的成本：
+  - **事件级一键批准**：一次动作发布该事件当前 revision 的全部产物，以及带 verified 原文片段的论断。Finance 仍逐条批准。
+  - **已发布版本只在"已批准文章集合单纯变大"时保留**：新 revision 生成待审的新版本，旧版本继续显示，直到新版本被批准。
+    拒绝文章、人工改写、改板块、重新分析，都要在同一个 `batch()` 里立刻撤下旧版本。
+  - **去抖**：只对 revision 已变化、且 `updated_at` 距今 ≥30 分钟的事件重生成，一次审核会话只触发一次。
+  - **论断守卫**：没有 verified 原文片段的论断，不能批准，也不能公开。
+- **日报和周报**：条目自动发布，但只用已批准文章自己的标题和摘要。模型写的 `one_liner` 和导语另走审核，批准后才显示。
+  Finance 的日报和周报整份人工发布。管理员邮件要等 Email Service 接好，所以重开 #12，标明这一项还没完成。
+- **"已批准"的定义只有一个**：pipeline 里约 20 处内联复制，全部换成 `approvedArticleWhere`。
+
+## 读者功能
+
+- **产物全覆盖**（N§7 "one-click student, educator, and professional explanations"）：每个入选事件都生成 Story Brief、
+  三档解释、学习材料和本板块的编辑产品，不设分数门槛。调度器和 build 共用同一个资格函数。
+- **生成物都带来源**（N§6 Critical product requirements 第一条）：Story Brief、三档解释和学习材料，都要显示来源文章、发布时间和抓取时间。
+- **Ask 开放给读者**（N§7 Stage 2 "Readers get useful, evidence-backed answers"，N§1 Reader loop）：本条取代第二轮"Ask 只在后台"。
+  - 入口：每个事件页都有 "Ask about this story"。回答只依据该事件已批准的正文，逐句引用；查不到时说明查不到的是什么。
+  - 回答只给提问者本人，不发布到公开页。限流按网络地址设，只防滥用。
+  - 开放的前提是先做离线评估（N§6 "after evaluation"）：题集上引用正确率与拒答正确率都达标。
+  - v1 不含 Finance 板块（N§4 "no personalized investment advice"）。
+  - 契约 `docs/architecture.md` 的 `questions` 行另开一个 PR 修改。
+- **读者自建关注**（N§2.1 最高优先级、N§2.6、N§7 "Follow a Topic: save specific questions"）：读者不注册，
+  用自然语言写下要跟的问题和命中条件，系统给一个私有 RSS 地址。只在出现实质进展时命中，同一进展不重复命中。
+  管理员建的 watch 保留，作为公开示范，并在公开站加一个列表入口。邮件推送等读者订阅以后再做。
+- **补齐 N§3 Technology 的编辑产品**：Launch Reality Check、Technology Evolution Timeline。Technology 是目前唯一有数据的板块。
+
+## Funding Round Tracker（#23，N§3 line 104、N§4）
+
+- 模型提取只生成提案。管理员批准是写入 `funding_rounds` 的唯一途径，提案本身不可修改，新报道生成新提案。
+- 管理员的操作有四种：批准为新轮；批准为对已发布轮 X 的更正；拒绝；撤回某个已发布轮。
+  - 提案的批准和拒绝都带 `WHERE state='pending'`，并用 `changes()=1` 串起来。
+  - 更正行 = X 的全部字段，再用提案里原文明确写出的字段覆盖。
+  - `superseded_by` 只能从 NULL 写一次。写入顺序要实测外键行为后再定。
+  - 批准前检查：所有来源文章都已经批准。
+- 管理员体验：每条提案预先配好最可能对应的已发布轮，逐字段列出差异和支持每个字段的原文片段。
+- 读者体验：`/funding` 可以按板块、阶段、投资方筛选，并显示趋势。每个数字都链接到原文片段，被更正的记录显示更正时间和原因。不给创业公司排名。
+- 字段政策：只记录原文明确写出的字段。身份由公司、具体轮次、公告日期三项确定，缺失或冲突时由管理员在提案上决定。
+
+## 信源（N§7 Stage 1 "Approved source feeds"）
+
+- 每个板块都要同时有一手来源和独立报道，这样才能把厂商的说法和独立评测对照起来。候选：
+  - Technology 增加：厂商一手新闻页（OpenAI、Google DeepMind、Anthropic）、独立评测（Epoch AI）、CISA 安全通告。
+  - Education：The Hechinger Report、EdSurge、ed.gov 新闻、NCES。
+  - Industry：Supply Chain Dive、Manufacturing Dive、NIST 新闻。
+  - Finance：Federal Reserve press releases、SEC press releases、FINRA news、TechCrunch Venture。
+- 每个候选都用项目 UA 验证：robots、feed、正文抓取梯，不需要浏览器才算通过。ainews-design 从验证通过的里定名单。
+  写生产时，先 dry-run，执行一次，前后的计数都要贴出来。
+
+## 钱与开关（金额已向使用者说明）
+
+- 新增的读者功能和信源会让花费明显上升。**建议**每日上限从 $2 提到 $8：`gateway` $7.50，`workers_ai` $0.50。
+  这是 ainews-design 的建议，使用者已表示"全部采纳"，但在改 `budget.caps` 的生产写入之前再请使用者确认一次金额。
+- 所有新的 write 和 reason 调用，做一次批量真实探测，确认 `finishReason=STOP`，预计花费不超过 $0.10。
+- `DISCOVERY_ENABLED` 保持 `"false"`。重新打开之前要先满足：probe 遵守 crawl-delay、带项目 UA、跨主机查 robots；
+  有当天预算；websearch 经过 `createModelClient` 记账。改这个开关仍然要单独开 PR，并经使用者同意。
+
+## 流程
+
+- 每个 PR 合并前，在 GitHub 上留两路评审的评论，适用时标 [degraded]。合并用 `--match-head-commit`，绑定评审过的 head。
+- #23 和 #24 的 0020 迁移号冲突：后合并的一方 rebase 后，重新运行 `db:generate`。
+- 5 个 `/private/tmp/ainews-review-*` worktree 的内容 main 上都已经有了，用 `git worktree remove` 清理。
+
+## 仍需使用者亲手做
+
+- 在 `ioenv.com` 上接好 Email Service，并确认发件地址。
+- 提供能读 AI Gateway 日志的凭据，用于 M1 关口的对账，并确认 embed 的计费渠道。
+- 确认每日预算的金额（建议 $8）。
