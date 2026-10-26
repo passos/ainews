@@ -322,10 +322,15 @@ describe("reader-visible text is English", () => {
     expect(v).toEqual(["src/components/a.tsx:8", "src/components/a.tsx:9"]);
   });
 
-  it("finds no CJK in src/components or src/routes outside admin", () => {
+  it("finds no CJK in reader-visible source outside admin", () => {
     const root = join(import.meta.dirname, "..");
     const real = new Map<string, string>();
-    for (const dir of ["src/components", "src/routes"]) {
+    for (const dir of [
+      "src/components",
+      "src/routes",
+      "src/lib",
+      "src/server/publication",
+    ]) {
       for (const entry of readdirSync(join(root, dir), { recursive: true })) {
         const rel = `${dir}/${String(entry).split("\\").join("/")}`;
         if (!/\.tsx?$/.test(rel)) continue;
@@ -338,6 +343,8 @@ describe("reader-visible text is English", () => {
       true,
     );
     expect(real.has("src/routes/index.tsx")).toBe(true);
+    expect(real.has("src/lib/site.ts")).toBe(true);
+    expect(real.has("src/server/publication/feed.ts")).toBe(true);
     expect(findCjk(real)).toEqual([]);
   });
 });
