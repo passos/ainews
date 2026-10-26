@@ -348,3 +348,42 @@ describe("renderArticleExcerpt review round 2", () => {
     ).toBeLessThanOrEqual(cap(total));
   });
 });
+
+describe("renderArticleExcerpt review round 4", () => {
+  const tail = paras(10, 20);
+  const wordCount = (html: string | null) =>
+    (html ?? "").match(/\bword\b/g)?.length ?? 0;
+
+  it("does not count zero-width spaces as words (P1)", () => {
+    // 300 real words, then 900 lone U+200B: W = 300, cap 75.
+    const body = "word ".repeat(300) + "\n\n" + "&#x200b; ".repeat(900);
+    // null (no excerpt) counts 0 words.
+    expect(wordCount(renderArticleExcerpt(body))).toBeLessThanOrEqual(75);
+  });
+
+  it("drops text after a self-closing <script/> in alt, full mode (P2)", () => {
+    const html = renderArticleMarkdown("![a <script/>SECRET b](https://x/i)");
+    expect(html).not.toContain("SECRET");
+    expect(html).toMatch(/alt="a {1,2}b"/);
+  });
+
+  it("drops text after a self-closing <script/> in alt, excerpt mode (P2)", () => {
+    const html = renderArticleExcerpt(
+      `![a <script/>SECRET b](https://x/i)\n\n${tail}`,
+    );
+    expect(html).not.toContain("SECRET");
+  });
+
+  it("drops text after a self-closing <script/> inline (P2)", () => {
+    const html = renderArticleMarkdown("Hello <script/>SECRET world");
+    expect(html).not.toContain("SECRET");
+    expect(html).toContain("Hello");
+  });
+
+  it("keeps the text after a self-closing <svg/> (P2)", () => {
+    expect(renderArticleMarkdown("Hello <svg/> world")).toContain("world");
+    expect(renderArticleMarkdown("![a <svg/> kept b](https://x/i)")).toContain(
+      "kept",
+    );
+  });
+});
