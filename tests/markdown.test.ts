@@ -329,6 +329,16 @@ describe("renderArticleExcerpt review round 2", () => {
     expect(html).not.toContain("<script");
   });
 
+  it("alt text is the visible text of the cleaned children, in full mode (P2-2)", () => {
+    // Raw HTML inside the alt is dropped, not kept as text: the alt a reader
+    // sees must match the words the excerpt counts.
+    const html = renderArticleMarkdown(
+      "![x <b>y</b> `z`](https://i.example/p.png)",
+    );
+    expect(html).toContain('alt="x y z"');
+    expect(html).not.toContain("&lt;b&gt;");
+  });
+
   it("caps the excerpt by the words of the rendered body (P2-3)", () => {
     const full = renderArticleMarkdown(TAG_HEAVY.src, { images: false });
     const total = htmlVisibleWords(full);
