@@ -1,4 +1,5 @@
 import type { ModelClient } from "../../providers/models";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import {
   GROUP_JOIN_MIN_CONFIDENCE,
   GROUP_PROMPT_VERSION,
@@ -305,9 +306,8 @@ export async function groupArticle(
             `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
              SELECT ?1, ?2, ?3, (
                SELECT revision + CASE WHEN EXISTS (
-                 SELECT 1 FROM reviews r
-                 JOIN articles a ON a.id = r.article_id
-                 WHERE a.id = ?2 AND r.body_sha = a.body_sha AND r.decision = 'approved'
+                 SELECT 1 FROM articles a
+                 WHERE a.id = ?2 AND ${APPROVED_ARTICLE_SQL}
                ) THEN 1 ELSE 0 END
                FROM events WHERE id = ?1
              )
@@ -322,9 +322,8 @@ export async function groupArticle(
           .prepare(
             `UPDATE events SET revision = revision + 1, updated_at = ?1
              WHERE id = ?2 AND changes() = 1 AND EXISTS (
-               SELECT 1 FROM reviews r
-               JOIN articles a ON a.id = r.article_id
-               WHERE a.id = ?3 AND r.body_sha = a.body_sha AND r.decision = 'approved'
+               SELECT 1 FROM articles a
+               WHERE a.id = ?3 AND ${APPROVED_ARTICLE_SQL}
              )`,
           )
           .bind(commitNow, targetEventId, articleId),
@@ -391,9 +390,8 @@ export async function groupArticle(
              WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?2)
                AND changes() = 1
                AND EXISTS (
-                 SELECT 1 FROM reviews r
-                 JOIN articles a ON a.id = r.article_id
-                 WHERE a.id = ?2 AND r.body_sha = a.body_sha AND r.decision = 'approved'
+                 SELECT 1 FROM articles a
+                 WHERE a.id = ?2 AND ${APPROVED_ARTICLE_SQL}
                )`,
           )
           .bind(commitNow, articleId),

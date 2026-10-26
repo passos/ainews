@@ -1,6 +1,7 @@
 import { isEnabled } from "../../lib/flags";
 import { attributeSource } from "../../lib/source-attribution";
 import { safeHttpUrl } from "../../lib/url";
+import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import {
   CallInProgressError,
@@ -305,10 +306,7 @@ export async function answerQuestion(
         JOIN sources s ON s.id = a.source_id
         JOIN industries i ON i.id = a.industry_id
         WHERE a.id IN (${placeholders})
-          AND EXISTS (
-            SELECT 1 FROM reviews r
-            WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-          )
+          AND ${APPROVED_ARTICLE_SQL}
       `;
 
       const bindings: (number | string)[] = [...candidateArticleIds];

@@ -24,11 +24,23 @@ const HOME_CORRECTIONS = 5;
  * version, decided "approved". An approval of an older body, a rejection
  * (including a take-down) or no review all mean "not public". The article
  * table must be aliased `a`. Every public read uses this one fragment.
+ * Pipeline code interpolates this string into D1 `prepare()` text. Do not
+ * interpolate `approvedArticleWhere` into a JS template string: it is an
+ * object and becomes `[object Object]`.
  */
-export const approvedArticleWhere: SQL = sql`EXISTS (
+export const APPROVED_ARTICLE_SQL = `EXISTS (
   SELECT 1 FROM reviews r
   WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
 )`;
+
+/** APPROVED_ARTICLE_SQL as a drizzle fragment, for public reads. */
+export const approvedArticleWhere: SQL = sql.raw(APPROVED_ARTICLE_SQL);
+
+// Who approved: the same condition as APPROVED_ARTICLE_SQL, but it has to
+// return the row's reviewer, which an EXISTS cannot. Keep the two in step.
+const APPROVED_BY_SQL = sql`(SELECT r.reviewer FROM reviews r
+  WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+  LIMIT 1)`;
 
 // Newest first; id makes the order total, so paging neither repeats nor
 // skips rows. Must stay identical to articles_industry_newest_idx (schema),
@@ -414,9 +426,7 @@ export async function getArticlePage(
         WHEN NULLIF(an.summary_en, '') IS NOT NULL THEN 'ai'
         ELSE 'feed'
       END AS summary_kind,
-      (SELECT r.reviewer FROM reviews r
-       WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       LIMIT 1) AS approved_by,
+      ${APPROVED_BY_SQL} AS approved_by,
       CASE WHEN json_valid(s.config) AND json_extract(s.config, '$.summaryIsBody') = 1
         THEN 1 ELSE 0 END AS body_is_abstract
     ${CARD_FROM}
