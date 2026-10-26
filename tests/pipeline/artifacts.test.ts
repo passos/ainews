@@ -5,7 +5,11 @@ import { enqueueDueArtifacts } from "../../src/pipeline/artifacts/schedule";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
 import type { ModelTransport } from "../../src/providers/transport";
-import type { ModelClient } from "../../src/providers/models";
+import {
+  BudgetExceededError,
+  CallFailedError,
+  type ModelClient,
+} from "../../src/providers/models";
 
 class FakeQueue {
   sent: GenerateMessage[] = [];
@@ -3784,4 +3788,242 @@ describe("enqueueDueArtifacts & handleGenerateBatch", () => {
     expect(requests).toContain("Source: sec.gov (sec.gov)");
     expect(requests).not.toContain("System mirror");
   });
+});
+
+describe("artifact scheduling (#92)", () => {
+  // Every event here uses its own section, host and URLs. Each test first sets
+  // revision = 0 on all events so that events left by earlier tests in this
+  // file are not due.
+
+  /** An auto section without artifacts.deepThreshold: the deep threshold falls back to thresholds.select (50). */
+  async function seedSection(tag: string) {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES (?1, ?1, 'auto', 1000) RETURNING id",
+    )
+      .bind(`art92-${tag}`)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, ?2, ?3, 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id, `https://art92-${tag}.test/feed`, `art92-${tag}.test`)
+      .first<{ id: number }>();
+    return { indId: ind!.id, srcId: src!.id, tag };
+  }
+
+  type Section = Awaited<ReturnType<typeof seedSection>>;
+
+  async function seedEvent(s: Section, updatedAt: number): Promise<number> {
+    const row = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Sched92 Event', 1, ?2, ?2) RETURNING id",
+    )
+      .bind(s.indId, updatedAt)
+      .first<{ id: number }>();
+    return row!.id;
+  }
+
+  /** An article in the event with a selected analysis; reviewed only when `approved`. */
+  async function seedArticle(
+    s: Section,
+    eventId: number,
+    name: string,
+    score: number,
+    approved: boolean,
+  ): Promise<number> {
+    const url = `https://art92-${s.tag}.test/${name}`;
+    const sha = `sha-art92-${s.tag}-${name}`;
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, ?3, ?3, 'Sched92 Story', 'Summary', ?4, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(s.srcId, s.indId, url, sha)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+       VALUES (?1, 'pv1', '{}', 'product_launch', '[]', ?2, 0.9, 1, 'cat', 'none', 1, 1000)`,
+    )
+      .bind(art!.id, score)
+      .run();
+    if (approved) {
+      await env.DB.prepare(
+        "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'auto', 1000)",
+      )
+        .bind(art!.id, sha)
+        .run();
+    }
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(eventId, art!.id)
+      .run();
+    return art!.id;
+  }
+
+  /** Approved article A (score 40) and pending article B (score 90). */
+  async function seedPendingHighScoreEvent(
+    s: Section,
+    updatedAt: number,
+  ): Promise<number> {
+    const eventId = await seedEvent(s, updatedAt);
+    await seedArticle(s, eventId, `a-${eventId}`, 40, true);
+    await seedArticle(s, eventId, `b-${eventId}`, 90, false);
+    return eventId;
+  }
+
+  /** A due event: one approved article, no artifacts, generator not run. */
+  async function seedDueEvent(s: Section, updatedAt: number): Promise<number> {
+    const eventId = await seedEvent(s, updatedAt);
+    await seedArticle(s, eventId, `due-${eventId}`, 40, true);
+    return eventId;
+  }
+
+  function schedEnv() {
+    const queue = new FakeQueue();
+    return { DB: env.DB, Q_GENERATE: queue as unknown as Queue };
+  }
+
+  async function evaluatedRevision(eventId: number): Promise<number> {
+    const row = await env.DB.prepare(
+      "SELECT artifacts_evaluated_revision AS r FROM events WHERE id = ?1",
+    )
+      .bind(eventId)
+      .first<{ r: number }>();
+    return row!.r;
+  }
+
+  function modelsWith(
+    generateText: (slot: string, key: string) => Promise<unknown>,
+  ): ModelClient {
+    return { generateText } as unknown as ModelClient;
+  }
+
+  it("an event with a pending high-score article leaves the due set once its revision is processed", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    await ensureBudget();
+    const s = await seedSection("p1");
+    const id = await seedPendingHighScoreEvent(s, 1000);
+
+    await generateEventArtifacts(testEnv, id, 1000, {
+      transport: makeAllValidFakeTransport(),
+    });
+    // The generator sees only article A (score 40 < deep threshold 50), so
+    // story_brief is everything this revision can get.
+    const { results: made } = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1 AND input_revision = 1",
+    )
+      .bind(id)
+      .all<{ type: string }>();
+    expect(made.map((r) => r.type)).toEqual(["story_brief"]);
+
+    expect(await enqueueDueArtifacts(schedEnv(), 2000)).not.toContain(id);
+    expect(await evaluatedRevision(id)).toBe(1);
+  });
+
+  it("20 processed events with pending high-score articles do not crowd out an older due event", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    await ensureBudget();
+    const s = await seedSection("p2");
+    const older = await seedDueEvent(s, 500);
+    for (let i = 0; i < 20; i++) {
+      const id = await seedPendingHighScoreEvent(s, 1000 + i);
+      await generateEventArtifacts(testEnv, id, 1000, {
+        transport: makeAllValidFakeTransport(),
+      });
+    }
+
+    expect(await enqueueDueArtifacts(schedEnv(), 2000, 20)).toContain(older);
+  });
+
+  it("rotates: events enqueued in the last run go behind events not yet enqueued", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("p3");
+    const ids: number[] = [];
+    for (let i = 0; i <= 20; i++) {
+      ids.push(await seedDueEvent(s, 1000 + i));
+    }
+
+    const first = await enqueueDueArtifacts(schedEnv(), 2000, 20);
+    expect(first).toEqual(ids.slice(0, 20));
+
+    const { results } = await env.DB.prepare(
+      `SELECT id, artifacts_scheduled_at, updated_at, revision FROM events
+       WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id ASC`,
+    )
+      .bind(JSON.stringify(first))
+      .all<{
+        id: number;
+        artifacts_scheduled_at: number;
+        updated_at: number;
+        revision: number;
+      }>();
+    expect(results).toEqual(
+      first.map((id, i) => ({
+        id,
+        artifacts_scheduled_at: 2000,
+        updated_at: 1000 + i,
+        revision: 1,
+      })),
+    );
+
+    const second = await enqueueDueArtifacts(schedEnv(), 3000, 20);
+    expect(second[0]).toBe(ids[20]);
+  });
+
+  it("a story_brief parse failure still marks the revision and re-enqueues after a revision bump", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("p4");
+    const id = await seedDueEvent(s, 1000);
+    const models = modelsWith(async () => ({
+      text: "not json",
+      usage: { inputTokens: 1, outputTokens: 1 },
+      finishReason: "STOP",
+    }));
+
+    await generateEventArtifacts(testEnv, id, 1000, { models });
+
+    expect(await enqueueDueArtifacts(schedEnv(), 2000)).not.toContain(id);
+    expect(await evaluatedRevision(id)).toBe(1);
+
+    await env.DB.prepare("UPDATE events SET revision = 2 WHERE id = ?1")
+      .bind(id)
+      .run();
+    expect(await enqueueDueArtifacts(schedEnv(), 3000)).toContain(id);
+  });
+
+  it("an exhausted artifact call (CallFailedError) is skipped and the revision is still marked", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("p5");
+    const id = await seedDueEvent(s, 1000);
+    const models = modelsWith(async (_slot, key) => {
+      throw new CallFailedError(key, "x");
+    });
+
+    await expect(
+      generateEventArtifacts(testEnv, id, 1000, { models }),
+    ).resolves.toBeDefined();
+
+    expect(await enqueueDueArtifacts(schedEnv(), 2000)).not.toContain(id);
+    expect(await evaluatedRevision(id)).toBe(1);
+  });
+
+  it("BudgetExceededError keeps the revision due", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("p6");
+    const id = await seedDueEvent(s, 1000);
+    const models = modelsWith(async () => {
+      throw new BudgetExceededError("gateway", "2026-10-26", 1);
+    });
+
+    await expect(
+      generateEventArtifacts(testEnv, id, 1000, { models }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+
+    expect(await enqueueDueArtifacts(schedEnv(), 2000)).toContain(id);
+    expect(await evaluatedRevision(id)).toBe(0);
+  });
+
+  // P7 needs the new export markArtifactsEvaluated (src/pipeline/artifacts/build.ts).
+  // At this HEAD it can only fail by a missing-symbol compile error, so it is
+  // written together with the export in phase 2.
+  it.todo("markArtifactsEvaluated never moves the marker backwards");
 });

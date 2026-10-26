@@ -469,4 +469,91 @@ describe("handleGroupBatch consumer", () => {
     expect(sent.length).toBe(0);
     expect(acked).toEqual([artId]);
   });
+
+  it("merge branch: article linked concurrently into another event does not bump the judge-chosen event", async () => {
+    // Guards `changes() = 1` in the merge branch's revision bump (#92): when
+    // the event_articles insert writes 0 rows, the article belongs to another
+    // event and the chosen event must keep its revision.
+    const { indId, artId } = await seedRedeliveryArticle(
+      "c-ind-race-merge",
+      "race-merge.test",
+      "sha-race-m",
+      true,
+    );
+    const x = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Ev Merge X', 0, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    const xId = x!.id;
+    const y = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Ev Merge Y', 0, 1000, 1000) RETURNING id",
+    )
+      .bind(indId)
+      .first<{ id: number }>();
+    const yId = y!.id;
+
+    const judgeOptions: string[][] = [];
+    const racingModels = {
+      // Simulates another writer linking the same approved article into Y
+      // while groupArticle waits for the embedding.
+      embed: async () => {
+        await env.DB.prepare(
+          "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+        )
+          .bind(yId, artId)
+          .run();
+        await env.DB.prepare(
+          "UPDATE articles SET stage = 'grouped' WHERE id = ?1",
+        )
+          .bind(artId)
+          .run();
+        await env.DB.prepare(
+          "UPDATE events SET revision = revision + 1 WHERE id = ?1",
+        )
+          .bind(yId)
+          .run();
+        return [[0.1, 0.2]];
+      },
+      judge: async (
+        _key: string,
+        _state: unknown,
+        questions: { event: { criteria: Record<string, string> } },
+      ) => {
+        judgeOptions.push(Object.keys(questions.event.criteria));
+        return {
+          event: {
+            choice: `event_${xId}`,
+            confidence: 0.9,
+            probabilities: { [`event_${xId}`]: 0.9 },
+          },
+        } as unknown as JevAnswers<JevQuestions>;
+      },
+    } as unknown as ModelClient;
+
+    const { queue, sent } = createRecordingQGenerate();
+    const pipelineEnv: PipelineEnv = {
+      ...env,
+      MODEL_CALLS_ENABLED: "true",
+      Q_GENERATE: queue,
+    };
+
+    const { batch, acked } = createFakeBatch([
+      { kind: "group", articleId: artId },
+    ]);
+    await handleGroupBatch(batch, pipelineEnv, {
+      models: racingModels,
+      vectors: new FakeVectorize(),
+      now: () => 1000,
+    });
+
+    // The judge was offered X, so the merge branch targeted X.
+    expect(judgeOptions).toHaveLength(1);
+    expect(judgeOptions[0]).toContain(`event_${xId}`);
+    expect((await eventRow(xId)).revision).toBe(0);
+    expect((await eventRow(yId)).revision).toBe(1);
+    expect(await eventOf(artId)).toBe(yId);
+    expect(sent.length).toBe(0);
+    expect(acked).toEqual([artId]);
+  });
 });
