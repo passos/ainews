@@ -5,7 +5,10 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { attributeSource } from "../../lib/source-attribution";
 import { parseContentDisplay } from "../../lib/content-display";
-import { excerptMarkdown, renderArticleMarkdown } from "../../lib/markdown";
+import {
+  renderArticleExcerpt,
+  renderArticleMarkdown,
+} from "../../lib/markdown";
 import { safeHttpUrl } from "../../lib/url";
 import type { getDb } from "../db/client";
 
@@ -435,23 +438,20 @@ export async function getArticlePage(
   // the feed summary, which the summary block already shows.
   if (display === "summary" || row.body_kind !== "full") return page;
 
-  let obj: R2ObjectBody | null;
+  // get and text() both read R2: either failing shows the summary and the
+  // original link, still a 200 page.
+  let md: string | null;
   try {
-    obj = await bodies.get(`bodies/${id}/${row.body_sha}.md`);
+    const obj = await bodies.get(`bodies/${id}/${row.body_sha}.md`);
+    md = obj ? await obj.text() : null;
   } catch (e) {
     console.warn({ article: id, r2: String(e) });
-    obj = null;
+    md = null;
   }
-  if (!obj) return page;
+  if (md === null) return page;
 
-  const md = await obj.text();
-  if (display === "full") {
-    page.bodyHtml = renderArticleMarkdown(md);
-  } else {
-    // Excerpt: text blocks only, no images (no republishing of media).
-    const ex = excerptMarkdown(md);
-    page.bodyHtml =
-      ex === null ? null : renderArticleMarkdown(ex, { images: false });
-  }
+  // Excerpt: text blocks only, no images (no republishing of media).
+  page.bodyHtml =
+    display === "full" ? renderArticleMarkdown(md) : renderArticleExcerpt(md);
   return page;
 }

@@ -86,7 +86,7 @@ function RootLayout() {
         <Outlet />
       </main>
       <footer className="border-t-2 py-3 font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
-        Summaries only. Follow the link for the full original.
+        Every story links to its original source.
       </footer>
     </div>
   );
