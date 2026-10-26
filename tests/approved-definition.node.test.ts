@@ -144,3 +144,16 @@ it("each pipeline file uses the shared approved condition as often as expected",
   }
   expect(found).toEqual(EXPECTED_USES);
 });
+
+it("ANY_BODY_APPROVED_SQL is interpolated once, in the primary tracker", () => {
+  // It accepts an approval of any body version; a reader-facing query must
+  // not pick it up by accident.
+  const found: Record<string, number> = {};
+  for (const file of sources("src")) {
+    const n =
+      readFileSync(file, "utf8").match(/\$\{ANY_BODY_APPROVED_SQL\}/g)
+        ?.length ?? 0;
+    if (n > 0) found[file] = n;
+  }
+  expect(found).toEqual({ "src/pipeline/evidence/primary.ts": 1 });
+});

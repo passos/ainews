@@ -673,7 +673,7 @@ Consolidated balance sheets, income statements, and cash flows are presented her
     // Pins current behavior of the recovery path (ANY_BODY_APPROVED_SQL, #84):
     // with no body_sha, the review is written for sha256(canonical), which is
     // not the article's current body, and the article is still linked.
-    // Switching this path to APPROVED_ARTICLE_SQL is an owner decision.
+    // Tightening this path is tracked in #103.
     it("auto section: recovering an orphan with no body_sha links it on an any-body approval", async () => {
       const orphan = await env.DB.prepare(
         `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
