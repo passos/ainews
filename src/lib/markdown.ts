@@ -44,7 +44,7 @@ const DROPPED_INLINE = new RegExp(
 );
 // `/>` closes only these (foreign content). For script, style and the rest
 // HTML ignores it: `<script/>x` makes x script text.
-const SELF_CLOSING_INLINE = /^(svg|math)$/i;
+const SELF_CLOSING = /^(svg|math)$/i;
 const DANGEROUS_OPEN = new RegExp(`<(${DANGEROUS})\\b`, "gi");
 // Void elements have no content: only the tag goes.
 const VOID_DANGEROUS = /^(embed|input|frame|link|meta|base)$/i;
@@ -64,8 +64,11 @@ function dropDangerous(html: string): string {
     const gt = html.indexOf(">", m.index);
     if (gt === -1) return out;
     let end = gt + 1;
-    if (!VOID_DANGEROUS.test(m[1]) && html[gt - 1] !== "/") {
-      const close = new RegExp(`</${m[1]}`, "gi");
+    if (
+      !VOID_DANGEROUS.test(m[1]) &&
+      !(SELF_CLOSING.test(m[1]) && html[gt - 1] === "/")
+    ) {
+      const close = new RegExp(`</${m[1]}(?=[\\s/>])`, "gi");
       close.lastIndex = end;
       const c = close.exec(html);
       const closeGt = c ? html.indexOf(">", c.index) : -1;
@@ -107,10 +110,7 @@ function cleanInline(children: Token[]): Token[] {
     const t = children[i];
     const open =
       t.type === "html_inline" ? DROPPED_INLINE.exec(t.content) : null;
-    if (
-      open &&
-      !(SELF_CLOSING_INLINE.test(open[1]) && /\/>\s*$/.test(t.content))
-    ) {
+    if (open && !(SELF_CLOSING.test(open[1]) && /\/>\s*$/.test(t.content))) {
       const close = new RegExp(`^<\\/${open[1]}\\s*>`, "i");
       while (
         i + 1 < children.length &&
