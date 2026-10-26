@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { listAdminDigests, publishDigest } from "../../server/admin/digests";
+import {
+  approveDigestCopy,
+  listAdminDigests,
+  publishDigest,
+} from "../../server/admin/digests";
 
 export const Route = createFileRoute("/admin/digests")({
   ssr: "data-only",
@@ -12,6 +16,7 @@ function AdminDigestsPage() {
   const { pending, published } = Route.useLoaderData();
   const router = useRouter();
   const [publishingId, setPublishingId] = useState<number | null>(null);
+  const [approvingId, setApprovingId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   async function handlePublish(digestId: number) {
@@ -26,6 +31,21 @@ function AdminDigestsPage() {
       );
     } finally {
       setPublishingId(null);
+    }
+  }
+
+  async function handleApproveCopy(digestId: number) {
+    setApprovingId(digestId);
+    setErrorMessage(null);
+    try {
+      await approveDigestCopy({ data: { digestId } });
+      await router.invalidate();
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to approve digest copy",
+      );
+    } finally {
+      setApprovingId(null);
     }
   }
 
@@ -86,16 +106,40 @@ function AdminDigestsPage() {
                       {d.itemCount} items
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    disabled={publishingId === d.id}
-                    onClick={() => handlePublish(d.id)}
-                    className="rounded bg-primary px-3 py-1 font-mono text-xs font-semibold text-primary-foreground shadow-xs hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
-                  >
-                    {publishingId === d.id
-                      ? "Publishing..."
-                      : "Publish to Site & RSS"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {d.hasCopy && d.copyApprovedAt === null ? (
+                      <button
+                        type="button"
+                        disabled={approvingId === d.id}
+                        onClick={() => handleApproveCopy(d.id)}
+                        className="rounded border px-3 py-1 font-mono text-xs font-semibold shadow-xs hover:bg-muted disabled:opacity-50 cursor-pointer"
+                      >
+                        {approvingId === d.id
+                          ? "Approving..."
+                          : "Approve intro & one-liners"}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {d.hasCopy ? "Copy: approved" : "Copy: none"}
+                      </span>
+                    )}
+                    {d.publishedAt === null ? (
+                      <button
+                        type="button"
+                        disabled={publishingId === d.id}
+                        onClick={() => handlePublish(d.id)}
+                        className="rounded bg-primary px-3 py-1 font-mono text-xs font-semibold text-primary-foreground shadow-xs hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                      >
+                        {publishingId === d.id
+                          ? "Publishing..."
+                          : "Publish to Site & RSS"}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        Published
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {d.intro && (
@@ -127,8 +171,13 @@ function AdminDigestsPage() {
                             </span>
                           </div>
                           <p className="text-foreground/80 leading-relaxed">
-                            {item.oneLiner}
+                            {item.summary || "—"}
                           </p>
+                          {item.oneLiner && (
+                            <p className="text-foreground/80 leading-relaxed">
+                              Model one-liner: {item.oneLiner}
+                            </p>
+                          )}
                         </li>
                       ))}
                     </ul>

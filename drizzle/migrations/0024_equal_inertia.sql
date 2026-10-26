@@ -1,0 +1,1 @@
+ALTER TABLE `digests` ADD `copy_approved_at` integer;

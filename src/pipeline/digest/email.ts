@@ -6,7 +6,10 @@ export interface DigestItemData {
   eventId: number;
   eventRevision?: number;
   title: string;
-  oneLiner: string;
+  /** Approved article summary at build time; absent on rows built before #114. */
+  summary?: string;
+  /** Model-written one_liner, or null when the model gave none (#114). */
+  oneLiner: string | null;
   sourceName: string;
   articleCount: number;
 }
@@ -24,6 +27,15 @@ export interface DigestEmailData {
 }
 
 export const DEFAULT_EMAIL_FROM = "digest@ioenv.com";
+
+// #114: oneLiner is null when the model wrote none; show the article summary
+// instead. Rows built before #114 have no summary and a non-null oneLiner.
+function itemLine(item: DigestItemData): string {
+  if (item.oneLiner === null || item.oneLiner === "") {
+    return item.summary ?? "";
+  }
+  return item.oneLiner;
+}
 
 function escapeHtml(str: string): string {
   return str
@@ -64,7 +76,7 @@ export function formatDigestEmail(
   for (const item of digest.items) {
     textLines.push(
       `- ${item.title}`,
-      `  ${item.oneLiner}`,
+      `  ${itemLine(item)}`,
       `  Source: ${item.sourceName} | View: ${base}/e/${item.eventId}`,
       "",
     );
@@ -84,7 +96,7 @@ export function formatDigestEmail(
         ${escapeHtml(item.title)}
       </a>
       <div style="margin: 4px 0; color: #333; font-size: 14px; line-height: 1.5;">
-        ${escapeHtml(item.oneLiner)}
+        ${escapeHtml(itemLine(item))}
       </div>
       <div style="font-size: 12px; color: #666; font-family: monospace;">
         Source: ${escapeHtml(item.sourceName)} · ${item.articleCount} report${item.articleCount > 1 ? "s" : ""}

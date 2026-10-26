@@ -5,6 +5,7 @@ export interface DigestItemView {
   eventId: number;
   eventRevision?: number;
   title: string;
+  /** The text readers see: the approved model one_liner, or else the approved article summary (#114). */
   oneLiner: string;
   sourceName: string;
   articleCount: number;
@@ -25,6 +26,19 @@ export interface RecentDigestLink {
   publishedAt: number;
 }
 
+// Shape of one entry in digests.items_json, as written by the digest builder.
+// Defined here because publication code must not import pipeline code (R1).
+// Rows built before #114 have no summary and mix model text into oneLiner.
+interface StoredDigestItem {
+  eventId: number;
+  eventRevision?: number;
+  title: string;
+  summary?: string;
+  oneLiner?: string | null;
+  sourceName: string;
+  articleCount: number;
+}
+
 interface RawDigestRow {
   id: number;
   kind: "daily" | "weekly";
@@ -35,6 +49,7 @@ interface RawDigestRow {
   published_at: number | null;
   intro: string;
   items_json: string;
+  copy_approved_at: number | null;
 }
 
 export interface FilteredDigestResult {
@@ -42,9 +57,12 @@ export interface FilteredDigestResult {
   suppressIntro: boolean;
 }
 
+// copyApproved: the admin approved this digest's model copy (#114). Without it,
+// the stored oneLiner is never read; items show the live approved summary.
 async function filterSurvivingItems(
   db: Db,
-  storedItems: DigestItemView[],
+  storedItems: StoredDigestItem[],
+  copyApproved: boolean,
 ): Promise<FilteredDigestResult> {
   if (storedItems.length === 0) return { items: [], suppressIntro: false };
   const eventIds = storedItems.map((it) => it.eventId);
@@ -111,20 +129,24 @@ async function filterSurvivingItems(
 
     if (revisionChanged) {
       suppressIntro = true;
-      survivingItems.push({
-        ...it,
-        eventRevision: info.revision,
-        title: info.firstTitle || it.title,
-        oneLiner: info.latestSummary || info.firstTitle || it.oneLiner,
-        articleCount: info.count,
-      });
-    } else {
-      survivingItems.push({
-        ...it,
-        title: info.firstTitle || it.title,
-        articleCount: info.count,
-      });
     }
+    const useModelLine =
+      copyApproved &&
+      !revisionChanged &&
+      typeof it.oneLiner === "string" &&
+      it.oneLiner.trim() !== "";
+    // Only DigestItemView fields; never spread the stored item, so neither the
+    // stored summary nor an unapproved oneLiner leaks into the view.
+    survivingItems.push({
+      eventId: it.eventId,
+      eventRevision: revisionChanged ? info.revision : it.eventRevision,
+      title: info.firstTitle || it.title,
+      oneLiner: useModelLine
+        ? (it.oneLiner as string)
+        : info.latestSummary || info.firstTitle,
+      sourceName: it.sourceName,
+      articleCount: info.count,
+    });
   }
 
   if (survivingItems.length < storedItems.length) {
@@ -132,6 +154,23 @@ async function filterSurvivingItems(
   }
 
   return { items: survivingItems, suppressIntro };
+}
+
+// The single gate for model copy on public pages and RSS (#114): the intro and
+// one_liners show only when the admin approved them and no item changed.
+async function publicDigestContent(
+  db: Db,
+  row: { intro: string; items_json: string; copy_approved_at: number | null },
+): Promise<{ intro: string; items: DigestItemView[] }> {
+  const copyApproved = row.copy_approved_at !== null;
+  const stored: StoredDigestItem[] = JSON.parse(row.items_json || "[]");
+  const { items, suppressIntro } = await filterSurvivingItems(
+    db,
+    stored,
+    copyApproved,
+  );
+  const intro = copyApproved && !suppressIntro ? row.intro : "";
+  return { intro, items };
 }
 
 export async function getDigest(
@@ -154,7 +193,8 @@ export async function getDigest(
       d.period_start AS period_start,
       d.published_at AS published_at,
       d.intro AS intro,
-      d.items_json AS items_json
+      d.items_json AS items_json,
+      d.copy_approved_at AS copy_approved_at
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
@@ -170,18 +210,12 @@ export async function getDigest(
   }
 
   const row = rows[0];
-  const storedItems: DigestItemView[] = JSON.parse(row.items_json || "[]");
-  const { items: survivingItems, suppressIntro } = await filterSurvivingItems(
-    db,
-    storedItems,
-  );
+  // Intro is hidden unless copy is approved and no item was retracted or modified
+  const { intro, items: survivingItems } = await publicDigestContent(db, row);
 
   if (survivingItems.length === 0) {
     return null;
   }
-
-  // If any item was retracted or modified, suppress pre-generated intro so retracted claims are not publicized
-  const intro = suppressIntro ? "" : row.intro;
 
   return {
     id: row.id,
@@ -225,8 +259,12 @@ export async function getRecentDigests(
 
   const results: RecentDigestLink[] = [];
   for (const r of rows) {
-    const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
-    const { items: surviving } = await filterSurvivingItems(db, rawItems);
+    const rawItems: StoredDigestItem[] = JSON.parse(r.items_json || "[]");
+    const { items: surviving } = await filterSurvivingItems(
+      db,
+      rawItems,
+      false,
+    );
     if (surviving.length > 0) {
       results.push({
         date: r.date,
@@ -278,7 +316,8 @@ export async function getDigestFeed(
       d.period_start AS period_start,
       d.published_at AS published_at,
       d.intro AS intro,
-      d.items_json AS items_json
+      d.items_json AS items_json,
+      d.copy_approved_at AS copy_approved_at
     FROM digests d
     JOIN industries i ON i.id = d.industry_id
     WHERE i.slug = ${slug}
@@ -291,14 +330,8 @@ export async function getDigestFeed(
 
   const digests: DigestFeedItem[] = [];
   for (const r of rows) {
-    const rawItems: DigestItemView[] = JSON.parse(r.items_json || "[]");
-    const { items: surviving, suppressIntro } = await filterSurvivingItems(
-      db,
-      rawItems,
-    );
+    const { intro, items: surviving } = await publicDigestContent(db, r);
     if (surviving.length > 0) {
-      // Suppress intro if any item in this digest was retracted or modified
-      const intro = suppressIntro ? "" : r.intro;
       digests.push({
         id: r.id,
         kind: r.kind,
