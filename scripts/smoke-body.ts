@@ -89,7 +89,7 @@ async function politeFetch(url: string) {
   const robots = robotsFromResponse(
     robotsRes?.res.status ?? 0,
     robotsRes ? new TextDecoder().decode(robotsRes.bytes) : null,
-    "PersonalNewsBot",
+    "DailyBot",
   );
   console.log(
     `robots.txt ${target.host}: HTTP ${robotsRes?.res.status ?? "network error"}, crawl-delay ${robots.crawlDelaySec ?? "none"}`,

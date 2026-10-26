@@ -121,7 +121,7 @@ export function parseRobots(txt: string, uaToken: string): Robots {
   };
 }
 
-/** "PersonalNewsBot/1.0" -> "personalnewsbot"; "*" stays. */
+/** "DailyBot/1.0" -> "dailybot"; "*" stays. */
 function productToken(value: string): string {
   return (value.split(/[\s/]/)[0] ?? "").toLowerCase();
 }

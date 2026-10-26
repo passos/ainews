@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { createServer } from "node:net";
+import { SITE_NAME } from "../src/lib/site.ts";
 
 const TIMEOUT_MS = 30_000;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -192,7 +193,7 @@ async function main() {
   const type = home.headers.get("content-type") ?? "";
   if (!type.includes("text/html")) fail(`GET / content-type is "${type}"`);
   if (!/<!doctype html/i.test(body)) fail("GET / has no <!doctype html>");
-  if (!body.includes("Personal News")) fail('GET / has no "Personal News"');
+  if (!body.includes(SITE_NAME)) fail(`GET / has no "${SITE_NAME}"`);
   const csp = home.headers.get("content-security-policy") ?? "";
   if (!csp.includes("default-src 'self'")) {
     fail(`GET / content-security-policy is "${csp}"`);

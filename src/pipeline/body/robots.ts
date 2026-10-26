@@ -7,7 +7,7 @@ import type { Robots } from "../../lib/robots";
 import type { PipelineEnv } from "../messages";
 
 /** Product token in USER_AGENT (src/lib/http.ts). */
-export const ROBOTS_UA_TOKEN = "PersonalNewsBot";
+export const ROBOTS_UA_TOKEN = "DailyBot";
 export const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
 /** After a network error or 5xx: ask again after this time. */
 export const ROBOTS_FAIL_TTL_MS = 60 * 60 * 1000;

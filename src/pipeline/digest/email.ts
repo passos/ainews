@@ -1,4 +1,5 @@
 import { isEnabled } from "../../lib/flags";
+import { SITE_NAME } from "../../lib/site";
 import type { PipelineEnv } from "../messages";
 
 export interface DigestItemData {
@@ -41,7 +42,7 @@ export function formatDigestEmail(
   const isWeekly = digest.kind === "weekly";
   const kindLabel = isWeekly ? "weekly digest" : "daily digest";
   const reviewSuffix = isUnpublished ? " (needs review)" : "";
-  const subject = `[Personal News] ${digest.industryName} ${kindLabel} — ${digest.periodStart}${reviewSuffix}`;
+  const subject = `[${SITE_NAME}] ${digest.industryName} ${kindLabel} — ${digest.periodStart}${reviewSuffix}`;
 
   const base = siteUrl.replace(/\/+$/, "");
   const digestUrl = `${base}/digest/${digest.industrySlug}/${digest.periodStart}${isWeekly ? "?kind=weekly" : ""}`;
@@ -49,7 +50,7 @@ export function formatDigestEmail(
 
   // Plain text version
   const textLines: string[] = [
-    `Personal News — ${digest.industryName} ${isWeekly ? "Weekly Digest" : "Daily Digest"}`,
+    `${SITE_NAME} — ${digest.industryName} ${isWeekly ? "Weekly Digest" : "Daily Digest"}`,
     `${isWeekly ? "Week of: " : "Date: "}${digest.periodStart}`,
     isUnpublished
       ? `Status: Pending Review (Approve at ${adminUrl})`
@@ -98,7 +99,7 @@ export function formatDigestEmail(
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 640px; margin: 0 auto; padding: 20px; color: #111;">
   <header style="border-bottom: 3px solid #111; padding-bottom: 12px; margin-bottom: 16px;">
     <h1 style="font-size: 20px; font-weight: 800; text-transform: uppercase; margin: 0;">
-      Personal News — ${escapeHtml(digest.industryName)}
+      ${SITE_NAME} — ${escapeHtml(digest.industryName)}
     </h1>
     <div style="font-size: 13px; color: #555; margin-top: 4px;">
       ${isWeekly ? "Weekly Digest" : "Daily Digest"} · ${isWeekly ? "Week of " : ""}${escapeHtml(digest.periodStart)}
@@ -120,7 +121,7 @@ export function formatDigestEmail(
 
   <footer style="border-top: 1px solid #ddd; padding-top: 12px; font-size: 12px; color: #666;">
     <p>
-      <a href="${digestUrl}" style="color: #0066cc;">View on Personal News</a>
+      <a href="${digestUrl}" style="color: #0066cc;">View on ${SITE_NAME}</a>
       ${isUnpublished ? ` · <a href="${adminUrl}" style="color: #c00; font-weight: bold;">Publish in Admin</a>` : ""}
     </p>
   </footer>

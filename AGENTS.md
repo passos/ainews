@@ -2,7 +2,7 @@
 
 给接手本仓库的编码 agent（Codex、Gemini/agy 或其他）。先读完本文件再动手。
 
-本项目是 **Personal News**：在一个 Cloudflare Worker 上自己找热点、自己写日报的新闻站，单管理员，多板块。
+本项目是 **Daily**：在一个 Cloudflare Worker 上自己找热点、自己写日报的新闻站，单管理员，多板块。
 生产站点 <https://news.ioenv.com>，仓库 `githonllc/ainews`，总 epic 是 #26。
 
 ---

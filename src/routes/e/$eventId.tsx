@@ -18,6 +18,7 @@ import { EarningsDecoderCard } from "../../components/artifacts/EarningsDecoderC
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import { getEvent, getEventSources } from "../../server/publication/api";
+import { SITE_NAME } from "../../lib/site";
 
 export async function loadEvent(
   params: { eventId: string },
@@ -44,8 +45,8 @@ export const Route = createFileRoute("/e/$eventId")({
     meta: [
       {
         title: loaderData
-          ? `${loaderData.data.title} — Personal News`
-          : "Personal News",
+          ? `${loaderData.data.title} — ${SITE_NAME}`
+          : SITE_NAME,
       },
     ],
   }),

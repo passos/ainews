@@ -1,7 +1,11 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { buildDailyDigest, buildDigest } from "../../src/pipeline/digest/build";
-import { sendDigestEmail } from "../../src/pipeline/digest/email";
+import { SITE_NAME } from "../../src/lib/site";
+import {
+  formatDigestEmail,
+  sendDigestEmail,
+} from "../../src/pipeline/digest/email";
 import {
   enqueueDueDigests,
   enqueueDueWeeklyDigests,
@@ -1488,5 +1492,27 @@ describe("buildWeeklyDigest", () => {
     );
     expect(weeklyMsgs).toHaveLength(1);
     expect(weeklyMsgs[0]?.periodStart).toBe("2026-10-12"); // Prior week Monday
+  });
+});
+
+describe("formatDigestEmail", () => {
+  it("names the site in the subject, text and html", () => {
+    const mail = formatDigestEmail(
+      {
+        id: 1,
+        industryId: 1,
+        industrySlug: "technology",
+        industryName: "Technology",
+        periodStart: "2026-10-26",
+        publishedAt: 1,
+        intro: "",
+        items: [],
+      },
+      "https://news.ioenv.com",
+    );
+    expect(mail.subject.startsWith(`[${SITE_NAME}] Technology`)).toBe(true);
+    expect(mail.text).toContain(`${SITE_NAME} — Technology`);
+    expect(mail.html).toContain(`View on ${SITE_NAME}`);
+    expect(mail.subject + mail.text + mail.html).not.toContain("Personal News");
   });
 });

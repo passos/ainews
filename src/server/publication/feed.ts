@@ -4,6 +4,7 @@ import { escapeXml } from "../../lib/xml";
 import { getSectionFeed } from "./articles";
 import type { ArticleView, Db, SectionFeed } from "./articles";
 import { getDigestFeed, type DigestFeed, type DigestFeedItem } from "./digests";
+import { SITE_NAME } from "../../lib/site";
 
 const x = escapeXml;
 
@@ -57,7 +58,7 @@ export function renderDigestFeed(feed: DigestFeed, siteUrl: string): string {
   const { section, digests } = feed;
   const base = siteUrl.replace(/\/+$/, "");
   const description = [
-    `Intelligence digests for ${section.name} from Personal News.`,
+    `Intelligence digests for ${section.name} from ${SITE_NAME}.`,
     section.disclaimer,
   ]
     .filter(Boolean)
@@ -66,7 +67,7 @@ export function renderDigestFeed(feed: DigestFeed, siteUrl: string): string {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0"><channel>',
-    `<title>${x(`Personal News — ${section.name} Digests`)}</title>`,
+    `<title>${x(`${SITE_NAME} — ${section.name} Digests`)}</title>`,
     `<link>${x(`${base}/s/${section.slug}`)}</link>`,
     `<description>${x(description)}</description>`,
     ...digests.map((d) =>
@@ -100,7 +101,7 @@ export function renderFeed(feed: SectionFeed, siteUrl: string): string {
   const { section, articles } = feed;
   const base = siteUrl.replace(/\/+$/, "");
   const description = [
-    `Approved ${section.name} stories from Personal News.`,
+    `Approved ${section.name} stories from ${SITE_NAME}.`,
     section.disclaimer,
   ]
     .filter(Boolean)
@@ -108,7 +109,7 @@ export function renderFeed(feed: SectionFeed, siteUrl: string): string {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0"><channel>',
-    `<title>${x(`Personal News — ${section.name}`)}</title>`,
+    `<title>${x(`${SITE_NAME} — ${section.name}`)}</title>`,
     `<link>${x(`${base}/s/${section.slug}`)}</link>`,
     `<description>${x(description)}</description>`,
     ...articles.map((a) => item(a, section.disclaimer)),

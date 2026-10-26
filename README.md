@@ -1,4 +1,4 @@
-# Personal News
+# Daily
 
 A news site that finds hot topics and writes daily reports by itself. One
 admin, several sections (Technology, Education, Industry, Finance). It is a

@@ -341,7 +341,7 @@ describe("collectSource", () => {
     const req = f.requests[0];
     expect(req.url).toBe(ARXIV);
     expect(req.headers.get("User-Agent")).toBe(USER_AGENT);
-    expect(USER_AGENT).toBe("PersonalNewsBot/1.0 (+https://news.ioenv.com)");
+    expect(USER_AGENT).toBe("DailyBot/1.0 (+https://news.ioenv.com)");
     expect(USER_AGENT).not.toMatch(
       /ClaudeBot|anthropic-ai|CCBot|ChatGPT-User/i,
     );

@@ -7,6 +7,7 @@ import { FollowButton } from "../../components/FollowButton";
 import { buttonVariants } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { getSection, getSectionSources } from "../../server/publication/api";
+import { SITE_NAME } from "../../lib/site";
 
 const searchSchema = z.object({
   // Unset and invalid both mean page 1; the URL is not rewritten for page 1.
@@ -31,8 +32,8 @@ export const Route = createFileRoute("/s/$section")({
     meta: [
       {
         title: loaderData
-          ? `${loaderData.data.section.name} — Personal News`
-          : "Personal News",
+          ? `${loaderData.data.section.name} — ${SITE_NAME}`
+          : SITE_NAME,
       },
     ],
     links: loaderData
@@ -40,7 +41,7 @@ export const Route = createFileRoute("/s/$section")({
           {
             rel: "alternate",
             type: "application/rss+xml",
-            title: `Personal News — ${loaderData.data.section.name}`,
+            title: `${SITE_NAME} — ${loaderData.data.section.name}`,
             href: `/rss/${loaderData.data.section.slug}.xml`,
           },
         ]

@@ -69,7 +69,7 @@
     "ACCESS_TEAM_DOMAIN": "https://ioenv.cloudflareaccess.com",
     "ACCESS_AUD": "694cd9c33b6579c778e70ff50da3539fca0c0610c2888203fd652c794bc5580c",
     "AI_GATEWAY_ID": "ainews",
-    "SEC_USER_AGENT": "Personal News simon.jinyu.liu@gmail.com",
+    "SEC_USER_AGENT": "Daily simon.jinyu.liu@gmail.com",
     // Web Analytics token; empty = no beacon script.
     "CF_BEACON_TOKEN": "",
     "COLLECT_ENABLED": "true",
@@ -109,7 +109,7 @@
         "ACCESS_TEAM_DOMAIN": "",
         "ACCESS_AUD": "",
         "AI_GATEWAY_ID": "ainews",
-        "SEC_USER_AGENT": "Personal News simon.jinyu.liu@gmail.com",
+        "SEC_USER_AGENT": "Daily simon.jinyu.liu@gmail.com",
         "CF_BEACON_TOKEN": "",
         "COLLECT_ENABLED": "false",
         "MODEL_CALLS_ENABLED": "false",
