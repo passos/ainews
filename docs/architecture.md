@@ -174,7 +174,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
   - **准入**：第 N 档的调用只有在花完之后剩余额度仍不少于 `floor(N)` 时才放行，即上面那条 `reserved + spent + est + floor(N) <= cap`。前面的档因此总能先用完自己的份额。只作用于 `gateway`；`workers_ai`（embed）和 `jina` 各有自己的上限，不分档。
   - **账本**：`llm_calls.tier`（可空整数，#116 迁移 ADD COLUMN；迁移前的旧行为 NULL，后台显示 "untiered"）。后台 `/admin/ledger` 按 `tier` 汇总当天 `gateway` 的花费。
   - **被拒**：和现在一样，行写回 `failed`、`error = 'budget_exceeded'`，`failures` 不变，不花钱。工作排到以后：artifacts / evidence / watch 的到期扫描会重新入队，`generate` 消费者对 `BudgetExceededError` 直接 ack（不再重试进 DLQ）；归组消费者对它重置 `requeue_count`，文章保持 `analyzed` 等下一轮。
-  - **已知行为**：日报导语（第 5 档）被拒时，当天日报不写导语，只显示已批准的标题和摘要，不会第二天补写。生产的日报在预算日开始（00:00 UTC）时生成，此时第 5 档放行。
+  - **已知行为**：日报导语（第 5 档）被拒时，当天日报不写导语，只显示已批准的标题和摘要，不会第二天补写。生产没有 `digest.timezone`，默认 UTC，所以日报在预算日开始（00:00 UTC）时生成，此时第 5 档放行。改成别的时区后，日报会在预算日中途生成，导语可能被第 5 档拒掉。
 - **归组**：`Q_GROUP` 并发 1，批内 `for…of` 顺序处理，不用 `Promise.all`。候选事件 = Vectorize 召回 ∪ D1 里 30 分钟内新建的事件（Vectorize 索引是异步的）。`event_articles.article_id` 唯一。
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：什么时候加 1、三种写法和全部写路径见本节下面的「事件 revision」。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
