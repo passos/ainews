@@ -410,6 +410,36 @@ describe("financial_facts.superseded_by follows amendment review (Issue #83)", (
     expect(first).toEqual(second);
   });
 
+  it("a filing never supersedes its own facts, but a later amendment hides all of them", async () => {
+    await resetPipeline();
+    const ctx = await seedBase();
+    // One amendment holds two facts in the same (company, concept, unit,
+    // period_end) group, e.g. a 3-month and a 9-month value.
+    const original = await seedFiling(ctx, "0000320193-24-000001", "10-Q", [
+      revenueUsd,
+    ]);
+    const a = await seedFiling(ctx, "0000320193-24-000002", "10-Q/A", [
+      revenueUsd,
+      revenueUsd,
+    ]);
+    const b = await seedFiling(ctx, "0000320193-24-000003", "10-Q/A", [
+      revenueUsd,
+    ]);
+    const [o1] = original.factIds;
+    const [a1, a2] = a.factIds;
+    const [b1] = b.factIds;
+
+    await decide(a.articleId, "approved");
+    expect(await supersededBy(a1)).toBeNull();
+    expect(await supersededBy(a2)).toBeNull();
+    expect(await supersededBy(o1)).toBe(a2);
+
+    await decide(b.articleId, "approved");
+    expect(await supersededBy(a1)).toBe(b1);
+    expect(await supersededBy(a2)).toBe(b1);
+    expect(await supersededBy(o1)).toBe(b1);
+  });
+
   it("re-ingest of an approved amendment with a changed body keeps the original hidden and the amendment non-public until re-approved", async () => {
     await resetPipeline();
     await env.DB.prepare(
