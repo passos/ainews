@@ -389,6 +389,7 @@ export async function groupArticle(
           .prepare(
             `UPDATE events SET revision = revision + 1, updated_at = ?1
              WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?2)
+               AND changes() = 1
                AND EXISTS (
                  SELECT 1 FROM reviews r
                  JOIN articles a ON a.id = r.article_id
