@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attributeSource,
   documentHost,
+  isSystemSource,
   readerSourceName,
 } from "../../src/lib/source-attribution";
 
@@ -18,6 +19,19 @@ describe("source attribution", () => {
     ["ftp host", "ftp://ftp.example.org/file.txt", "ftp.example.org"],
   ])("documentHost: %s", (_case, url, host) => {
     expect(documentHost(url)).toBe(host);
+  });
+
+  // Same match as SQL `feed_url LIKE 'system:%'` and assertNotSystemFeed.
+  it.each([
+    ["lower case", "system:x", true],
+    ["upper case", "SYSTEM:x", true],
+    ["mixed case", "System:x", true],
+    ["leading whitespace", "  system:x", true],
+    ["system: inside a URL", "https://system:x", false],
+    ["prefix before system:", "xsystem:", false],
+    ["real feed", "https://techwire.com/feed", false],
+  ])("isSystemSource: %s", (_case, feedUrl, expected) => {
+    expect(isSystemSource(feedUrl)).toBe(expected);
   });
 
   const DOC = "https://user:pw@WWW.NASA.gov:8443/report";
