@@ -1044,9 +1044,11 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     expect(await hitStatusFor(review)).toBe("pending_review");
   });
 
-  it("stores a hit in an auto non-Finance section as published", async () => {
+  // Ruling 1 (#85): a hit's summary and rationale are model-written text, so
+  // every section reviews it first, auto sections included.
+  it("stores a hit in an auto non-Finance section as pending_review", async () => {
     const auto = await seedIndustry("auto-section", "auto");
-    expect(await hitStatusFor(auto)).toBe("published");
+    expect(await hitStatusFor(auto)).toBe("pending_review");
   });
 
   it("does not call the judge again for an event revision that was already evaluated", async () => {
