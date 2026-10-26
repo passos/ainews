@@ -108,3 +108,33 @@ it("public code has no copy outside the whitelisted constants", () => {
   expect(files).toContain("src/server/publication/articles.ts");
   expect(inlineCopies(files)).toEqual({});
 });
+
+// How often each pipeline file interpolates the shared condition. The scan
+// above stops copies from coming back; this stops the condition from being
+// deleted: a file that drops one use no longer matches its count. A new use
+// (or a new file) needs a new row on purpose.
+const EXPECTED_USES: Record<string, number> = {
+  "src/pipeline/artifacts/build.ts": 2,
+  "src/pipeline/artifacts/schedule.ts": 1,
+  "src/pipeline/ask/answer.ts": 1,
+  "src/pipeline/digest/build.ts": 15,
+  "src/pipeline/evidence/build.ts": 1,
+  "src/pipeline/evidence/diff.ts": 2,
+  "src/pipeline/evidence/primary.ts": 4,
+  "src/pipeline/evidence/schedule.ts": 1,
+  "src/pipeline/group/group-article.ts": 3,
+  "src/pipeline/watch/evaluate.ts": 1,
+  "src/pipeline/watch/schedule.ts": 1,
+};
+
+it("each pipeline file uses the shared approved condition as often as expected", () => {
+  const found: Record<string, number> = {};
+  for (const file of sources("src/pipeline")) {
+    const n =
+      readFileSync(file, "utf8").match(
+        /\$\{(?:APPROVED_ARTICLE_SQL|approvedArticleWhere)\}/g,
+      )?.length ?? 0;
+    if (n > 0) found[file] = n;
+  }
+  expect(found).toEqual(EXPECTED_USES);
+});
