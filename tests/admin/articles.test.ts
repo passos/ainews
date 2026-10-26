@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   changeArticleIndustry,
   createCorrection,
+  getArticle,
+  parseReanalyzeInput,
   reanalyzeArticle,
   updateArticleOverride,
 } from "../../src/server/admin/ops";
@@ -275,19 +277,28 @@ describe("reanalyzeArticle (#81)", () => {
       // `'a:' || ?1` would yield "a:1.0" and never match a production key.
       .bind(`analyze:${id}:abc:v1`, `write:${id}:abc:v1`, `write:${id}:old:v1`)
       .run();
+    // The other bind form: SQL concatenation of a number-bound id (what the
+    // old DELETE matched). Local D1 renders it as "analyze:1.0:x".
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES ('analyze:' || ?1 || ':x', 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              ('write:' || ?1 || ':x', 'write', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0)`,
+    )
+      .bind(id)
+      .run();
     await env.DB.prepare(
       "INSERT INTO budgets (day, channel, cap_micros, reserved_micros) VALUES ('2026-10-26', 'gateway', 1900000, 500)",
     ).run();
     const ledger = () =>
       env.DB.prepare(
         `SELECT logical_key, status, attempt, failures FROM llm_calls
-         WHERE logical_key LIKE ?1 ORDER BY logical_key`,
+         WHERE logical_key LIKE ?1 OR logical_key LIKE ?2 ORDER BY logical_key`,
       )
-        .bind(`%:${id}:%`)
+        .bind(`%:${id}:%`, `%:${id}.0:%`)
         .all()
         .then((r) => r.results);
     const before = await ledger();
-    expect(before).toHaveLength(3);
+    expect(before).toHaveLength(5);
 
     const { sent, q } = queue();
     await reanalyzeArticle(env.DB, q, {
@@ -438,13 +449,22 @@ describe("reanalyzeArticle (#81)", () => {
     )
       .bind(`analyze:${artId}:w1:v1`, `write:${artId}:w1:v1`)
       .run();
+    // The other bind form: SQL concatenation of a number-bound id (what the
+    // old DELETE matched). Local D1 renders it as "analyze:1.0:x".
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES ('analyze:' || ?1 || ':x', 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              ('write:' || ?1 || ':x', 'write', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0)`,
+    )
+      .bind(artId)
+      .run();
     const rows = async () => ({
       calls: (
         await env.DB.prepare(
           `SELECT logical_key, status FROM llm_calls
-           WHERE logical_key LIKE ?1 ORDER BY logical_key`,
+           WHERE logical_key LIKE ?1 OR logical_key LIKE ?2 ORDER BY logical_key`,
         )
-          .bind(`%:${artId}:%`)
+          .bind(`%:${artId}:%`, `%:${artId}.0:%`)
           .all()
       ).results,
       analyses: (
@@ -456,7 +476,7 @@ describe("reanalyzeArticle (#81)", () => {
       ).results,
     });
     const before = await rows();
-    expect(before.calls).toHaveLength(2);
+    expect(before.calls).toHaveLength(4);
     expect(before.analyses).toHaveLength(2);
 
     await reanalyzeArticle(env.DB, env.Q_INGEST, {
@@ -501,5 +521,48 @@ describe("reanalyzeArticle (#81)", () => {
     ).toEqual({ stage: "grouped", stage_updated_at: 0, requeue_count: 3 });
     expect(await revisionOf(eventId!)).toBe(1);
     expect(sent).toEqual([]);
+  });
+
+  it("the admin detail lists analyses newest first, the higher id first on a tie", async () => {
+    const { id } = await seed81({ stage: "analyzed", bodySha: "sha-o" });
+    for (const pv of ["v1", "v2", "v3"]) {
+      await env.DB.prepare(
+        `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+         VALUES (?1, ?2, '{}', 'news', '{}', 50, 0, 1000)`,
+      )
+        .bind(id, pv)
+        .run();
+    }
+    const detail = await getArticle(env.DB, id);
+    expect(detail!.analyses.map((a) => a.promptVersion)).toEqual([
+      "v3",
+      "v2",
+      "v1",
+    ]);
+  });
+
+  describe("parseReanalyzeInput", () => {
+    const status = (v: unknown) => {
+      try {
+        parseReanalyzeInput(v);
+        return null;
+      } catch (e) {
+        return e instanceof Response ? e.status : -1;
+      }
+    };
+    it("accepts a positive integer id with a known stage", () => {
+      expect(
+        parseReanalyzeInput({ articleId: 3, expectedStage: "analyzed" }),
+      ).toEqual({ articleId: 3, expectedStage: "analyzed" });
+    });
+    it("rejects a payload from an older client bundle (no expectedStage) with 400", () => {
+      expect(status({ articleId: 3 })).toBe(400);
+    });
+    it("rejects an unknown stage, a non-integer id, a non-positive id and a non-object with 400", () => {
+      expect(status({ articleId: 3, expectedStage: "nope" })).toBe(400);
+      expect(status({ articleId: 1.5, expectedStage: "analyzed" })).toBe(400);
+      expect(status({ articleId: 0, expectedStage: "analyzed" })).toBe(400);
+      expect(status(3)).toBe(400);
+    });
   });
 });
