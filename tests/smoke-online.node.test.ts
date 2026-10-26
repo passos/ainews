@@ -1,5 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { spawnSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +24,10 @@ const manifest: SmokeManifest = {
 };
 const options: SmokeOptions = { baseUrl: base, mode: "routes", online: true };
 const notice = "Not investment advice";
+// Mirrors the real routes: digest items are ol > li with an /e/$id link, and
+// watch hits are one article each with an /e/$id link.
+const digestItem = '<ol><li><a href="/e/7">Event</a></li></ol>';
+const watchHit = '<article><a href="/e/7">Event</a></article>';
 const temps: string[] = [];
 function temporary() {
   const p = mkdtempSync(join(tmpdir(), "ainews-smoke-"));
@@ -52,7 +59,7 @@ function html(path: string): string {
     ${sections.map((s) => `<a href="/s/${s}">${s}</a>`).join("")}
     <div data-section="${sections.includes(section) ? section : "technology"}"><h1>${heading}</h1>
     <p>${notice}</p><h2>Timeline</h2><h2>Material Developments</h2><p>Criterion for Update:</p>
-    <a href="/rss/w/chip-watch.xml">RSS Feed</a><h2>Top Developments</h2></div></main></body></html>`;
+    <a href="/rss/w/chip-watch.xml">RSS Feed</a>${watchHit}<h2>Top Developments</h2>${digestItem}</div></main></body></html>`;
 }
 function rss(path: string, items = true): string {
   const watch = path.startsWith("/rss/w/");
@@ -100,7 +107,12 @@ function cli(args: string[], cwd = temporary(), preload?: string) {
     { cwd, encoding: "utf8", timeout: 5000 },
   );
 }
-async function rejectsBody(path: string, body: string, opts = options) {
+async function rejectsBody(
+  path: string,
+  body: string,
+  opts = options,
+  code?: string,
+) {
   const type = path.startsWith("/rss/") ? "application/rss+xml" : "text/html";
   const result = await runSmoke(opts, {
     fetch: fake((p) =>
@@ -110,6 +122,7 @@ async function rejectsBody(path: string, body: string, opts = options) {
     ),
   });
   expect(result.ok).toBe(false);
+  if (code) expect(result.cases.find((c) => c.path === path)!.code).toBe(code);
 }
 const argBase = ["--base-url", base];
 
@@ -671,3 +684,191 @@ test("timeouts_caps_and_errors_never_print_sensitive_text", async () => {
   expect(output).toContain("REQUEST_TIMEOUT");
   expect(output).not.toContain(sentinel);
 }, 100_000);
+
+test("each_page_guard_rejects_a_minimal_counterexample", async () => {
+  const withManifest = { ...options, manifest };
+  await rejectsBody(
+    "/",
+    html("/").replace('<a href="/s/finance">finance</a>', ""),
+    options,
+    "HTML_NAVIGATION",
+  );
+  const tech = rss("/rss/technology.xml");
+  await rejectsBody(
+    "/rss/technology.xml",
+    tech.replace("Personal News — technology", "Personal News — education"),
+    options,
+    "RSS_TITLE",
+  );
+  await rejectsBody(
+    "/rss/technology.xml",
+    tech.replace(
+      `<link>${base}/s/technology</link>`,
+      "<link>https://outside.example/s/technology</link>",
+    ),
+    options,
+    "RSS_LINK",
+  );
+  for (const link of [
+    "javascript:alert(1)",
+    "https://user:pass@outside.example/article",
+  ])
+    await rejectsBody(
+      "/rss/technology.xml",
+      tech.replace("https://outside.example/article", link),
+      options,
+      "RSS_LINK",
+    );
+  await rejectsBody(
+    "/w/chip-watch",
+    html("/w/chip-watch").replace(
+      'href="/rss/w/chip-watch.xml"',
+      'href="/rss/w/other-watch.xml"',
+    ),
+    withManifest,
+    "HTML_WATCH",
+  );
+  await rejectsBody(
+    "/digest/technology/2024-02-29",
+    html("/digest/technology/2024-02-29").replace(
+      "· 2024-02-29",
+      "· 2024-02-28",
+    ),
+    withManifest,
+    "HTML_DIGEST",
+  );
+  await rejectsBody(
+    "/e/7",
+    html("/e/7").replace('<div data-section="technology">', "<div>"),
+    withManifest,
+    "HTML_EVENT",
+  );
+  for (const attr of ["hidden", 'aria-hidden="true"'])
+    await rejectsBody(
+      "/s/finance",
+      html("/s/finance").replace(
+        `<p>${notice}</p>`,
+        `<p ${attr}>${notice}</p>`,
+      ),
+      options,
+      "FINANCE_NOTICE",
+    );
+});
+
+test("launch_rejects_empty_digest_and_watch_but_routes_still_passes", async () => {
+  const daily = "/digest/technology/2024-02-29",
+    weekly = "/digest/industry/2024-02-26?kind=weekly",
+    watch = "/w/chip-watch";
+  const empty: [string, string, string][] = [
+    [
+      daily,
+      html(daily).replace(
+        digestItem,
+        "<p>No approved events for this day.</p>",
+      ),
+      "EMPTY_DIGEST",
+    ],
+    [weekly, html(weekly).replace(digestItem, ""), "EMPTY_DIGEST"],
+    [
+      daily,
+      html(daily).replace(
+        '<li><a href="/e/7">',
+        '<li><a href="https://outside.example/e/7">',
+      ),
+      "EMPTY_DIGEST",
+    ],
+    [
+      watch,
+      html(watch).replace(
+        watchHit,
+        "<div>No material developments recorded yet.</div>",
+      ),
+      "EMPTY_WATCH",
+    ],
+  ];
+  for (const [path, body, code] of empty) {
+    await rejectsBody(
+      path,
+      body,
+      { ...options, mode: "launch", manifest },
+      code,
+    );
+    const routes = await runSmoke(
+      { ...options, manifest },
+      {
+        fetch: fake((p) =>
+          p === path
+            ? new Response(body, { headers: { "content-type": "text/html" } })
+            : undefined,
+        ),
+      },
+    );
+    expect(routes.ok).toBe(true);
+    expect(routes.contentReadiness).toBe("unchecked");
+  }
+});
+
+async function serve(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): Promise<{ server: Server; origin: string }> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const { port } = server.address() as AddressInfo;
+  return { server, origin: `http://127.0.0.1:${port}` };
+}
+async function close(server: Server) {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+test("real_socket_redirect_never_reaches_poison_server", async () => {
+  let poisonHits = 0;
+  const poison = await serve((_req, res) => {
+    poisonHits++;
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("poison");
+  });
+  const site = await serve((req, res) => {
+    if (req.url === "/")
+      res.writeHead(302, { location: `${poison.origin}/token` });
+    else res.writeHead(404);
+    res.end();
+  });
+  try {
+    const r = await runSmoke({
+      baseUrl: site.origin,
+      mode: "routes",
+      online: true,
+    });
+    expect(poisonHits).toBe(0);
+    expect(r.ok).toBe(false);
+    expect(r.cases.find((c) => c.path === "/")!.code).toBe("HTTP_STATUS");
+  } finally {
+    await close(site.server);
+    await close(poison.server);
+  }
+});
+
+test("real_socket_endless_body_times_out", async () => {
+  const site = await serve((req, res) => {
+    if (req.url === "/") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.write("<!DOCTYPE html>");
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  try {
+    const r = await runSmoke(
+      { baseUrl: site.origin, mode: "routes", online: true },
+      { requestTimeoutMs: 200 },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.cases.find((c) => c.path === "/")!.code).toBe("REQUEST_TIMEOUT");
+  } finally {
+    await close(site.server);
+  }
+}, 5000);

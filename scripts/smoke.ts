@@ -164,7 +164,20 @@ function text(html: string): string {
 function notice(html: string): boolean {
   return /\bNot investment advice\b/i.test(text(html));
 }
-function htmlCheck(body: string, path: string, baseUrl: string) {
+function eventLinked(nodes: ReturnType<typeof visible>[], baseUrl: string) {
+  return nodes.some((n) =>
+    n
+      .querySelectorAll("a[href]")
+      .some((a) =>
+        /^\/e\/[1-9]\d*$/.test(
+          localLink(a.getAttribute("href")!, baseUrl) ?? "",
+        ),
+      ),
+  );
+}
+function htmlCheck(body: string, path: string, o: SmokeOptions) {
+  const baseUrl = o.baseUrl,
+    launch = o.mode === "launch";
   requireThat(/^\s*<!doctype html\s*>/i.test(body), "HTML_FORMAT");
   const dom = visible(body),
     main = dom.querySelector("main"),
@@ -206,6 +219,12 @@ function htmlCheck(body: string, path: string, baseUrl: string) {
           /Top Developments/i.test(main.structuredText),
         "HTML_DIGEST",
       );
+    // Launch needs at least one item: the route renders ol > li per item.
+    if (path.startsWith("/digest/") && launch)
+      requireThat(
+        eventLinked(main.querySelectorAll("ol > li"), baseUrl),
+        "EMPTY_DIGEST",
+      );
   } else if (path.startsWith("/e/")) {
     requireThat(
       main
@@ -231,6 +250,12 @@ function htmlCheck(body: string, path: string, baseUrl: string) {
           ),
       "HTML_WATCH",
     );
+    // Launch needs at least one hit: the route renders one article per hit.
+    if (launch)
+      requireThat(
+        eventLinked(main.querySelectorAll("article"), baseUrl),
+        "EMPTY_WATCH",
+      );
   } else if (path === "/funding") {
     // #23 renders ul/li cards under section[aria-label="Rounds"], or one empty
     // paragraph there; it renders no table.
@@ -403,11 +428,11 @@ function validateResponse(
     "CONTENT_TYPE",
   );
   if (xml) rssCheck(body, path, o);
-  else htmlCheck(body, path, o.baseUrl);
+  else htmlCheck(body, path, o);
 }
 export async function runSmoke(
   options: SmokeOptions,
-  deps: { fetch?: typeof fetch } = {},
+  deps: { fetch?: typeof fetch; requestTimeoutMs?: number } = {},
 ): Promise<SmokeResult> {
   const o = normalized(options),
     paths = buildSmokePlan(o);
@@ -427,6 +452,7 @@ export async function runSmoke(
   if (!o.online)
     return { ok: true, executed: false, contentReadiness: "unchecked", cases };
   const fetcher = deps.fetch ?? globalThis.fetch,
+    requestLimit = deps.requestTimeoutMs ?? 10_000,
     deadline = Date.now() + 120_000;
   let next = 0;
   async function worker() {
@@ -476,10 +502,12 @@ export async function runSmoke(
               () =>
                 reject(
                   new SmokeError(
-                    remaining <= 10_000 ? "TOTAL_TIMEOUT" : "REQUEST_TIMEOUT",
+                    remaining <= requestLimit
+                      ? "TOTAL_TIMEOUT"
+                      : "REQUEST_TIMEOUT",
                   ),
                 ),
-              Math.min(10_000, remaining),
+              Math.min(requestLimit, remaining),
             );
           }),
         ]);

@@ -107,7 +107,7 @@ only confirms a valid plan. Replace `/ABS/WORKTREE` with your absolute worktree:
 node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode routes --dry-run
 ```
 
-The #26 read-only GET checks are already authorized for this session and need no repeated confirmation (GET requests still have cost). Flag changes, paid model/Jina calls, production writes, source lists/thresholds and public UI screenshots keep their existing explicit approvals. Run routes or launch:
+Every online read-only check must name, in its approval record, who authorized it and on which date (GET requests still have cost). Flag changes, paid model/Jina calls, production writes, source lists/thresholds and public UI screenshots keep their existing explicit approvals. Run routes or launch:
 
 ```sh
 npm --prefix /ABS/WORKTREE run smoke -- --base-url https://news.ioenv.com --mode routes --online

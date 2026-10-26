@@ -4,12 +4,12 @@
 
 ## 操作分级与审批单
 
-所有 `/ABS/WORKTREE`、`/ABS/SCRATCH`、`/ABS/EVIDENCE` 必须替换为本次独立工作树和私有证据目录的绝对路径。命令未执行。每份审批点名 environment、SHA/version、资源、影响、费用上限、恢复点/回退、owner、UTC窗口。#26 已授权的只读GET/SELECT/审计在本会话持续有效，不为每条只读命令重复向owner确认；flags、付费模型/Jina、生产写、信源名单/阈值、公开UI截图等既有项目明确批准边界不变，未获批准的只做 local-only。
+所有 `/ABS/WORKTREE`、`/ABS/SCRATCH`、`/ABS/EVIDENCE` 必须替换为本次独立工作树和私有证据目录的绝对路径。命令未执行。每份审批点名 environment、SHA/version、资源、影响、费用上限、恢复点/回退、owner、UTC窗口。每次线上只读检查（GET/SELECT/审计）都要在审批单里写明是谁、哪天授权的；审批单没写授权人和日期就不执行；flags、付费模型/Jina、生产写、信源名单/阈值、公开UI截图等既有项目明确批准边界不变，未获批准的只做 local-only。
 
 | 类别 | 权限与影响 | 证据范围 |
 |---|---|---|
 | local-only | 无生产凭证；不复制 `.env*`/`.dev.vars*`，不继承生产凭证；Node 24、已安装锁定依赖 | exit、测试计数、bundle大小 |
-| remote-read-only | 已授权reader（授权在本会话持续）；GET/查询也有访问和请求成本 | SHA、job结论、version、schema对象计数、聚合数值、固定错误码 |
+| remote-read-only | 已授权reader（每次在审批单写明授权人和日期）；GET/查询也有访问和请求成本 | SHA、job结论、version、schema对象计数、聚合数值、固定错误码 |
 | owner-mutation | 单项具体批准后执行一次；不隐式重试 | 前后计数、指定版本、secret名称/日期；失败先核实际状态 |
 
 凭证由owner在受控会话提供，不写入命令、临时文件或报告，不自动加载 `.env.prod`。禁止 tracing、环境/headers/raw error/request/response/prompt/body/IP/JWT/cookie 输出；不下载部署payload日志，不公开完整binding dump。私有原件先脱敏，公开报告仅保留上表字段。
@@ -67,11 +67,26 @@ node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 输出在受控端过滤：version去作者等个人字段；secret仅名称/日期，不能证明值正确。五个live flags只从owner批准的控制面读取五个名字和值，不下载可能带secret的Worker bundle。Gateway limit/credits/channel逐项查官方控制面；无权限记未知，不用付费调用探路。
 以下各查询由reader一次一条SELECT，以 `--command` 传入；SQL可来自审定的绝对路径文件，但必须读成字符串再传，**不得用 `--file`**（Q3、Q5含多条语句，拆成独立文件逐条执行）：
 
+**必须先做预检**（每个SQL文件、每次执行前都做，不能省）：去掉 `--` 注释行和空行后，文件只能有一个分号且在末尾，第一行以 `SELECT` 开头，不含写入、改结构或事务关键字。输出不是 `PRECHECK_OK` 就停，不执行下一条命令：
+
 ```sh
-(cd /ABS/WORKTREE && npx --no-install wrangler d1 execute DB --remote --json --config /ABS/WORKTREE/wrangler.jsonc --command "$(cat /ABS/EVIDENCE/audit-q1.sql)")
+SQL_FILE=/ABS/EVIDENCE/audit-q1.sql
+body=$(grep -v '^[[:space:]]*--' "$SQL_FILE" | grep -v '^[[:space:]]*$')
+semis=$(printf '%s\n' "$body" | tr -cd ';' | wc -c | tr -d ' ')
+if [ "$semis" = 1 ] \
+  && printf '%s\n' "$body" | tail -n 1 | grep -qE ';[[:space:]]*$' \
+  && printf '%s\n' "$body" | head -n 1 | grep -qiE '^[[:space:]]*SELECT([[:space:]]|$)' \
+  && ! printf '%s\n' "$body" | grep -qiwE 'INSERT|UPDATE|DELETE|REPLACE|UPSERT|DROP|ALTER|CREATE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX|ANALYZE|BEGIN|COMMIT|ROLLBACK|SAVEPOINT'
+then echo PRECHECK_OK; else echo PRECHECK_FAIL; fi
 ```
 
-远端 `--file` 走bulk import，只回 `Total queries executed/Rows read/Rows written/Database size` 汇总（已核 `/private/tmp/ainews-26-production-audit/initial.json`：success=true、rows_written=0、无业务行），不是查询证据；`--command` 才返回查询列（同目录 `readiness.json` 的 `metric/data`）。只SELECT，不自动repair/reconcile，不调用后台POST：
+预检通过后，在同一个shell里执行同一个文件：
+
+```sh
+(cd /ABS/WORKTREE && npx --no-install wrangler d1 execute DB --remote --json --config /ABS/WORKTREE/wrangler.jsonc --command "$(cat "$SQL_FILE")")
+```
+
+远端 `--file` 走bulk import，只回 `Total queries executed/Rows read/Rows written/Database size` 汇总（**假设，待补证据**：只在一台机器的临时文件里观察过，原件没有进入issue；[#26 的审计评论](https://github.com/githonllc/ainews/issues/26#issuecomment-6411383128) 只记录了只读查询 success=true、rows_written=0，不能证明 `--file` 的返回形状），不是查询证据；`--command` 才返回查询列（同样是**假设，待补证据**）。只SELECT，不自动repair/reconcile，不调用后台POST：
 
 ```sql
 -- Q1: exact current-body review; seed is not production evidence.
@@ -127,7 +142,7 @@ Q1/Q2不导出feed URL；私有端逐行匹配已批准dossier，报告仅源id/
 
 ## Remote-read-only：smoke routes / launch
 
-已授权的#26只读GET，本会话内无需逐次再确认；示例Access origin须先核实际值。仅匿名GET，拒绝跟随跳转，不发凭证、不调server functions/Ask/反馈，不访问外部文章/SEC，不自动探索链接或修复空内容。
+每次线上只读GET都要在审批单里写明是谁、哪天授权的；示例Access origin须先核实际值。仅匿名GET，拒绝跟随跳转，不发凭证、不调server functions/Ask/反馈，不访问外部文章/SEC，不自动探索链接或修复空内容。
 
 ```sh
 node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode routes --access-origin https://ioenv.cloudflareaccess.com --online
@@ -135,7 +150,7 @@ node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode lau
 ```
 
 manifest仅含 `eventIds`正safe整数数组、`watchSlugs`小写字母数字连字符数组、`digests`数组（section四slug之一、真实YYYY-MM-DD、kind daily/weekly）、`funding`布尔（默认false）；数组默认空，重复路径去重，额外key拒绝。owner从真实公开记录选值，观察UTC时间及选择依据存相邻私有证据单，禁止填fixture ID/日期。日期不要求今天。无任意URL；manifest路径必须绝对。
-`routes`可检查空RSS，但输出 `contentReadiness=unchecked`；`launch`必须四section RSS非空、至少event/watch/Technology daily/任一weekly/funding。#23未合入时funding会失败；#24是后台证据，不编公开URL。失败或不完整exit1，参数非法exit2；dry-run exit0不代表请求通过。`contentReadiness=checked`仅表示本次launch覆盖通过，不能代替M1–M4。每请求10s含流、全程120s、并发2、64case、实际读取每体2MiB，无重试。正常页面精确200，missing精确404；admin只接受401/403或指定HTTPS Access origin的302/303/307，200登录壳失败。这只证明匿名不可读，不证明管理员名单/server function鉴权。
+`routes`可检查空RSS，但输出 `contentReadiness=unchecked`；`launch`必须四section RSS非空、至少event/watch/Technology daily/任一weekly/funding，且每个digest页至少1条、每个watch页至少1次命中（否则 `EMPTY_DIGEST`/`EMPTY_WATCH`）。#23未合入时funding会失败；#24是后台证据，不编公开URL。失败或不完整exit1，参数非法exit2；dry-run exit0不代表请求通过。`contentReadiness=checked`仅表示本次launch覆盖通过，不能代替M1–M4。每请求10s含流、全程120s、并发2、64case、实际读取每体2MiB，无重试。正常页面精确200，missing精确404；admin只接受401/403或指定HTTPS Access origin的302/303/307，200登录壳失败。这只证明匿名不可读，不证明管理员名单/server function鉴权。
 
 ## M1 financial：三方对账
 
