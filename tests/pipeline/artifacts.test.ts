@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { generateEventArtifacts } from "../../src/pipeline/artifacts/build";
+import {
+  generateEventArtifacts,
+  markArtifactsEvaluated,
+} from "../../src/pipeline/artifacts/build";
 import { enqueueDueArtifacts } from "../../src/pipeline/artifacts/schedule";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
@@ -4022,8 +4025,21 @@ describe("artifact scheduling (#92)", () => {
     expect(await evaluatedRevision(id)).toBe(0);
   });
 
-  // P7 needs the new export markArtifactsEvaluated (src/pipeline/artifacts/build.ts).
-  // At this HEAD it can only fail by a missing-symbol compile error, so it is
-  // written together with the export in phase 2.
-  it.todo("markArtifactsEvaluated never moves the marker backwards");
+  it("markArtifactsEvaluated never moves the marker backwards", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("p7");
+    const id = await seedDueEvent(s, 1000);
+
+    await markArtifactsEvaluated(env.DB, id, 3);
+    expect(await evaluatedRevision(id)).toBe(3);
+
+    await markArtifactsEvaluated(env.DB, id, 2);
+    expect(await evaluatedRevision(id)).toBe(3);
+    const row = await env.DB.prepare(
+      "SELECT updated_at, revision FROM events WHERE id = ?1",
+    )
+      .bind(id)
+      .first<{ updated_at: number; revision: number }>();
+    expect(row).toEqual({ updated_at: 1000, revision: 1 });
+  });
 });

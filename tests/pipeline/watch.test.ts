@@ -1098,7 +1098,7 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     const old = now - 2 * 3600 * 1000;
     const created: number[] = [];
     for (let i = 0; i < 21; i++) {
-      // Distinct updated_at: the newest 20 come first.
+      // Never enqueued yet: the 20 lowest ids come first.
       const eventId = await seedEvent(1, 1, old + i);
       await seedApproved(eventId, 1, `Marker article ${i}`, old + i);
       created.push(eventId);
