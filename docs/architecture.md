@@ -167,7 +167,14 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 ## 6. 幂等、并发与预算
 
 - **模型调用账本** `llm_calls`：`logical_key` 唯一，状态 `pending → in_flight → completed | failed | unknown`，带 `lease_expires_at`。租约过期的行可以用条件 `UPDATE` 接管；调用已发出、结果没落库的标 `unknown`，后台人工核账。承诺的是"不重复发起、可以恢复"，不是"恰好一次付费"。
-- **预算预留**：调用前用一条条件语句预留 `UPDATE budgets SET reserved = reserved + ? WHERE day = ? AND channel = ? AND reserved + spent + ? <= cap`。影响行数为 0 就不调用。AI Gateway 的 spend limit 是最终一致的，只作外层兜底（**已验证**："Spend limits are eventually consistent"）。
+- **预算预留**：调用前用一条条件语句预留 `UPDATE budgets SET reserved = reserved + ? WHERE day = ? AND channel = ? AND reserved + spent + ? + ?floor <= cap`。`?floor` 是这一档的地板（见下一条「gateway 五档」），非 `gateway` 渠道恒为 0。影响行数为 0 就不调用。AI Gateway 的 spend limit 是最终一致的，只作外层兜底（**已验证**："Spend limits are eventually consistent"）。
+- **gateway 五档**（#116 新增）：`gateway` 的每日额度按调用用途分五档，档位挂在模型客户端上（`createModelClient` 的必填选项 `tier`），不挂在槽位、请求或 logical key 上，所以不改 `request_json`、`promptVersion` 和已有 key。
+  1 = 预筛评分摘要、归组（含 `body` 的记账）；2 = Story Brief 与三档解释；3 = 论断与证据、后台 Ask；4 = 学习材料、板块编辑产品、watch；5 = 日报导语（日报、周报）与 discover。
+  - **保留额**：第 1–4 档各有一个保留额 `R1..R4`（整数微美元，默认 `R1 = 500000, R2 = 400000, R3 = 200000, R4 = 100000`，写在 `DEFAULT_TIER_RESERVES`；`settings` 键 `budget.tier_reserves` 可选，有就覆盖，没有就用默认，不写迁移）。第 N 档的地板 `floor(N) = R1 + … + R(N−1)`，所以第 1 档的地板是 0，第 5 档的地板是 `R1 + R2 + R3 + R4`。
+  - **准入**：第 N 档的调用只有在花完之后剩余额度仍不少于 `floor(N)` 时才放行，即上面那条 `reserved + spent + est + floor(N) <= cap`。前面的档因此总能先用完自己的份额。只作用于 `gateway`；`workers_ai`（embed）和 `jina` 各有自己的上限，不分档。
+  - **账本**：`llm_calls.tier`（可空整数，#116 迁移 ADD COLUMN；迁移前的旧行为 NULL，后台显示 "untiered"）。后台 `/admin/ledger` 按 `tier` 汇总当天 `gateway` 的花费。
+  - **被拒**：和现在一样，行写回 `failed`、`error = 'budget_exceeded'`，`failures` 不变，不花钱。工作排到以后：artifacts / evidence / watch 的到期扫描会重新入队，`generate` 消费者对 `BudgetExceededError` 直接 ack（不再重试进 DLQ）；归组消费者对它重置 `requeue_count`，文章保持 `analyzed` 等下一轮。
+  - **已知行为**：日报导语（第 5 档）被拒时，当天日报不写导语，只显示已批准的标题和摘要，不会第二天补写。生产没有 `digest.timezone`，默认 UTC，所以日报在预算日开始（00:00 UTC）时生成，此时第 5 档放行。改成别的时区后，日报会在预算日中途生成，导语可能被第 5 档拒掉。
 - **归组**：`Q_GROUP` 并发 1，批内 `for…of` 顺序处理，不用 `Promise.all`。候选事件 = Vectorize 召回 ∪ D1 里 30 分钟内新建的事件（Vectorize 索引是异步的）。`event_articles.article_id` 唯一。
 - **预算渠道**：`workers_ai`、`gateway`、`jina`。
 - **事件 revision**：什么时候加 1、三种写法和全部写路径见本节下面的「事件 revision」。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
