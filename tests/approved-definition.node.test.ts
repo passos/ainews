@@ -33,6 +33,12 @@ const WHITELIST: { file: string; constant: string; reason: string }[] = [
       "event_report_count needs aliases a2/r2, and APPROVED_ARTICLE_SQL is fixed to a/r. Kept as a non-goal of #84.",
   },
   {
+    file: "src/server/publication/articles.ts",
+    constant: "APPROVED_BY_SQL",
+    reason:
+      "reader page: returns the approving review's reviewer, which an EXISTS cannot. Same condition as APPROVED_ARTICLE_SQL.",
+  },
+  {
     file: "src/pipeline/evidence/primary.ts",
     constant: "ANY_BODY_APPROVED_SQL",
     reason:

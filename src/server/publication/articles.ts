@@ -36,6 +36,12 @@ export const APPROVED_ARTICLE_SQL = `EXISTS (
 /** APPROVED_ARTICLE_SQL as a drizzle fragment, for public reads. */
 export const approvedArticleWhere: SQL = sql.raw(APPROVED_ARTICLE_SQL);
 
+// Who approved: the same condition as APPROVED_ARTICLE_SQL, but it has to
+// return the row's reviewer, which an EXISTS cannot. Keep the two in step.
+const APPROVED_BY_SQL = sql`(SELECT r.reviewer FROM reviews r
+  WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+  LIMIT 1)`;
+
 // Newest first; id makes the order total, so paging neither repeats nor
 // skips rows. Must stay identical to articles_industry_newest_idx (schema),
 // or SQLite sorts instead of reading the index.
@@ -420,9 +426,7 @@ export async function getArticlePage(
         WHEN NULLIF(an.summary_en, '') IS NOT NULL THEN 'ai'
         ELSE 'feed'
       END AS summary_kind,
-      (SELECT r.reviewer FROM reviews r
-       WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
-       LIMIT 1) AS approved_by,
+      ${APPROVED_BY_SQL} AS approved_by,
       CASE WHEN json_valid(s.config) AND json_extract(s.config, '$.summaryIsBody') = 1
         THEN 1 ELSE 0 END AS body_is_abstract
     ${CARD_FROM}
