@@ -272,14 +272,15 @@ export async function createSource(
     jinaEnabled?: number;
   },
 ) {
-  assertNotSystemFeed(data.feedUrl);
+  const feedUrl = data.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
   const d = getDb(database);
   const res = await d
     .insert(sources)
     .values({
       industryId: data.industryId,
       name: data.name,
-      feedUrl: data.feedUrl,
+      feedUrl,
       siteDomain: data.siteDomain ?? null,
       kind: data.kind,
       intervalMinutes: data.intervalMinutes ?? 60,
@@ -306,7 +307,8 @@ export async function updateSource(
     jinaEnabled?: number;
   },
 ) {
-  assertNotSystemFeed(data.feedUrl);
+  const feedUrl = data.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
   const res = await database
     .prepare(
       `UPDATE sources
@@ -316,7 +318,7 @@ export async function updateSource(
     )
     .bind(
       data.name,
-      data.feedUrl,
+      feedUrl,
       data.siteDomain ?? null,
       data.intervalMinutes ?? null,
       data.utcOffset ?? null,
@@ -408,7 +410,8 @@ export async function approveCandidate(
     });
   }
 
-  assertNotSystemFeed(candidate.feedUrl);
+  const feedUrl = candidate.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
 
   if (candidate.kind !== "rss") {
     throw new Response(
@@ -427,7 +430,7 @@ export async function approveCandidate(
       .bind(
         candidate.industryId,
         candidate.name || candidate.siteDomain || "",
-        candidate.feedUrl,
+        feedUrl,
         candidate.siteDomain,
         candidate.kind,
         candidate.fetchRung,

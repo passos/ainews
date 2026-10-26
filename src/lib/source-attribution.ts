@@ -16,11 +16,12 @@ export function documentHost(url: string): string {
 }
 
 /**
- * True for a system placeholder source, which is never collected. Ignores
- * case, like SQL `feed_url LIKE 'system:%'`, and leading/trailing whitespace.
+ * True for a system placeholder source, which is never collected. Same rule
+ * as SQL `feed_url LIKE 'system:%'`: ignores case, does not trim (feed URLs
+ * are trimmed where they enter the system).
  */
 export function isSystemSource(feedUrl: string): boolean {
-  return feedUrl.trim().toLowerCase().startsWith("system:");
+  return feedUrl.toLowerCase().startsWith("system:");
 }
 
 /** Source name a reader sees: a system source shows the document's host. */
