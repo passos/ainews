@@ -269,6 +269,22 @@ describe("getArticlePage", () => {
     );
   });
 
+  it("editorApproved ignores an approval of an older body version", async () => {
+    const auto = await approvedFull();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE reviews SET reviewer = 'auto' WHERE article_id = ?1",
+      ).bind(auto),
+      // Sorts before the current sha, so an unguarded lookup finds it first.
+      env.DB.prepare(
+        "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, '0-old', 'approved', 'alice', 1)",
+      ).bind(auto),
+    ]);
+    expect((await getArticlePage(db(), env.BODIES, auto))!.editorApproved).toBe(
+      false,
+    );
+  });
+
   it("bodyIsAbstract follows the source's summaryIsBody config", async () => {
     const plain = await approvedFull();
     expect(
