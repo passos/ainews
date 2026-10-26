@@ -271,7 +271,7 @@ describe("Deterministic Financial Comparator", () => {
 });
 
 describe("Ingest Filings & Superseded Historical Facts", () => {
-  it("ingests a 10-Q filing, creates article & financial facts, and updates superseded_by on 10-Q/A amendment", async () => {
+  it("ingests a 10-Q filing and its 10-Q/A amendment without writing superseded_by", async () => {
     await resetPipeline();
 
     // 1. Seed Finance industry and SEC source
@@ -457,7 +457,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     );
     expect(res2.ingestedCount).toBe(1);
 
-    // Verify that the original fact's superseded_by now points to the new fact ID!
+    // Ingest never writes superseded_by: only approving the amendment does (Issue #83)
     const facts = await env.DB.prepare(
       "SELECT id, val, superseded_by FROM financial_facts WHERE company_id = ?1 ORDER BY id ASC",
     )
@@ -467,7 +467,7 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     expect(facts.results.length).toBe(2);
     // Old version still exists (M4 acceptance: filing 修订后数字跟着更新，旧版本保留)
     expect(facts.results[0].val).toBe("85777000000");
-    expect(facts.results[0].superseded_by).toBe(facts.results[1].id);
+    expect(facts.results[0].superseded_by).toBeNull();
     // New version has latest restated figure
     expect(facts.results[1].val).toBe("85800000000");
     expect(facts.results[1].superseded_by).toBeNull();

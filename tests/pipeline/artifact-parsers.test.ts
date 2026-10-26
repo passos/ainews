@@ -830,6 +830,25 @@ describe("Artifact Output Parsers (Issue #20)", () => {
         "本简报仅供资讯与学习参考，基于公开 SEC 申报文件生成，不构成任何投资建议、买卖要约或金融决策依据。",
     };
 
+    const mockMaterial = {
+      eventId: 1,
+      eventTitle: "Apple Q4 Earnings",
+      industryName: "Finance",
+      industrySlug: "finance",
+      articles: [],
+      calculatedMetrics: [validMetric],
+      filing: {
+        id: 1,
+        accessionNumber: "0000320193-24-000106",
+        form: "10-K",
+        filingDate: "2024-11-01",
+        secUrl: "https://sec.gov/filing/1",
+        companyTicker: "AAPL",
+        companyName: "Apple Inc.",
+        companyCik: "0000320193",
+      },
+    };
+
     it("parses valid JSON with metrics and citations successfully", () => {
       const res = parseEarningsDecoderOutput(JSON.stringify(validPayload));
       expect(res).not.toBeNull();
@@ -847,25 +866,6 @@ describe("Artifact Output Parsers (Issue #20)", () => {
     });
 
     it("uses pre-computed calculatedMetrics from material if provided", () => {
-      const mockMaterial = {
-        eventId: 1,
-        eventTitle: "Apple Q4 Earnings",
-        industryName: "Finance",
-        industrySlug: "finance",
-        articles: [],
-        calculatedMetrics: [validMetric],
-        filing: {
-          id: 1,
-          accessionNumber: "0000320193-24-000106",
-          form: "10-K",
-          filingDate: "2024-11-01",
-          secUrl: "https://sec.gov/filing/1",
-          companyTicker: "AAPL",
-          companyName: "Apple Inc.",
-          companyCik: "0000320193",
-        },
-      };
-
       const rawLlmOutput = JSON.stringify({
         executiveSummary: "LLM summarized Q4 earnings.",
         keyDrivers: ["Growth in Cloud and Hardware."],
@@ -879,6 +879,32 @@ describe("Artifact Output Parsers (Issue #20)", () => {
       expect(res?.metrics.length).toBe(1);
       expect(res?.metrics[0].reportedValue).toBe("94930000000");
       expect(res?.executiveSummary).toBe("LLM summarized Q4 earnings.");
+    });
+
+    it("ignores model-supplied company and filing when material is provided (Issue #83)", () => {
+      for (const secUrl of ["javascript:alert(1)", "https://evil.example/x"]) {
+        const rawLlmOutput = JSON.stringify({
+          executiveSummary: "LLM summarized Q4 earnings.",
+          keyDrivers: ["Growth in Cloud and Hardware."],
+          company: { ticker: "EVIL", name: "Evil", cik: "9999999999" },
+          filing: {
+            form: "8-K",
+            filingDate: "2099-01-01",
+            secUrl,
+            accessionNumber: "x",
+          },
+        });
+
+        const res = parseEarningsDecoderOutput(
+          rawLlmOutput,
+          mockMaterial as unknown as ArtifactEventMaterial,
+        );
+        expect(res).not.toBeNull();
+        expect(res?.filing.secUrl).toBe("https://sec.gov/filing/1");
+        expect(res?.filing.form).toBe("10-K");
+        expect(res?.company.cik).toBe("0000320193");
+        expect(res?.company.ticker).toBe("AAPL");
+      }
     });
 
     it("returns null on malformed JSON or empty string", () => {
