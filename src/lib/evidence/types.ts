@@ -56,6 +56,8 @@ export const claimEvidenceViewSchema = z.strictObject({
   isPrimarySource: z.boolean(),
   sourceRole: sourceRoleSchema.default("independent"),
   verified: z.boolean(),
+  /** The reader page /a/{articleId} shows the quote (content_display, #86). */
+  inArticle: z.boolean(),
 });
 
 export type ClaimEvidenceView = z.infer<typeof claimEvidenceViewSchema>;

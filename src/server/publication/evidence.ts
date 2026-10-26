@@ -9,6 +9,7 @@ import type {
   RealityCheckStatus,
   SourceRole,
 } from "../../lib/evidence/types";
+import { parseContentDisplay } from "../../lib/content-display";
 import { approvedArticleWhere, publicSource, type Db } from "./articles";
 
 export async function getEventEvidence(
@@ -38,6 +39,8 @@ export async function getEventEvidence(
     is_primary_source: number | null;
     source_role: string | null;
     verified: number | null;
+    content_display: string | null;
+    body_kind: string | null;
   }>(sql`
     SELECT
       c.id AS claim_id,
@@ -61,7 +64,9 @@ export async function getEventEvidence(
       ev.stance,
       ev.is_primary_source,
       ev.source_role,
-      ev.verified
+      ev.verified,
+      ev.content_display,
+      ev.body_kind
     FROM events e
     JOIN claims c ON c.event_id = e.id AND c.input_revision = e.revision
     LEFT JOIN (
@@ -81,7 +86,9 @@ export async function getEventEvidence(
         a.canonical_url AS article_url,
         s.name AS source_raw_name,
         s.site_domain AS source_site_domain,
-        s.feed_url AS source_feed_url
+        s.feed_url AS source_feed_url,
+        s.content_display AS content_display,
+        a.body_kind AS body_kind
       FROM claim_evidence ce
       JOIN articles a ON a.id = ce.article_id AND ce.body_sha = a.body_sha AND ${approvedArticleWhere}
       JOIN sources s ON s.id = a.source_id
@@ -146,6 +153,12 @@ export async function getEventEvidence(
         isPrimarySource: r.is_primary_source === 1,
         sourceRole: (r.source_role as SourceRole) || "independent",
         verified: r.verified === 1,
+        // Only a full source with a real body shows every quote on the reader
+        // page. Excerpt (even a quote inside the excerpt), summary and no
+        // body: the quote links to the original.
+        inArticle:
+          parseContentDisplay(r.content_display) === "full" &&
+          r.body_kind === "full",
       });
     }
   }

@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  DEFAULT_CONTENT_DISPLAY,
+  type ContentDisplay,
+} from "../../../lib/content-display";
 import { listIndustries } from "../../../server/admin/industries";
 import {
   createSource,
@@ -42,6 +46,9 @@ function AdminSourceEditPage() {
   const [jinaEnabled, setJinaEnabled] = useState(
     Boolean(source?.jinaEnabled ?? 0),
   );
+  const [contentDisplay, setContentDisplay] = useState<ContentDisplay>(
+    source?.contentDisplay ?? DEFAULT_CONTENT_DISPLAY,
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +73,7 @@ function AdminSourceEditPage() {
             utcOffset: utcOffset.trim(),
             config,
             jinaEnabled: jinaEnabled ? 1 : 0,
+            contentDisplay,
           },
         });
       } else if (source) {
@@ -79,6 +87,7 @@ function AdminSourceEditPage() {
             utcOffset: utcOffset.trim(),
             config,
             jinaEnabled: jinaEnabled ? 1 : 0,
+            contentDisplay,
           },
         });
       }
@@ -254,6 +263,26 @@ function AdminSourceEditPage() {
           <label htmlFor="jinaEnabled" className="text-sm font-medium">
             Enable Jina Reader fallback (Ladder step 3)
           </label>
+        </div>
+
+        <div className="flex flex-col gap-1.5 pt-1">
+          <label htmlFor="contentDisplay" className="text-sm font-medium">
+            Reader page display
+          </label>
+          <select
+            id="contentDisplay"
+            value={contentDisplay}
+            onChange={(e) =>
+              setContentDisplay(e.target.value as ContentDisplay)
+            }
+            className="rounded-md border bg-background px-3 py-2 text-sm"
+          >
+            <option value="full">
+              Full text — only after the publisher allows republishing
+            </option>
+            <option value="excerpt">Excerpt (default)</option>
+            <option value="summary">Summary only</option>
+          </select>
         </div>
 
         <div className="flex items-center gap-3 pt-3">

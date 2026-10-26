@@ -4,6 +4,8 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { attributeSource } from "../../lib/source-attribution";
+import { parseContentDisplay } from "../../lib/content-display";
+import { excerptMarkdown, renderArticleMarkdown } from "../../lib/markdown";
 import { safeHttpUrl } from "../../lib/url";
 import type { getDb } from "../db/client";
 
@@ -361,4 +363,95 @@ export async function getSectionSources(
     name: r.name,
     homepage: r.site_domain ? `https://${r.site_domain}/` : null,
   }));
+}
+
+export interface ArticlePage {
+  article: ArticleView;
+  /** Who wrote the summary: editor = summary_override; ai = the newest analysis; feed = the feed. */
+  summaryKind: "editor" | "ai" | "feed";
+  /** The approval of the current version is not "auto" (a person approved it). */
+  editorApproved: boolean;
+  /** Sanitised body HTML; null = show no body. */
+  bodyHtml: string | null;
+  /** Excerpt source: "Continue reading the original" follows the body (or summary). */
+  excerpted: boolean;
+  /** The source's body is the feed summary, the authors' abstract (summaryIsBody). */
+  bodyIsAbstract: boolean;
+}
+
+interface ArticlePageRow extends CardRow {
+  body_sha: string;
+  body_kind: string | null;
+  content_display: string | null;
+  summary_kind: ArticlePage["summaryKind"];
+  approved_by: string | null;
+  body_is_abstract: number | null;
+}
+
+/**
+ * The reader page of one approved article; null when it is not approved.
+ * Reads D1 and R2 only: no model call, no budget. The body is the version the
+ * approval is bound to (`a.body_sha` of the row that passed
+ * approvedArticleWhere), cut to the source's content_display.
+ */
+export async function getArticlePage(
+  db: Db,
+  bodies: Pick<R2Bucket, "get">,
+  id: number,
+): Promise<ArticlePage | null> {
+  // approved_by only names the approver; approvedArticleWhere alone decides
+  // whether the article is public.
+  const rows = await db.all<ArticlePageRow>(sql`
+    SELECT ${CARD_COLUMNS},
+      a.body_sha AS body_sha,
+      a.body_kind AS body_kind,
+      s.content_display AS content_display,
+      CASE
+        WHEN NULLIF(a.summary_override, '') IS NOT NULL THEN 'editor'
+        WHEN NULLIF(an.summary_en, '') IS NOT NULL THEN 'ai'
+        ELSE 'feed'
+      END AS summary_kind,
+      (SELECT r.reviewer FROM reviews r
+       WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
+       LIMIT 1) AS approved_by,
+      CASE WHEN json_valid(s.config) AND json_extract(s.config, '$.summaryIsBody') = 1
+        THEN 1 ELSE 0 END AS body_is_abstract
+    ${CARD_FROM}
+    WHERE a.id = ${id} AND ${approvedArticleWhere}
+    LIMIT 1`);
+  const row = rows[0];
+  if (!row) return null;
+
+  const display = parseContentDisplay(row.content_display);
+  const page: ArticlePage = {
+    article: toViews([row])[0],
+    summaryKind: row.summary_kind,
+    editorApproved: row.approved_by !== "auto",
+    bodyHtml: null,
+    excerpted: display === "excerpt",
+    bodyIsAbstract: row.body_is_abstract === 1,
+  };
+  // Summary sources show no body. A body_kind other than 'full' means R2 holds
+  // the feed summary, which the summary block already shows.
+  if (display === "summary" || row.body_kind !== "full") return page;
+
+  let obj: R2ObjectBody | null;
+  try {
+    obj = await bodies.get(`bodies/${id}/${row.body_sha}.md`);
+  } catch (e) {
+    console.warn({ article: id, r2: String(e) });
+    obj = null;
+  }
+  if (!obj) return page;
+
+  const md = await obj.text();
+  if (display === "full") {
+    page.bodyHtml = renderArticleMarkdown(md);
+  } else {
+    // Excerpt: text blocks only, no images (no republishing of media).
+    const ex = excerptMarkdown(md);
+    page.bodyHtml =
+      ex === null ? null : renderArticleMarkdown(ex, { images: false });
+  }
+  return page;
 }

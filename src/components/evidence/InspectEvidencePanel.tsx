@@ -1,5 +1,13 @@
 import { useState } from "react";
-import type { ClaimView, EventEvidenceView } from "../../lib/evidence/types";
+import type {
+  ClaimEvidenceView,
+  ClaimView,
+  EventEvidenceView,
+} from "../../lib/evidence/types";
+import {
+  originalFragmentHref,
+  textFragmentHref,
+} from "../../lib/text-fragment";
 import { safeHttpUrl } from "../../lib/url";
 
 export function InspectEvidencePanel({
@@ -209,6 +217,7 @@ function ClaimRow({
                   <blockquote className="border-l-2 border-primary/40 pl-2.5 italic text-foreground/90">
                     "{cit.quote}"
                   </blockquote>
+                  <QuoteLink cit={cit} />
                 </div>
               ))}
             </div>
@@ -216,5 +225,40 @@ function ClaimRow({
         </div>
       )}
     </div>
+  );
+}
+
+// A quote the reader page shows links there and is highlighted. A quote
+// outside what the source's licence lets the page show links to the original,
+// also with a text fragment.
+function QuoteLink({ cit }: { cit: ClaimEvidenceView }) {
+  const original = safeHttpUrl(cit.articleUrl);
+  if (cit.inArticle) {
+    return (
+      <p className="mt-1.5 font-mono text-[0.68rem]">
+        <a
+          href={textFragmentHref(cit.articleId, cit.quote)}
+          className="font-semibold text-sec-ink underline"
+        >
+          Highlight in article →
+        </a>
+      </p>
+    );
+  }
+  if (!original) return null;
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.68rem]">
+      <a
+        href={originalFragmentHref(original, cit.quote)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-sec-ink underline"
+      >
+        Highlight in original ↗
+      </a>
+      <span className="text-muted-foreground">
+        {`Quote is in the full article at ${cit.sourceName}`}
+      </span>
+    </p>
   );
 }

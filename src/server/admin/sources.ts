@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 import { accessMiddleware } from "./fn";
+import { contentDisplaySchema } from "../../lib/content-display";
 import { isEnabled } from "../../lib/flags";
 import * as ops from "./ops";
 
@@ -19,6 +20,7 @@ const sourceFields = z.object({
     .union([z.boolean(), z.literal(0), z.literal(1)])
     .transform(Number)
     .default(0),
+  contentDisplay: contentDisplaySchema.optional(),
 });
 
 export const listSources = createServerFn({ method: "GET" })

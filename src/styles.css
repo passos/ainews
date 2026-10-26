@@ -142,3 +142,101 @@
     outline-offset: 2px;
   }
 }
+
+/* Reader page body (#86): server-rendered markdown. Theme variables only, so
+   light and dark both apply. Wide content scrolls in its own box; the page
+   never scrolls sideways at 375px. */
+@layer components {
+  .article-body {
+    max-width: 68ch;
+    overflow-wrap: anywhere;
+    font-family: var(--font-serif);
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+  .article-body > * + * {
+    margin-top: 0.9em;
+  }
+  .article-body h1,
+  .article-body h2,
+  .article-body h3,
+  .article-body h4 {
+    font-weight: 700;
+    line-height: 1.25;
+    margin-top: 1.4em;
+  }
+  .article-body h1 {
+    font-size: 1.5rem;
+  }
+  .article-body h2 {
+    font-size: 1.3rem;
+  }
+  .article-body h3 {
+    font-size: 1.15rem;
+  }
+  .article-body h4 {
+    font-size: 1rem;
+  }
+  .article-body ul {
+    list-style: disc;
+    padding-left: 1.4em;
+  }
+  .article-body ol {
+    list-style: decimal;
+    padding-left: 1.4em;
+  }
+  .article-body li + li {
+    margin-top: 0.3em;
+  }
+  .article-body blockquote {
+    border-left: 3px solid var(--sec);
+    padding-left: 0.9em;
+    color: var(--muted-foreground);
+  }
+  .article-body code {
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    padding: 0.1em 0.3em;
+  }
+  .article-body pre {
+    background: var(--muted);
+    overflow-x: auto;
+    max-width: 100%;
+    padding: 0.8em;
+    overflow-wrap: normal;
+  }
+  .article-body pre code {
+    padding: 0;
+  }
+  .article-body img {
+    max-width: 100%;
+    height: auto;
+  }
+  .article-body .article-table {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .article-body table {
+    border-collapse: collapse;
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+  }
+  .article-body th,
+  .article-body td {
+    border: 1px solid var(--border);
+    padding: 0.35em 0.6em;
+    text-align: left;
+    overflow-wrap: normal;
+  }
+  .article-body th {
+    background: var(--muted);
+  }
+  .article-body a {
+    text-decoration: underline;
+    color: var(--sec-ink);
+  }
+  .article-body hr {
+    border-top: 1px solid var(--border);
+  }
+}

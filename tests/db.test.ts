@@ -256,3 +256,15 @@ it("claims and claim_evidence tables exist with proper schema and checks", async
     ]),
   );
 });
+
+it("sources.content_display is NOT NULL with default 'excerpt'", async () => {
+  const { results } = await env.DB.prepare("PRAGMA table_info(sources)").all<{
+    name: string;
+    dflt_value: string | null;
+    notnull: number;
+  }>();
+  const col = results.find((c) => c.name === "content_display");
+  expect(col).toBeDefined();
+  expect(col!.dflt_value).toBe("'excerpt'");
+  expect(col!.notnull).toBe(1);
+});

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
+import { Route as AArticleIdRouteImport } from './routes/a/$articleId'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminArtifactsRouteImport } from './routes/admin/artifacts'
 import { Route as AdminAskRouteImport } from './routes/admin/ask'
@@ -42,6 +43,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRouteRoute = AdminRouteRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AArticleIdRoute = AArticleIdRouteImport.update({
+  id: '/a/$articleId',
+  path: '/a/$articleId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -162,6 +168,7 @@ const RssWChar123watchChar125DotxmlRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
@@ -187,6 +194,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
@@ -214,6 +222,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
   '/admin/companies': typeof AdminCompaniesRoute
@@ -242,6 +251,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
@@ -267,6 +277,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
@@ -293,6 +304,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
     | '/admin/companies'
@@ -320,6 +332,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRouteRoute: typeof AdminRouteRouteWithChildren
+  AArticleIdRoute: typeof AArticleIdRoute
   EEventIdRoute: typeof EEventIdRoute
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
   SSectionRoute: typeof SSectionRoute
@@ -343,6 +356,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/a/$articleId': {
+      id: '/a/$articleId'
+      path: '/a/$articleId'
+      fullPath: '/a/$articleId'
+      preLoaderRoute: typeof AArticleIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -545,6 +565,7 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRouteRoute: AdminRouteRouteWithChildren,
+  AArticleIdRoute: AArticleIdRoute,
   EEventIdRoute: EEventIdRoute,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
   SSectionRoute: SSectionRoute,

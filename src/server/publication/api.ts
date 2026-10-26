@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 import { getDb } from "../db/client";
 import {
+  getArticlePage as readArticlePage,
   getHome as readHome,
   getRecentCorrections as readRecentCorrections,
   getSection as readSection,
@@ -40,6 +41,12 @@ export const getSection = createServerFn({ method: "GET" })
 export const getSectionSources = createServerFn({ method: "GET" })
   .validator(sectionInput)
   .handler(({ data }) => readSectionSources(getDb(env.DB), data.slug));
+
+export const getArticle = createServerFn({ method: "GET" })
+  .validator(z.object({ articleId: z.number().int().positive() }))
+  .handler(({ data }) =>
+    readArticlePage(getDb(env.DB), env.BODIES, data.articleId),
+  );
 
 const eventInput = z.object({ eventId: z.number().int().positive() });
 

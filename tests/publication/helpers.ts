@@ -72,6 +72,8 @@ export interface ArticleSeed {
   bodySha?: string;
   titleOverride?: string | null;
   summaryOverride?: string | null;
+  /** `articles.body_kind`; NULL when not given. */
+  bodyKind?: "full" | "summary" | null;
 }
 
 let counter = 0;
@@ -81,8 +83,8 @@ export async function seedArticle(a: ArticleSeed): Promise<number> {
   const url = a.url ?? `https://news.example/a/${counter}`;
   const row = await env.DB.prepare(
     `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary,
-       published_at, fetched_at, stage, stage_updated_at, body_sha, title_override, summary_override)
-     VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 'analyzed', 0, ?8, ?9, ?10) RETURNING id`,
+       published_at, fetched_at, stage, stage_updated_at, body_sha, title_override, summary_override, body_kind)
+     VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 'analyzed', 0, ?8, ?9, ?10, ?11) RETURNING id`,
   )
     .bind(
       a.sourceId,
@@ -95,6 +97,7 @@ export async function seedArticle(a: ArticleSeed): Promise<number> {
       a.bodySha ?? "sha-current",
       a.titleOverride ?? null,
       a.summaryOverride ?? null,
+      a.bodyKind ?? null,
     )
     .first<{ id: number }>();
   return row!.id;

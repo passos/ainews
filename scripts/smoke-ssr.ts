@@ -348,6 +348,39 @@ async function main() {
       fail(`GET ${path} shows an unapproved article`);
   }
 
+  // Reader page /a/$articleId (#86). Every card links one; unapproved
+  // articles are 404, never shown. The preview DB is rebuilt each run, so
+  // ids 1..30 cover every fixture article, unapproved ones included.
+  const readerIds = [...tech.text.matchAll(/href="\/a\/(\d+)"/g)].map(
+    (m) => m[1],
+  );
+  if (readerIds.length === 0) fail("GET /s/technology has no /a/ links");
+  for (const id of new Set(readerIds)) {
+    const { res, text } = await page(`/a/${id}`);
+    if (res.status !== 200) fail(`GET /a/${id} returned ${res.status}`);
+    if (!text.includes('rel="canonical"'))
+      fail(`GET /a/${id} has no canonical link`);
+    if (text.includes("HIDDEN"))
+      fail(`GET /a/${id} shows an unapproved article`);
+  }
+  for (let n = 1; n <= 30; n++) {
+    const { res, text } = await page(`/a/${n}`);
+    if (res.status === 200 && text.includes("HIDDEN"))
+      fail(`GET /a/${n} shows an unapproved article`);
+  }
+  const finPage = await page("/s/finance");
+  const finId = /href="\/a\/(\d+)"/.exec(finPage.text)?.[1];
+  if (!finId) fail("GET /s/finance has no /a/ links");
+  const finReader = await page(`/a/${finId}`);
+  const finNotes = notes(finReader.text);
+  if (finNotes.length !== 1 || !finNotes[0].includes(DISCLAIMER)) {
+    fail(`GET /a/${finId} has ${finNotes.length} disclaimer notes, want 1`);
+  }
+  for (const path of ["/a/999999", "/a/abc"]) {
+    const { res } = await page(path);
+    if (res.status !== 404) fail(`GET ${path} returned ${res.status}`);
+  }
+
   const none = await page("/s/nope");
   if (none.res.status !== 404) fail(`GET /s/nope returned ${none.res.status}`);
 
@@ -413,6 +446,12 @@ async function main() {
     techFeed.text.includes("HIDDEN")
   ) {
     fail("GET /rss/technology.xml has the wrong items");
+  }
+  if (
+    !techFeed.text.includes("/a/") ||
+    !techFeed.text.includes('<guid isPermaLink="false">')
+  ) {
+    fail("GET /rss/technology.xml items do not link /a/ or lost their guid");
   }
   const finFeed = await rss("/rss/finance.xml");
   const channel = finFeed.text.split("<item>")[0];
