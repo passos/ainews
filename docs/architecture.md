@@ -63,7 +63,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 - **已批准**只用 `approvedArticleWhere` 判断，不另写条件；不满足 → 404。显示的正文版本是通过这个条件的那一行的 `articles.body_sha`（就是审核记录绑定的版本），R2 键 `bodies/{article_id}/{body_sha}.md`，不按"最新的 R2 对象"找。
 - **显示范围**由信源的 `content_display`（第 9 节）决定，任何情况下都不显示超出范围的正文：
   - `full`：全文。只用于公共领域或允许转载的信源（政府来源、arXiv）；商业媒体用 `excerpt`。管理员确认对方允许转载后，才在后台把信源改成 `full`。
-  - `excerpt`：从开头取完整的顶层块，合计不超过正文的 25%，也不超过 300 词；一块都放不下就不显示正文，不在段落中间截断。正文（或摘要）后面接 `Continue reading the original ↗`。
+  - `excerpt`：从开头取完整的顶层块，合计不超过正文的 25%，也不超过 300 词；一块都放不下就不显示正文，不在段落中间截断。字数按读者实际看到的文字计（含图片 alt 文字）；渲染后再按可见文字核一次，超限就只显示摘要和原文链接。正文（或摘要）后面接 `Continue reading the original ↗`。
   - `summary`：只显示摘要，不读 R2。
   - `articles.body_kind` 不是 `full` 时（R2 里存的是 feed 摘要），按没有正文处理，不读 R2。
   - R2 没有对象或读取出错：显示摘要和原始链接，状态码仍是 200。
@@ -75,11 +75,11 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
   - 输出的 HTML 只能来自 markdown-it 自己生成的标记，加上表格外面的横向滚动容器。
   - 原始 HTML 一律不原样输出：`script`、`style`、`iframe`、`form` 等危险块整块删除；其他标签去掉，标签里的文字按纯文本转义输出。
   - 链接只允许 `http`/`https`，外链 `rel="nofollow noopener noreferrer"`（与现有规则同值）。
-  - 图片只允许 `https`，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`；其他图片只留 alt 文字。只有 `full` 模式输出图片；`excerpt` 模式只输出文字块，图片只留 alt 文字，不算进 25% 和 300 词。理由：摘录模式下不转载商业媒体的图片。
+  - 图片只允许 `https`，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`；其他图片只留 alt 文字。只有 `full` 模式输出图片；`excerpt` 模式只输出文字块，图片只留 alt 文字，alt 文字计入 25% 和 300 词。理由：摘录模式下不转载商业媒体的图片。
 - **排版**：正文宽度约 68 字符；标题、引用、代码、表格都有样式，表格和代码块在自己的容器里横向滚动；亮色和暗色都适用；375px 下页面不出现横向滚动。
 - **证据锚点**：Inspect evidence 里每条引文都带一个链接，原来的原文链接同时保留。
-  - 引文在阅读页的显示范围内：链到 `/a/{id}#:~:text=…`，在站内高亮。
-  - 引文在显示范围外（`excerpt` 截掉的部分、`summary` 信源、没有正文）：链到原文 URL，同样带 `#:~:text=…`，旁边标 `Quote is in the full article at {source}`。
+  - 引文在阅读页的显示范围内（信源为 `full` 且 `body_kind='full'`）：链到 `/a/{id}#:~:text=…`，在站内高亮。
+  - 其余情况（`excerpt` 信源的全部引文、`summary` 信源、没有正文）：链到原文 URL，同样带 `#:~:text=…`，旁边标 `Quote is in the full article at {source}`。`excerpt` 信源暂不判断引文是否落在摘录内，这样绝不显示超出版权范围的正文，事件页也不必读 R2；证据构建时存“是否在摘录内”的标记后再改成站内高亮（W2 跟进）。
   - 文本片段由引文去掉 markdown 记号后生成。
 
 server function 的请求路径是 `/_serverFn/*`，不在 Access 保护的 `/admin*` 之下，公开页面也用它，所以不能整段交给 Access。后台 server function 的鉴权：先读 `Cf-Access-Jwt-Assertion` 请求头，没有就读 `CF_Authorization` cookie，两者做同样的完整校验（#4）。Zero Trust 应用要关闭 "Cookie Path Attribute"，否则 cookie 只在 `/admin` 下发送。
