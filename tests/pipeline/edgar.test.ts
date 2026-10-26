@@ -782,9 +782,15 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
     expect(filing1?.status).toBe("failed");
 
     const art1 = await env.DB.prepare(
-      "SELECT id, body_sha, stage FROM articles WHERE canonical_url LIKE '%aapl-8k.htm'",
-    ).first<{ id: number; body_sha: string; stage: string }>();
+      "SELECT id, body_sha, stage, analysis_generation FROM articles WHERE canonical_url LIKE '%aapl-8k.htm'",
+    ).first<{
+      id: number;
+      body_sha: string;
+      stage: string;
+      analysis_generation: number;
+    }>();
     const oldSha = art1!.body_sha;
+    expect(art1!.analysis_generation).toBe(0);
 
     // Simulate stage being moved forward (e.g. grouped)
     await env.DB.prepare("UPDATE articles SET stage = 'grouped' WHERE id = ?1")
@@ -810,12 +816,19 @@ describe("Ingest Filings & Superseded Historical Facts", () => {
 
     // Check that article body_sha was updated and stage was reset to body_ready!
     const art2 = await env.DB.prepare(
-      "SELECT body_sha, stage, requeue_count FROM articles WHERE id = ?1",
+      "SELECT body_sha, stage, requeue_count, analysis_generation FROM articles WHERE id = ?1",
     )
       .bind(art1!.id)
-      .first<{ body_sha: string; stage: string; requeue_count: number }>();
+      .first<{
+        body_sha: string;
+        stage: string;
+        requeue_count: number;
+        analysis_generation: number;
+      }>();
     expect(art2?.body_sha).not.toBe(oldSha);
     expect(art2?.stage).toBe("body_ready");
     expect(art2?.requeue_count).toBe(0);
+    // #81: a new body is a new analysis generation.
+    expect(art2?.analysis_generation).toBe(1);
   });
 });
