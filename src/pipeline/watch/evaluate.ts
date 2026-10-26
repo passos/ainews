@@ -7,7 +7,6 @@ import {
   bindingTransport,
   type ModelTransport,
 } from "../../providers/transport";
-import { effectivePublishMode } from "../analyze/analyze";
 import type { PipelineEnv } from "../messages";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import {
@@ -38,8 +37,6 @@ interface EventRow {
   updated_at: number;
   watch_evaluated_revision: number;
   watch_evaluated_through: number | null;
-  industry_slug: string;
-  industry_publish_mode: "auto" | "review";
 }
 
 interface ApprovedArticleRow {
@@ -86,16 +83,11 @@ function matchKeyword(text: string, keyword: string): boolean {
 }
 
 /**
- * A hit is public at once only in an auto section that is not Finance; the
- * section is the event's. Same rule as artifacts (contract §7).
+ * Every hit starts in the review queue, auto sections and Finance alike: its
+ * summary and rationale are model-written text (#85 ruling 1, N§6).
  */
-export function watchHitInitialStatus(industry: {
-  slug: string;
-  publish_mode: "auto" | "review";
-}): "published" | "pending_review" {
-  return effectivePublishMode(industry) === "auto"
-    ? "published"
-    : "pending_review";
+export function watchHitInitialStatus(): "pending_review" {
+  return "pending_review";
 }
 
 /**
@@ -151,10 +143,8 @@ export async function evaluateEventWatches(
   const event = await db
     .prepare(
       `SELECT e.id, e.title, e.revision, e.industry_id, e.updated_at,
-              e.watch_evaluated_revision, e.watch_evaluated_through,
-              i.slug AS industry_slug, i.publish_mode AS industry_publish_mode
+              e.watch_evaluated_revision, e.watch_evaluated_through
        FROM events e
-       JOIN industries i ON i.id = e.industry_id
        WHERE e.id = ?1`,
     )
     .bind(eventId)
@@ -471,10 +461,7 @@ export async function evaluateEventWatches(
             promptVersion: WATCH_PROMPT_VERSION,
             articleIds: newArticles.map((a) => a.id),
           }),
-          watchHitInitialStatus({
-            slug: event.industry_slug,
-            publish_mode: event.industry_publish_mode,
-          }),
+          watchHitInitialStatus(),
         )
         .run();
     }
