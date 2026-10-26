@@ -17,6 +17,7 @@ export async function resetPublication(): Promise<void> {
       "claims",
       "event_artifacts",
       "corrections",
+      "funding_observations",
       "funding_rounds",
       "digests",
       "event_articles",

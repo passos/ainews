@@ -5,12 +5,18 @@ import { safeHttpUrl } from "../../lib/url";
 import {
   correctFundingRound,
   decideFundingRound,
+  listFundingObservations,
   listPendingFundingRounds,
+  resolveFundingObservation,
 } from "../../server/admin/funding";
+import type { FundingObservationView } from "../../server/admin/ops";
 
 export const Route = createFileRoute("/admin/funding")({
   ssr: "data-only",
-  loader: async () => ({ rounds: await listPendingFundingRounds() }),
+  loader: async () => ({
+    rounds: await listPendingFundingRounds(),
+    observations: await listFundingObservations(),
+  }),
   component: AdminFundingPage,
 });
 
@@ -21,7 +27,7 @@ function amountText(amount: number | null, currency: string | null): string {
 }
 
 function AdminFundingPage() {
-  const { rounds: initial } = Route.useLoaderData();
+  const { rounds: initial, observations } = Route.useLoaderData();
   const [rounds, setRounds] = useState(initial);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +97,11 @@ function AdminFundingPage() {
           {notice}
         </p>
       )}
+      <ObservationQueue
+        initial={observations}
+        onApplied={async () => setRounds(await listPendingFundingRounds())}
+      />
+      <h2 className="text-xl font-semibold">Rounds</h2>
       {rounds.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing to review.</p>
       ) : (
@@ -252,5 +263,264 @@ function FundingCorrectionForm({
         </Button>
       </form>
     </details>
+  );
+}
+
+type ObservationAction =
+  | { action: "attach_existing"; roundId: number }
+  | {
+      action: "confirm_new";
+      companyName: string;
+      roundName: string;
+      announcedDate: string | null;
+    }
+  | { action: "reject" };
+
+/** Observations whose identity the administrator must confirm. */
+function ObservationQueue({
+  initial,
+  onApplied,
+}: {
+  initial: FundingObservationView[];
+  onApplied: () => Promise<void>;
+}) {
+  const [items, setItems] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function act(
+    item: FundingObservationView,
+    reason: string,
+    action: ObservationAction,
+  ) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await resolveFundingObservation({
+        data: {
+          ...action,
+          observationId: item.id,
+          expectedRevision: item.decisionRevision,
+          reason,
+        },
+      });
+      if (!result.updated)
+        throw new Error("This observation has changed. Refresh and try again.");
+      if (result.result === "ignored")
+        setError(
+          "Decision saved, but the round was held for review. See the queue.",
+        );
+      setItems(await listFundingObservations());
+      await onApplied();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Decision failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-xl font-semibold">Observations awaiting identity</h2>
+      <p className="text-sm text-muted-foreground">
+        The model found these rounds, but the company, round or announcement
+        date is missing or conflicts. Confirming an identity does not publish
+        anything.
+      </p>
+      {error && (
+        <div
+          role="alert"
+          className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {error}
+        </div>
+      )}
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing to resolve.</p>
+      ) : (
+        <ul className="space-y-3">
+          {items.map((item) => (
+            <ObservationItem
+              key={item.id}
+              item={item}
+              busy={busy}
+              onAct={act}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ObservationItem({
+  item,
+  busy,
+  onAct,
+}: {
+  item: FundingObservationView;
+  busy: boolean;
+  onAct: (
+    item: FundingObservationView,
+    reason: string,
+    action: ObservationAction,
+  ) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [roundId, setRoundId] = useState(item.candidates[0]?.id ?? 0);
+  const [companyName, setCompanyName] = useState(item.companyName);
+  const [roundName, setRoundName] = useState(item.roundName);
+  const [date, setDate] = useState(
+    /^\d{4}-\d{2}-\d{2}$/.test(item.announcedDate ?? "")
+      ? item.announcedDate!
+      : "",
+  );
+  const [dateUnknown, setDateUnknown] = useState(false);
+  const articleUrl = safeHttpUrl(item.articleUrl);
+  const reasonOk = reason.trim().length >= 3;
+  const id = item.id.replace(/[^A-Za-z0-9_-]/g, "-");
+  return (
+    <li className="space-y-2 rounded-lg border bg-card p-4">
+      <h3 className="text-lg font-semibold">
+        {item.companyName} · {item.roundName}
+        {item.announcedDate ? ` · ${item.announcedDate}` : " · date not given"}
+      </h3>
+      <p className="text-xs">
+        {articleUrl ? (
+          <a href={articleUrl} rel="noopener noreferrer" className="underline">
+            {item.articleTitle}
+          </a>
+        ) : (
+          item.articleTitle
+        )}
+        {item.companyHost && ` · host ${item.companyHost}`}
+      </p>
+      <details>
+        <summary className="cursor-pointer text-sm underline">
+          Evidence ({item.evidence.length})
+        </summary>
+        <ul className="mt-2 space-y-1 text-sm">
+          {item.evidence.map((e, i) => (
+            <li key={i}>
+              <span className="font-mono text-xs">{e.field}</span>:{" "}
+              <q>{e.quote}</q>
+            </li>
+          ))}
+        </ul>
+      </details>
+      <label className="grid gap-1 text-sm" htmlFor={`obs-reason-${id}`}>
+        Reason for the decision
+        <textarea
+          className="rounded border bg-background px-3 py-2"
+          id={`obs-reason-${id}`}
+          required
+          minLength={3}
+          maxLength={500}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          disabled={busy}
+        />
+      </label>
+      {item.candidates.length > 0 && (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid gap-1 text-sm" htmlFor={`obs-round-${id}`}>
+            Same company: attach to round
+            <select
+              className="rounded border bg-background px-3 py-2"
+              id={`obs-round-${id}`}
+              value={roundId}
+              onChange={(e) => setRoundId(Number(e.target.value))}
+              disabled={busy}
+            >
+              {item.candidates.map((c) => (
+                <option key={c.id} value={c.id}>
+                  #{c.id} {c.companyName} · {c.roundName} ·{" "}
+                  {c.announcedDate ?? "date unknown"} ·{" "}
+                  {amountText(c.amount, c.currency)} · {c.status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            variant="outline"
+            disabled={busy || !reasonOk || !roundId}
+            onClick={() =>
+              onAct(item, reason, { action: "attach_existing", roundId })
+            }
+          >
+            Attach
+          </Button>
+        </div>
+      )}
+      <form
+        className="grid max-w-lg gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onAct(item, reason, {
+            action: "confirm_new",
+            companyName,
+            roundName,
+            announcedDate: dateUnknown ? null : date,
+          });
+        }}
+      >
+        <label className="grid gap-1 text-sm" htmlFor={`obs-company-${id}`}>
+          Company
+          <input
+            className="rounded border bg-background px-3 py-2"
+            id={`obs-company-${id}`}
+            required
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+        <label className="grid gap-1 text-sm" htmlFor={`obs-roundname-${id}`}>
+          Round
+          <input
+            className="rounded border bg-background px-3 py-2"
+            id={`obs-roundname-${id}`}
+            required
+            value={roundName}
+            onChange={(e) => setRoundName(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+        <label className="grid gap-1 text-sm" htmlFor={`obs-date-${id}`}>
+          Announcement date
+          <input
+            className="rounded border bg-background px-3 py-2"
+            id={`obs-date-${id}`}
+            type="date"
+            required={!dateUnknown}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            disabled={busy || dateUnknown}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={dateUnknown}
+            onChange={(e) => setDateUnknown(e.target.checked)}
+            disabled={busy}
+          />
+          The source does not give the announcement date
+        </label>
+        <div className="flex gap-2">
+          <Button type="submit" disabled={busy || !reasonOk}>
+            Confirm as a new round
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy || !reasonOk}
+            onClick={() => onAct(item, reason, { action: "reject" })}
+          >
+            Reject observation
+          </Button>
+        </div>
+      </form>
+    </li>
   );
 }

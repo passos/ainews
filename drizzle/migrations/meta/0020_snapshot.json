@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "308dfb32-08cb-45fa-bf9d-24e0e25b0900",
+  "id": "2b61d2b4-57b1-4dfd-a13a-afa67fff4f97",
   "prevId": "2b28ac58-6370-412f-a8a2-9097164632ec",
   "tables": {
     "analyses": {
@@ -2192,6 +2192,21 @@
           "notNull": true,
           "autoincrement": true
         },
+        "identity_confirmed": {
+          "name": "identity_confirmed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "identity_json": {
+          "name": "identity_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "company_name": {
           "name": "company_name",
           "type": "text",
@@ -2353,14 +2368,23 @@
         }
       },
       "indexes": {
-        "funding_rounds_active_unique": {
-          "name": "funding_rounds_active_unique",
+        "funding_rounds_published_unique": {
+          "name": "funding_rounds_published_unique",
           "columns": [
             "company_key",
             "round_key"
           ],
           "isUnique": true,
-          "where": "superseded_by IS NULL"
+          "where": "status = 'published' AND superseded_by IS NULL"
+        },
+        "funding_rounds_pending_unique": {
+          "name": "funding_rounds_pending_unique",
+          "columns": [
+            "company_key",
+            "round_key"
+          ],
+          "isUnique": true,
+          "where": "status = 'pending_review'"
         },
         "funding_rounds_sector_idx": {
           "name": "funding_rounds_sector_idx",
@@ -3436,6 +3460,122 @@
         "watches_status_check": {
           "name": "watches_status_check",
           "value": "\"watches\".\"status\" IN ('active', 'paused')"
+        }
+      }
+    },
+    "funding_observations": {
+      "name": "funding_observations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "article_id": {
+          "name": "article_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body_sha": {
+          "name": "body_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_index": {
+          "name": "item_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolution_json": {
+          "name": "resolution_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decision_revision": {
+          "name": "decision_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "funding_observations_state_idx": {
+          "name": "funding_observations_state_idx",
+          "columns": [
+            "state",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "funding_observations_article_id_articles_id_fk": {
+          "name": "funding_observations_article_id_articles_id_fk",
+          "tableFrom": "funding_observations",
+          "tableTo": "articles",
+          "columnsFrom": [
+            "article_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "funding_observations_state_check": {
+          "name": "funding_observations_state_check",
+          "value": "\"funding_observations\".\"state\" IN ('unresolved','ready','applied','rejected')"
         }
       }
     }

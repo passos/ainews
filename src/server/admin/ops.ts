@@ -2,10 +2,29 @@ import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import {
+  applyFundingObservation,
   supersedeFundingRound,
   type FundingRow,
 } from "../../pipeline/funding/extract";
+import {
+  decideFundingObservation,
+  observationPayload,
+  readFundingObservation,
+  type FundingObservation,
+} from "../../pipeline/funding/observations";
+import {
+  concreteFundingRound,
+  fundingCompanyHost,
+  fundingCompanyKey,
+  manualFundingIdentity,
+} from "../../lib/funding/identity";
 import { convertToMicroUsd } from "../../lib/funding/normalize";
+import {
+  fundingObservationActionSchema,
+  type ConfirmedFundingIdentity,
+  type ExtractedRound,
+  type FundingObservationAction,
+} from "../../lib/funding/types";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -1927,4 +1946,207 @@ export async function correctFundingRound(
     now,
     row,
   );
+}
+
+// -----------------------------------------------------------------------------
+// Funding observations (#23). An observation whose identity is missing or
+// conflicting waits here. The administrator attaches it to a round of the
+// same company, confirms a new round, or rejects it. Every action carries the
+// decision revision the page showed, so a stale page changes nothing.
+// -----------------------------------------------------------------------------
+
+export interface FundingObservationView {
+  id: string;
+  articleId: number;
+  articleTitle: string;
+  articleUrl: string;
+  state: "unresolved" | "ready";
+  decisionRevision: number;
+  companyName: string;
+  roundName: string;
+  companyHost: string | null;
+  announcedDate: string | null;
+  evidence: { field: string; quote: string }[];
+  /** Active rounds with the same company key. */
+  candidates: {
+    id: number;
+    companyName: string;
+    roundName: string;
+    announcedDate: string | null;
+    amount: number | null;
+    currency: string;
+    status: string;
+  }[];
+}
+
+function observationEvidence(
+  payload: ExtractedRound,
+): FundingObservationView["evidence"] {
+  const out: FundingObservationView["evidence"] = [];
+  const groups = [
+    ["", payload.identity],
+    ["", payload.reportedFacts],
+    ["correction.", payload.correctionPatch],
+  ] as const;
+  for (const [prefix, group] of groups)
+    for (const [field, value] of Object.entries(group)) {
+      if (!value || typeof value !== "object") continue;
+      const quote =
+        "evidence" in value
+          ? value.evidence.quote
+          : (value as { quote?: string }).quote;
+      if (typeof quote === "string") out.push({ field: prefix + field, quote });
+    }
+  return out;
+}
+
+export async function listFundingObservations(
+  database: D1Database,
+): Promise<FundingObservationView[]> {
+  const { results } = await database
+    .prepare(
+      `SELECT o.*, a.title AS article_title, a.canonical_url AS article_url
+       FROM funding_observations o JOIN articles a ON a.id = o.article_id
+       WHERE o.state IN ('unresolved','ready')
+       ORDER BY o.updated_at ASC, o.id ASC LIMIT 100`,
+    )
+    .all<FundingObservation & { article_title: string; article_url: string }>();
+  const views: FundingObservationView[] = [];
+  for (const row of results ?? []) {
+    const payload = observationPayload(row);
+    const companyKey = fundingCompanyKey(payload.identity.companyName.value);
+    const candidates = companyKey
+      ? (
+          await database
+            .prepare(
+              `SELECT id, company_name, round_name, announced_date, amount, currency, status
+               FROM funding_rounds
+               WHERE company_key = ?1 AND superseded_by IS NULL AND status != 'rejected'
+               ORDER BY id LIMIT 20`,
+            )
+            .bind(companyKey)
+            .all<{
+              id: number;
+              company_name: string;
+              round_name: string;
+              announced_date: string | null;
+              amount: number | null;
+              currency: string;
+              status: string;
+            }>()
+        ).results
+      : [];
+    views.push({
+      id: row.id,
+      articleId: row.article_id,
+      articleTitle: row.article_title,
+      articleUrl: row.article_url,
+      state: row.state as FundingObservationView["state"],
+      decisionRevision: row.decision_revision,
+      companyName: payload.identity.companyName.value,
+      roundName: payload.identity.roundName.value,
+      companyHost: payload.identity.companyHost?.value ?? null,
+      announcedDate: payload.identity.announcedDate?.value ?? null,
+      evidence: observationEvidence(payload),
+      candidates: (candidates ?? []).map((c) => ({
+        id: c.id,
+        companyName: c.company_name,
+        roundName: c.round_name,
+        announcedDate: c.announced_date,
+        amount: c.amount,
+        currency: c.currency,
+        status: c.status,
+      })),
+    });
+  }
+  return views;
+}
+
+function storedIdentity(
+  json: string | null,
+): Partial<ConfirmedFundingIdentity> {
+  try {
+    const value = json ? JSON.parse(json) : null;
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Records the decision with a revision check, then applies it at once. False
+ * when the observation is missing, already applied or rejected, the page was
+ * stale, or the chosen round is not an active round of the same company.
+ */
+export async function resolveFundingObservation(
+  database: D1Database,
+  bodies: R2Bucket,
+  input: FundingObservationAction,
+  now: number = Date.now(),
+): Promise<{
+  updated: boolean;
+  result?: "inserted" | "merged" | "superseded" | "ignored";
+}> {
+  const data = fundingObservationActionSchema.parse(input);
+  const observation = await readFundingObservation(
+    database,
+    data.observationId,
+  );
+  if (!observation) return { updated: false };
+  const payload = observationPayload(observation);
+  let target: ConfirmedFundingIdentity | null = null;
+  if (data.action === "attach_existing") {
+    const companyKey = fundingCompanyKey(payload.identity.companyName.value);
+    const row = await database
+      .prepare(
+        `SELECT * FROM funding_rounds
+         WHERE id = ?1 AND company_key = ?2 AND superseded_by IS NULL AND status != 'rejected'`,
+      )
+      .bind(data.roundId, companyKey)
+      .first<FundingRow>();
+    if (!row) return { updated: false };
+    const prior = storedIdentity(row.identity_json);
+    target = {
+      companyKey: row.company_key,
+      roundKey: row.round_key,
+      companyName: row.company_name,
+      roundName: row.round_name,
+      companyHost: prior.companyHost ?? null,
+      announcedDate: row.announced_date,
+      concreteRound:
+        prior.concreteRound ??
+        concreteFundingRound(row.round_name) ??
+        row.round_key,
+      source: "manual",
+    };
+  } else if (data.action === "confirm_new") {
+    target = manualFundingIdentity({
+      companyName: data.companyName,
+      roundName: data.roundName,
+      announcedDate: data.announcedDate,
+      companyHost: fundingCompanyHost(
+        payload.identity.companyHost?.value ?? null,
+      ),
+    });
+    if (!target) return { updated: false };
+  }
+  const updated = await decideFundingObservation(
+    database,
+    observation.id,
+    data.expectedRevision,
+    target,
+    data.reason,
+    now,
+  );
+  if (!updated || !target) return { updated };
+  return {
+    updated,
+    result: await applyFundingObservation(
+      database,
+      bodies,
+      observation.id,
+      data.expectedRevision + 1,
+      now,
+    ),
+  };
 }

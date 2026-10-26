@@ -39,35 +39,171 @@ export const FUNDING_SECTORS = [
 ] as const;
 export type FundingSector = (typeof FUNDING_SECTORS)[number];
 
-/**
- * The model's answer for one article. The model reports what the article
- * says; keys, stage buckets and micro-USD are computed in code
- * (normalize.ts), never taken from the model.
- */
-export const extractedRoundSchema = z.object({
-  isFundingAnnouncement: z.boolean(),
-  companyName: z.string().min(1).max(200),
-  roundName: z.string().min(1).max(100),
-  amount: z.number().int().safe().nonnegative().nullable().optional(),
-  currency: z.string().min(3).max(3).nullable().optional(),
-  valuation: z.number().int().safe().nonnegative().nullable().optional(),
-  sector: z.string().max(100).nullable().optional(),
-  investors: z.array(z.string().min(1).max(200)).max(50).default([]),
-  leadInvestors: z.array(z.string().min(1).max(200)).max(20).default([]),
-  announcedDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
-  isCorrectionOrUpdate: z.boolean().optional(),
-  correctionReason: z.string().max(500).nullable().optional(),
-});
+export const evidenceSchema = z
+  .object({ quote: z.string().min(1).max(2000) })
+  .strict();
+const name = z.string().trim().min(1).max(200);
+const amount = z.number().int().safe().nonnegative();
+export const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00Z`);
+    return (
+      Number.isFinite(date.getTime()) &&
+      date.toISOString().slice(0, 10) === value
+    );
+  });
+const currency = z
+  .string()
+  .regex(/^[A-Za-z]{3}$/)
+  .transform((value) => value.toUpperCase());
+const names = z.array(name).max(50);
+const reported = <T extends z.ZodType>(value: T) =>
+  z.object({ value, evidence: evidenceSchema }).strict();
+const set = <T extends z.ZodType>(value: T) =>
+  z.object({ op: z.literal("set"), value, evidence: evidenceSchema }).strict();
+const clear = z
+  .object({ op: z.literal("clear"), evidence: evidenceSchema })
+  .strict();
+const listPatch = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("replace"),
+      values: names,
+      evidence: evidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("delta"),
+      add: names,
+      remove: names,
+      evidence: evidenceSchema,
+    })
+    .strict()
+    .refine(
+      (value) =>
+        !value.add.some((name) =>
+          value.remove.some(
+            (removed) =>
+              removed.trim().toLowerCase() === name.trim().toLowerCase(),
+          ),
+        ),
+    ),
+]);
+export const fundingPatchSchema = z
+  .object({
+    companyName: set(name).optional(),
+    roundName: set(name.max(100)).optional(),
+    amount: z.union([set(amount), clear]).optional(),
+    currency: set(currency).optional(),
+    valuation: z.union([set(amount), clear]).optional(),
+    announcedDate: z.union([set(isoDateSchema), clear]).optional(),
+    sector: set(z.enum(FUNDING_SECTORS)).optional(),
+    stage: set(z.enum(FUNDING_STAGES)).optional(),
+    investors: listPatch.optional(),
+    leadInvestors: listPatch
+      .refine((operation) =>
+        operation.op === "replace"
+          ? operation.values.length <= 20
+          : operation.add.length <= 20 && operation.remove.length <= 20,
+      )
+      .optional(),
+  })
+  .strict();
+export const fundingIdentitySchema = z
+  .object({
+    companyName: reported(name),
+    roundName: reported(name.max(100)),
+    companyHost: reported(z.string().min(1).max(500)).nullable(),
+    announcedDate: reported(z.string().min(1).max(80)).nullable(),
+    sameEventEvidence: evidenceSchema.nullable(),
+  })
+  .strict();
+export const reportedFundingFactsSchema = z
+  .object({
+    amount: reported(amount.nullable()).optional(),
+    currency: reported(currency).optional(),
+    valuation: reported(amount.nullable()).optional(),
+    sector: reported(z.enum(FUNDING_SECTORS)).optional(),
+    stage: reported(z.enum(FUNDING_STAGES)).optional(),
+    announcedDate: reported(isoDateSchema.nullable()).optional(),
+    investors: reported(names).optional(),
+    leadInvestors: reported(z.array(name).max(20)).optional(),
+  })
+  .strict();
+export const extractedRoundSchema = z
+  .object({
+    identity: fundingIdentitySchema,
+    reportedFacts: reportedFundingFactsSchema,
+    correctionPatch: fundingPatchSchema,
+    correctionReason: z.string().min(1).max(500).nullable(),
+  })
+  .strict();
 export type ExtractedRound = z.infer<typeof extractedRoundSchema>;
-
-export const extractedFundingBatchSchema = z.object({
-  rounds: z.array(extractedRoundSchema).max(10),
-});
+export type FundingPatch = z.infer<typeof fundingPatchSchema>;
+export const extractedFundingBatchSchema = z
+  .object({
+    version: z.literal(2),
+    rounds: z.array(extractedRoundSchema).max(10),
+  })
+  .strict();
 export type ExtractedFundingBatch = z.infer<typeof extractedFundingBatchSchema>;
+
+export const fundingResolutionSchema = z
+  .object({
+    companyKey: z.string().min(1).max(1000),
+    roundKey: z.string().min(1).max(500),
+    companyName: name,
+    roundName: name,
+    companyHost: z.string().min(1).max(500).nullable(),
+    announcedDate: isoDateSchema.nullable(),
+    concreteRound: z.string().min(1).max(100),
+    source: z.enum(["automatic", "manual"]),
+  })
+  .strict();
+export type ConfirmedFundingIdentity = z.infer<typeof fundingResolutionSchema>;
+const observationAction = {
+  observationId: z.string().min(1).max(500),
+  expectedRevision: z.number().int().nonnegative(),
+  reason: z.string().trim().min(3).max(500),
+};
+/** The three administrator actions on an unresolved funding observation. */
+export const fundingObservationActionSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("attach_existing"),
+      roundId: z.number().int().positive(),
+      ...observationAction,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("confirm_new"),
+      companyName: name,
+      roundName: name.max(100),
+      announcedDate: isoDateSchema.nullable(),
+      ...observationAction,
+    })
+    .strict(),
+  z.object({ action: z.literal("reject"), ...observationAction }).strict(),
+]);
+export type FundingObservationAction = z.infer<
+  typeof fundingObservationActionSchema
+>;
+export interface FundingFacts {
+  companyName: string;
+  roundName: string;
+  amount: number | null;
+  currency: string;
+  valuation: number | null;
+  sector: string;
+  stage: FundingStage;
+  announcedDate: string | null;
+  investors: string[];
+  leadInvestors: string[];
+}
 
 export interface FundingSourceArticle {
   articleId: number;
@@ -75,6 +211,8 @@ export interface FundingSourceArticle {
   url: string;
   title: string;
   seenAt: number;
+  observationId?: string;
+  decisionRevision?: number;
 }
 
 export const fundingCorrectionSchema = z.object({

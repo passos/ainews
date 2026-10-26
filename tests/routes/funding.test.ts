@@ -94,6 +94,43 @@ describe("public funding read layer", () => {
     expect(await getFundingRoundDetails(db(), id)).toBeNull();
   });
 
+  it("hides a round once any one of its sources is revoked, and a round without sources", async () => {
+    const a = await seedArticle({
+      industryId: fin.industryId,
+      sourceId: fin.sourceId,
+      title: "A",
+      url: "https://news.example/a",
+    });
+    const b = await seedArticle({
+      industryId: fin.industryId,
+      sourceId: fin.sourceId,
+      title: "B",
+      url: "https://news.example/b",
+    });
+    await seedReview(a, "approved");
+    await seedReview(b, "approved");
+    const id = await seedRound({
+      status: "published",
+      sector: "robotics",
+      investors: ["Only A Investor"],
+      sources: [
+        { articleId: a, url: "https://news.example/a", title: "A" },
+        { articleId: b, url: "https://news.example/b", title: "B" },
+      ],
+    });
+    await seedRound({ status: "published", sources: [] });
+    expect(
+      (await getPublishedFundingRounds(db())).items.map((r) => r.id),
+    ).toEqual([id]);
+    await seedReview(a, "rejected");
+    expect(await getPublishedFundingRounds(db())).toMatchObject({
+      total: 0,
+      items: [],
+    });
+    expect((await getFundingTrends(db())).roundCount).toBe(0);
+    expect(await getFundingRoundDetails(db(), id)).toBeNull();
+  });
+
   it("does not revive old derived facts when a different article body is approved", async () => {
     const id = await seedRound({ status: "published" });
     const row = await env.DB.prepare(
@@ -359,11 +396,6 @@ describe("public funding read layer", () => {
       status: "published",
       sources: [
         { articleId: good, url: "https://news.example/good", title: "Good" },
-        {
-          articleId: taken,
-          url: "https://news.example/taken",
-          title: "Taken down",
-        },
         { articleId: evil, url: "javascript:alert(1)", title: "Evil" },
       ],
     });
@@ -371,6 +403,19 @@ describe("public funding read layer", () => {
     expect(item.sources).toEqual([
       { articleId: good, url: "https://news.example/good", title: "Good" },
     ]);
+    // A round that cites a revoked source is not public at all.
+    await seedRound({
+      status: "published",
+      sources: [
+        { articleId: good, url: "https://news.example/good", title: "Good" },
+        {
+          articleId: taken,
+          url: "https://news.example/taken",
+          title: "Taken down",
+        },
+      ],
+    });
+    expect((await getPublishedFundingRounds(db())).total).toBe(1);
   });
 
   it("carries public corrections of a round", async () => {

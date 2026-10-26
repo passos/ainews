@@ -14,6 +14,8 @@ export const fundingRounds = sqliteTable(
   "funding_rounds",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
+    identityConfirmed: integer("identity_confirmed").notNull().default(0),
+    identityJson: text("identity_json"),
     companyName: text("company_name").notNull(),
     companyKey: text("company_key").notNull(),
     roundName: text("round_name").notNull(),
@@ -54,7 +56,7 @@ export const fundingRounds = sqliteTable(
     articleId: integer("article_id").references(() => articles.id),
     /** Canonical or source URL of the reporting article */
     sourceUrl: text("source_url").notNull(),
-    /** JSON array of articles reporting this round: Array<{ articleId: number, url: string, title: string, seenAt: number }> */
+    /** JSON array of the articles reporting this round: Array<{ articleId: number, bodySha: string, observationId: string }> */
     sourceArticles: text("source_articles").notNull().default("[]"),
     /** Editorial review status */
     status: text("status", {
@@ -62,7 +64,7 @@ export const fundingRounds = sqliteTable(
     })
       .notNull()
       .default("pending_review"),
-    /** ID of the restating/superseding funding round when corrected, null if latest active round */
+    /** ID of the published version that replaced this published one; null otherwise */
     supersededBy: integer("superseded_by").references(
       (): AnySQLiteColumn => fundingRounds.id,
     ),
@@ -72,9 +74,13 @@ export const fundingRounds = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
-    uniqueIndex("funding_rounds_active_unique")
+    // One public version and one version awaiting review, side by side.
+    uniqueIndex("funding_rounds_published_unique")
       .on(t.companyKey, t.roundKey)
-      .where(sql`superseded_by IS NULL`),
+      .where(sql`status = 'published' AND superseded_by IS NULL`),
+    uniqueIndex("funding_rounds_pending_unique")
+      .on(t.companyKey, t.roundKey)
+      .where(sql`status = 'pending_review'`),
     index("funding_rounds_sector_idx").on(t.sector, t.status),
     index("funding_rounds_stage_idx").on(t.stage, t.status),
     index("funding_rounds_announced_date_idx").on(t.announcedDate, t.status),

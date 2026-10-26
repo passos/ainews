@@ -22,3 +22,4 @@ export * from "./reviews";
 export * from "./settings";
 export * from "./sources";
 export * from "./watches";
+export * from "./funding-observations";

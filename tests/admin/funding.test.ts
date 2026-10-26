@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   correctFundingRound,
   decideFundingRound,
+  listFundingObservations,
   listPendingFundingRounds,
+  resolveFundingObservation,
 } from "../../src/server/admin/ops";
+import { captureFundingObservation } from "../../src/pipeline/funding/observations";
+import { extractedRoundSchema } from "../../src/lib/funding/types";
+import { seedArticle, seedReview } from "../publication/helpers";
 import { adminOr403 } from "../../src/server/admin/access";
 import { getDb } from "../../src/server/db/client";
 import {
@@ -15,6 +20,7 @@ import { seedRound } from "../helpers/funding";
 
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM funding_observations"),
     env.DB.prepare("DELETE FROM corrections"),
     env.DB.prepare("DELETE FROM funding_rounds"),
   ]);
@@ -129,11 +135,13 @@ describe("admin funding review", () => {
       "listPendingFundingRounds",
       "decideFundingRound",
       "correctFundingRound",
+      "listFundingObservations",
+      "resolveFundingObservation",
     ]) {
       await expect(
         adminOr403(
           new Request(`https://news.ioenv.com/_serverFn/${name}`, {
-            method: name === "listPendingFundingRounds" ? "GET" : "POST",
+            method: name.startsWith("list") ? "GET" : "POST",
           }),
           accessEnv,
         ),
@@ -403,5 +411,237 @@ describe("admin funding review", () => {
     expect(
       await correctFundingRound(env.DB, { roundId: replaced, ...input }),
     ).toBe(false);
+  });
+});
+
+const OBSERVATION_BODY = "Acme raised a Seed round of 10 USD, led by Alpha.";
+
+/** An approved Finance article with one unresolved observation (no date). */
+async function seedObservation(): Promise<{ id: string; articleId: number }> {
+  const industry = await env.DB.prepare(
+    "SELECT id FROM industries WHERE slug = 'finance'",
+  ).first<{ id: number }>();
+  if (!industry) await seedRound({ status: "rejected" });
+  const finance = (await env.DB.prepare(
+    "SELECT i.id industry_id, s.id source_id FROM industries i JOIN sources s ON s.industry_id = i.id WHERE i.slug = 'finance'",
+  ).first<{ industry_id: number; source_id: number }>())!;
+  const articleId = await seedArticle({
+    industryId: finance.industry_id,
+    sourceId: finance.source_id,
+    title: "Acme raises seed",
+    url: `https://news.example/acme-${Math.random()}`,
+  });
+  await seedReview(articleId, "approved");
+  await env.BODIES.put(`bodies/${articleId}/sha-current.md`, OBSERVATION_BODY);
+  const quote = { quote: OBSERVATION_BODY };
+  const payload = extractedRoundSchema.parse({
+    identity: {
+      companyName: { value: "Acme", evidence: quote },
+      roundName: { value: "Seed", evidence: quote },
+      companyHost: null,
+      announcedDate: null,
+      sameEventEvidence: null,
+    },
+    reportedFacts: {
+      amount: { value: 10, evidence: quote },
+      currency: { value: "USD", evidence: quote },
+    },
+    correctionPatch: {},
+    correctionReason: null,
+  });
+  const row = await captureFundingObservation(
+    env.DB,
+    articleId,
+    "sha-current",
+    "funding-test",
+    0,
+    payload,
+    OBSERVATION_BODY,
+    1,
+  );
+  expect(row.state).toBe("unresolved");
+  return { id: row.id, articleId };
+}
+
+async function observationState(id: string) {
+  return env.DB.prepare(
+    "SELECT state, decision_revision FROM funding_observations WHERE id = ?1",
+  )
+    .bind(id)
+    .first<{ state: string; decision_revision: number }>();
+}
+
+async function activeRounds() {
+  return (
+    await env.DB.prepare(
+      "SELECT * FROM funding_rounds WHERE superseded_by IS NULL AND status != 'rejected' ORDER BY id",
+    ).all<{
+      id: number;
+      company_key: string;
+      round_key: string;
+      announced_date: string | null;
+      status: string;
+      source_articles: string;
+    }>()
+  ).results;
+}
+
+describe("admin funding observation queue", () => {
+  it("lists unresolved observations with evidence and same-company candidates", async () => {
+    const candidate = await seedRound({
+      company: "Acme",
+      companyKey: "entity:acme",
+      roundKey: "event:seed:2026-10-19",
+    });
+    await seedRound({ company: "Other", companyKey: "entity:other" });
+    const { id, articleId } = await seedObservation();
+    const [view] = await listFundingObservations(env.DB);
+    expect(view).toMatchObject({
+      id,
+      articleId,
+      state: "unresolved",
+      decisionRevision: 0,
+      companyName: "Acme",
+      roundName: "Seed",
+      announcedDate: null,
+    });
+    expect(view.evidence).toContainEqual({
+      field: "companyName",
+      quote: OBSERVATION_BODY,
+    });
+    expect(view.candidates.map((c) => c.id)).toEqual([candidate]);
+  });
+
+  it("attaches an observation to an existing round of the same company once", async () => {
+    const target = await seedRound({
+      company: "Acme",
+      companyKey: "entity:acme",
+      roundKey: "event:seed:2026-10-19",
+      amount: null,
+    });
+    const other = await seedRound({
+      company: "Other",
+      companyKey: "entity:other",
+    });
+    const { id, articleId } = await seedObservation();
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "attach_existing",
+        observationId: id,
+        expectedRevision: 0,
+        roundId: other,
+        reason: "Wrong company",
+      }),
+    ).toMatchObject({ updated: false });
+    expect(await observationState(id)).toEqual({
+      state: "unresolved",
+      decision_revision: 0,
+    });
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "attach_existing",
+        observationId: id,
+        expectedRevision: 0,
+        roundId: target,
+        reason: "Same seed round",
+      }),
+    ).toMatchObject({ updated: true });
+    expect(await observationState(id)).toEqual({
+      state: "applied",
+      decision_revision: 1,
+    });
+    const acme = (await activeRounds()).filter(
+      (r) => r.company_key === "entity:acme",
+    );
+    expect(acme).toHaveLength(1);
+    expect(acme[0].round_key).toBe("event:seed:2026-10-19");
+    expect(
+      JSON.parse(acme[0].source_articles).map(
+        (s: { articleId: number }) => s.articleId,
+      ),
+    ).toContain(articleId);
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "attach_existing",
+        observationId: id,
+        expectedRevision: 0,
+        roundId: target,
+        reason: "Stale page",
+      }),
+    ).toMatchObject({ updated: false });
+  });
+
+  it("ignores an action whose revision differs from the observation's", async () => {
+    const { id } = await seedObservation();
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "reject",
+        observationId: id,
+        expectedRevision: 1,
+        reason: "Page from another revision",
+      }),
+    ).toMatchObject({ updated: false });
+    expect(await observationState(id)).toEqual({
+      state: "unresolved",
+      decision_revision: 0,
+    });
+  });
+
+  it("confirms a new round with an explicitly unknown announcement date", async () => {
+    const { id } = await seedObservation();
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "confirm_new",
+        observationId: id,
+        expectedRevision: 0,
+        companyName: "Acme",
+        roundName: "Seed",
+        announcedDate: null,
+        reason: "Date not disclosed",
+      }),
+    ).toMatchObject({ updated: true, result: "inserted" });
+    expect(await activeRounds()).toEqual([
+      expect.objectContaining({
+        company_key: "entity:acme",
+        round_key: "event:seed:unknown",
+        announced_date: null,
+        status: "pending_review",
+      }),
+    ]);
+    expect(await observationState(id)).toEqual({
+      state: "applied",
+      decision_revision: 1,
+    });
+  });
+
+  it("rejects an observation without writing a round, and a stale page cannot revive it", async () => {
+    const { id } = await seedObservation();
+    expect(
+      await resolveFundingObservation(env.DB, env.BODIES, {
+        action: "reject",
+        observationId: id,
+        expectedRevision: 0,
+        reason: "Not a funding round",
+      }),
+    ).toMatchObject({ updated: true });
+    expect(await observationState(id)).toEqual({
+      state: "rejected",
+      decision_revision: 1,
+    });
+    expect(await activeRounds()).toEqual([]);
+    expect(await listFundingObservations(env.DB)).toEqual([]);
+    for (const expectedRevision of [0, 1])
+      expect(
+        await resolveFundingObservation(env.DB, env.BODIES, {
+          action: "confirm_new",
+          observationId: id,
+          expectedRevision,
+          companyName: "Acme",
+          roundName: "Seed",
+          announcedDate: null,
+          reason: "Stale page",
+        }),
+      ).toMatchObject({ updated: false });
+    expect(await activeRounds()).toEqual([]);
   });
 });

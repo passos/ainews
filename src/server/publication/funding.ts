@@ -10,12 +10,19 @@ import { approvedArticleWhere, type Db } from "./articles";
 export const FUNDING_PAGE_SIZE = 20;
 const TOP_INVESTORS = 10;
 
-/** Current approved evidence is required for both facts and aggregates. */
-const approvedFundingSource: SQL = sql`EXISTS (
-  SELECT 1 FROM json_each(f.source_articles) source
-  JOIN articles a ON a.id = json_extract(source.value, '$.articleId')
-  WHERE a.body_sha = json_extract(source.value, '$.bodySha')
-    AND ${approvedArticleWhere}
+/**
+ * Every source must cite the current, approved body of its article, and there
+ * must be at least one source. One revoked source hides the whole record:
+ * its facts may rest on that source alone.
+ */
+const approvedFundingSource: SQL = sql`(
+  json_array_length(f.source_articles) > 0
+  AND json_array_length(f.source_articles) = (
+    SELECT count(*) FROM json_each(f.source_articles) source
+    JOIN articles a ON a.id = json_extract(source.value, '$.articleId')
+    WHERE a.body_sha = json_extract(source.value, '$.bodySha')
+      AND ${approvedArticleWhere}
+  )
 )`;
 
 /** The table must be aliased f. Superseded facts never remain active. */

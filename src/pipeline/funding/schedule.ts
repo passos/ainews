@@ -23,8 +23,9 @@ export async function enqueueDueFunding(
       AND ${approvedArticleWhere}
       AND EXISTS (SELECT 1 FROM analyses an WHERE an.article_id = a.id
         AND an.content_type = 'funding_round')
-      AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key =
-        'funding:done:' || a.id || ':' || ${FUNDING_PROMPT_VERSION} || ':' || a.body_sha)
+      AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key IN (
+        'funding:done:' || a.id || ':' || ${FUNDING_PROMPT_VERSION} || ':' || a.body_sha,
+        'funding:done:' || a.id || ':funding-v1:' || a.body_sha))
     ORDER BY a.id ASC LIMIT ${limit}`);
 
   const ids = (results ?? []).map((r) => r.id);

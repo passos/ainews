@@ -108,6 +108,7 @@ it("migrations create the core tables", async () => {
     "fetch_hosts",
     "filings",
     "financial_facts",
+    "funding_observations",
     "funding_rounds",
     "industries",
     "llm_calls",
@@ -255,5 +256,45 @@ it("claims and claim_evidence tables exist with proper schema and checks", async
       "verified",
       "created_at",
     ]),
+  );
+});
+
+it("funding observations and identity columns are additive", async () => {
+  const table = await env.DB.prepare(
+    "SELECT sql FROM sqlite_master WHERE name='funding_observations'",
+  ).first<{ sql: string }>();
+  expect(table).not.toBeNull();
+  const columns = await env.DB.prepare(
+    "PRAGMA table_info(funding_observations)",
+  ).all<{ name: string }>();
+  expect(columns.results.map((c) => c.name).sort()).toEqual(
+    [
+      "id",
+      "article_id",
+      "body_sha",
+      "prompt_version",
+      "item_index",
+      "payload_json",
+      "resolution_json",
+      "decision_revision",
+      "state",
+      "created_at",
+      "updated_at",
+    ].sort(),
+  );
+  const indexes = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='funding_observations' AND sql IS NOT NULL",
+  ).all<{ name: string }>();
+  expect(indexes.results.map((i) => i.name)).toEqual([
+    "funding_observations_state_idx",
+  ]);
+  const { results } = await env.DB.prepare(
+    "PRAGMA table_info(funding_rounds)",
+  ).all<{ name: string; dflt_value: string }>();
+  expect(results).toContainEqual(
+    expect.objectContaining({ name: "identity_confirmed", dflt_value: "0" }),
+  );
+  expect(results).toContainEqual(
+    expect.objectContaining({ name: "identity_json" }),
   );
 });

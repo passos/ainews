@@ -13,13 +13,24 @@ import {
   extractFundingRounds,
   type FundingDeps,
   fundingCompletionKey,
+  applyFundingObservation,
 } from "../../src/pipeline/funding/extract";
 import { getDb } from "../../src/server/db/client";
 import {
   getFundingRoundDetails,
   getPublishedFundingRounds,
 } from "../../src/server/publication/funding";
+import {
+  captureFundingObservation,
+  decideFundingObservation,
+} from "../../src/pipeline/funding/observations";
+import {
+  extractedRoundSchema,
+  type ConfirmedFundingIdentity,
+  type ExtractedRound,
+} from "../../src/lib/funding/types";
 import { decideFundingRound } from "../../src/server/admin/ops";
+import { FUNDING_PROMPT_VERSION } from "../../src/pipeline/funding/prompts";
 import { enqueueDueFunding } from "../../src/pipeline/funding/schedule";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
@@ -52,23 +63,76 @@ interface RoundOut {
   correctionReason?: string | null;
 }
 
-/** A fake `reason` slot that answers with the given rounds and counts calls. */
+const FUNDING_BODY =
+  "Funding announcement 2026-10-19 https://acme.example Acme AI Series A Seed.";
+function v2Envelope(input: { rounds: RoundOut[] }, quote = FUNDING_BODY) {
+  const evidenced = <T>(value: T) => ({ value, evidence: { quote } });
+  return {
+    version: 2,
+    rounds: input.rounds
+      .filter((round) => round.isFundingAnnouncement !== false)
+      .map((round) => ({
+        identity: {
+          companyName: evidenced(round.companyName),
+          roundName: evidenced(round.roundName),
+          companyHost: evidenced(
+            `https://${normalizeCompanyKey(round.companyName)}.example`,
+          ),
+          announcedDate:
+            round.announcedDate === null
+              ? null
+              : evidenced(round.announcedDate ?? "2026-10-19"),
+          sameEventEvidence: null,
+        },
+        reportedFacts: Object.fromEntries(
+          [
+            "amount",
+            "currency",
+            "valuation",
+            "sector",
+            "investors",
+            "leadInvestors",
+          ]
+            .filter(
+              (key) =>
+                key in round &&
+                (key !== "currency" || round.currency !== null) &&
+                (key !== "sector" ||
+                  ["fintech", "ai_infrastructure", "robotics"].includes(
+                    round.sector ?? "",
+                  )),
+            )
+            .map((key) => [key, evidenced(round[key as keyof RoundOut])]),
+        ),
+        correctionPatch:
+          round.amount !== null && round.amount !== undefined && round.currency
+            ? {
+                amount: { op: "set", value: round.amount, evidence: { quote } },
+                currency: {
+                  op: "set",
+                  value: round.currency,
+                  evidence: { quote },
+                },
+              }
+            : {},
+        correctionReason: round.correctionReason ?? null,
+      })),
+  };
+}
+/** Synthetic transport response uses the actual supplied body quote; new v2 cases exercise ordinary facts separately. */
 function fakeModels(rounds: RoundOut[] | string) {
   const calls: string[] = [];
   const models: FundingDeps["models"] = {
-    async generateText(_slot, key) {
+    async generateText(_slot, key, request) {
       calls.push(key);
-      const text =
-        typeof rounds === "string"
-          ? rounds
-          : JSON.stringify({
-              rounds: rounds.map((r) => ({
-                isFundingAnnouncement: true,
-                ...r,
-              })),
-            });
+      const material = JSON.parse(
+        request.prompt.slice(request.prompt.indexOf("{")),
+      );
       return {
-        text,
+        text:
+          typeof rounds === "string"
+            ? rounds
+            : JSON.stringify(v2Envelope({ rounds }, material.body)),
         usage: { inputTokens: 1, outputTokens: 1 },
         finishReason: "STOP",
       };
@@ -91,7 +155,7 @@ function interleaveAfterEmptyRead(
         if (property === "first")
           return async (...args: unknown[]) => {
             const row = await Reflect.apply(target.first, target, args);
-            if (pending && row === null) {
+            if (pending && (activeRead ? row === null : row !== null)) {
               pending = false;
               await run();
             }
@@ -107,7 +171,7 @@ function interleaveAfterEmptyRead(
       return query.startsWith(
         activeRead
           ? "SELECT * FROM funding_rounds"
-          : "SELECT 1 FROM funding_rounds f, json_each",
+          : "SELECT canonical_url,title FROM articles",
       )
         ? wrap(stmt)
         : stmt;
@@ -124,6 +188,7 @@ async function seedArticle(opts?: {
   approved?: boolean;
   industryId?: number;
   fundingType?: boolean;
+  body?: string;
 }): Promise<number> {
   seq += 1;
   const sha = `sha${String(seq).padStart(20, "0")}`;
@@ -142,10 +207,7 @@ async function seedArticle(opts?: {
     )
     .first<{ id: number }>();
   const id = row!.id;
-  await env.BODIES.put(
-    `bodies/${id}/${sha}.md`,
-    `Acme AI raised money. Report ${seq}.`,
-  );
+  await env.BODIES.put(`bodies/${id}/${sha}.md`, opts?.body ?? FUNDING_BODY);
   if (opts?.approved !== false) {
     await env.DB.prepare(
       `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
@@ -191,6 +253,7 @@ async function allRounds(): Promise<ActiveRow[]> {
 
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM funding_observations"),
     env.DB.prepare("DELETE FROM corrections"),
     env.DB.prepare("DELETE FROM funding_rounds"),
     env.DB.prepare("DELETE FROM llm_calls"),
@@ -201,6 +264,567 @@ beforeEach(async () => {
   sourceId = await seedSource({
     industryId: financeId,
     feedUrl: "https://news.example/feed",
+  });
+});
+
+function protocolRound(quote = FUNDING_BODY): ExtractedRound {
+  const batch = v2Envelope(
+    {
+      rounds: [
+        { companyName: "Acme", roundName: "Seed", amount: 10, currency: "USD" },
+      ],
+    },
+    quote,
+  );
+  const round = extractedRoundSchema.parse(batch.rounds[0]);
+  round.correctionPatch = {};
+  return round;
+}
+const protocolModels = (rounds: ExtractedRound[]): FundingDeps["models"] => ({
+  generateText: async () => ({
+    text: JSON.stringify({ version: 2, rounds }),
+    finishReason: "STOP",
+    usage: { inputTokens: 1, outputTokens: 1 },
+  }),
+});
+const manualTarget: ConfirmedFundingIdentity = {
+  companyKey: "manual:acme",
+  roundKey: "manual:seed",
+  companyName: "Acme",
+  roundName: "Seed",
+  companyHost: null,
+  announcedDate: null,
+  concreteRound: "seed",
+  source: "manual",
+};
+async function observations() {
+  return (
+    await env.DB.prepare(
+      "SELECT * FROM funding_observations ORDER BY article_id,item_index",
+    ).all<
+      import("../../src/pipeline/funding/observations").FundingObservation
+    >()
+  ).results;
+}
+
+describe("funding v2 observations", () => {
+  it.each([false, true])(
+    "ten date-missing observations become one round after manual association (missing host=%s)",
+    async (missingHost) => {
+      for (let i = 0; i < 10; i++) {
+        const id = await seedArticle();
+        const round = protocolRound();
+        if (missingHost) round.identity.companyHost = null;
+        round.identity.announcedDate = null;
+        await extractFundingRounds(pEnv(), id, NOW, {
+          models: protocolModels([round]),
+        });
+      }
+      expect(await allRounds()).toEqual([]);
+      const rows = await observations();
+      expect(rows.every((row) => row.state === "unresolved")).toBe(true);
+      const reviews = (
+        await env.DB.prepare("SELECT * FROM reviews ORDER BY article_id").all()
+      ).results;
+      for (const row of rows) {
+        expect(
+          await decideFundingObservation(
+            env.DB,
+            row.id,
+            0,
+            manualTarget,
+            "Confirmed same round; date not disclosed",
+            NOW,
+          ),
+        ).toBe(true);
+        await applyFundingObservation(env.DB, env.BODIES, row.id, 1, NOW);
+      }
+      expect(await allRounds()).toHaveLength(1);
+      expect((await allRounds())[0].announced_date).toBeNull();
+      expect(JSON.parse((await allRounds())[0].source_articles)).toHaveLength(
+        10,
+      );
+      expect(
+        (
+          await env.DB.prepare(
+            "SELECT * FROM reviews ORDER BY article_id",
+          ).all()
+        ).results,
+      ).toEqual(reviews);
+      expect(
+        await decideFundingObservation(
+          env.DB,
+          rows[0].id,
+          0,
+          manualTarget,
+          "Duplicate decision",
+          NOW,
+        ),
+      ).toBe(false);
+      expect(
+        await applyFundingObservation(env.DB, env.BODIES, rows[0].id, 0, NOW),
+      ).toBe("ignored");
+      expect(
+        await applyFundingObservation(env.DB, env.BODIES, rows[0].id, 1, NOW),
+      ).toBe("ignored");
+    },
+  );
+
+  it("keeps distinct announcement dates separate and keys a company by name with or without a host", async () => {
+    for (const [host, date] of [
+      ["https://acme.example", "2026-10-19"],
+      ["https://acme.example", "2026-10-20"],
+      [null, "2026-10-19"],
+    ] as const) {
+      const quote = `Acme Seed 10 USD announced ${date}${host ? ` by ${host}` : ""}`;
+      const id = await seedArticle({ body: quote });
+      const round = protocolRound(quote);
+      if (host) round.identity.companyHost!.value = host;
+      else round.identity.companyHost = null;
+      round.identity.announcedDate!.value = date;
+      await extractFundingRounds(pEnv(), id, NOW, {
+        models: protocolModels([round]),
+      });
+    }
+    const rows = await allRounds();
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.company_key))).toEqual(
+      new Set(["entity:acme"]),
+    );
+    expect((await observations()).every((row) => row.state === "applied")).toBe(
+      true,
+    );
+    expect(
+      JSON.parse(
+        rows.find((row) => row.announced_date === "2026-10-19")!
+          .source_articles,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("applies evidenced valuation/date/list corrections to a pending version of the same stable event", async () => {
+    const quote =
+      "Acme Seed on 2026-10-19; corrected valuation 80, announcement 2026-10-18, Alpha removed and Gamma leads; same financing.";
+    const first = await seedArticle({ body: quote });
+    const base = protocolRound(quote);
+    base.reportedFacts.valuation = { value: 100, evidence: { quote } };
+    base.reportedFacts.investors = {
+      value: ["Alpha", "Beta"],
+      evidence: { quote },
+    };
+    base.reportedFacts.leadInvestors = {
+      value: ["Alpha"],
+      evidence: { quote },
+    };
+    await extractFundingRounds(pEnv(), first, NOW, {
+      models: protocolModels([base]),
+    });
+    const old = (await allRounds())[0];
+    await decideFundingRound(env.DB, old.id, "published");
+    const second = await seedArticle({ body: quote });
+    const next = protocolRound(quote);
+    next.identity.sameEventEvidence = { quote };
+    next.correctionReason = "Company corrected the financing details";
+    next.correctionPatch = {
+      valuation: { op: "set", value: 80, evidence: { quote } },
+      announcedDate: { op: "set", value: "2026-10-18", evidence: { quote } },
+      investors: { op: "replace", values: [], evidence: { quote } },
+      leadInvestors: {
+        op: "delta",
+        add: ["Gamma"],
+        remove: ["Alpha"],
+        evidence: { quote },
+      },
+    };
+    await extractFundingRounds(pEnv(), second, NOW, {
+      models: protocolModels([next]),
+    });
+    const rows = await allRounds();
+    expect(rows).toHaveLength(2);
+    expect(rows[1].round_key).toBe(old.round_key);
+    expect(rows[1]).toMatchObject({
+      status: "pending_review",
+      announced_date: "2026-10-18",
+      investors: "[]",
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT valuation,lead_investors FROM funding_rounds WHERE id=?1",
+      )
+        .bind(rows[1].id)
+        .first(),
+    ).toEqual({ valuation: 80, lead_investors: '["Gamma"]' });
+    expect(
+      await env.DB.prepare(
+        "SELECT valuation,announced_date FROM funding_rounds WHERE id=?1",
+      )
+        .bind(old.id)
+        .first(),
+    ).toEqual({ valuation: 100, announced_date: "2026-10-19" });
+  });
+
+  it.each([1, 10])(
+    "fully captures and applies %i complete v2 rounds",
+    async (count) => {
+      const quote = Array.from(
+        { length: count },
+        (_, i) =>
+          `Company ${i} https://company${i}.example Seed 2026-10-19 raised 10 USD, corrected to 12; Alpha joins`,
+      ).join("; ");
+      const rounds = Array.from({ length: count }, (_, i) => {
+        const round = protocolRound(quote);
+        round.identity.companyName.value = `Company ${i}`;
+        round.identity.companyHost!.value = `https://company${i}.example`;
+        round.correctionPatch = {
+          amount: { op: "set", value: 12, evidence: { quote } },
+          investors: {
+            op: "delta",
+            add: ["Alpha"],
+            remove: [],
+            evidence: { quote },
+          },
+        };
+        return round;
+      });
+      const id = await seedArticle({ body: quote });
+      await extractFundingRounds(pEnv(), id, NOW, {
+        models: protocolModels(rounds),
+      });
+      expect(await allRounds()).toHaveLength(count);
+      expect((await allRounds()).every((row) => row.amount === 12)).toBe(true);
+      expect(
+        (await observations()).filter((row) => row.state === "applied"),
+      ).toHaveLength(count);
+    },
+  );
+
+  it("processes an excerpt without changing the complete R2 body or its version", async () => {
+    const body = FUNDING_BODY + "\n" + "x".repeat(18000);
+    const id = await seedArticle({ body });
+    const before = await env.DB.prepare(
+      "SELECT body_sha FROM articles WHERE id=?1",
+    )
+      .bind(id)
+      .first<{ body_sha: string }>();
+    await extractFundingRounds(pEnv(), id, NOW, {
+      models: {
+        generateText: async (_slot, _key, request) => {
+          const material = JSON.parse(
+            request.prompt.slice(request.prompt.indexOf("{")),
+          );
+          expect(material.body).toBe(body.slice(0, 12000));
+          expect(material.bodyIsExcerpt).toBe(true);
+          expect(request.maxOutputTokens).toBe(8000);
+          return {
+            text: JSON.stringify({ version: 2, rounds: [protocolRound()] }),
+            finishReason: "STOP",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        },
+      },
+    });
+    expect(
+      await env.DB.prepare("SELECT body_sha FROM articles WHERE id=?1")
+        .bind(id)
+        .first(),
+    ).toEqual(before);
+    expect(
+      await (await env.BODIES.get(
+        `bodies/${id}/${before!.body_sha}.md`,
+      ))!.text(),
+    ).toBe(body);
+  });
+
+  it.each(["eleven", "round_limit", "MAX_TOKENS", "SAFETY", "invalid_quote"])(
+    "rejects %s without partial business writes",
+    async (kind) => {
+      const id = await seedArticle();
+      const round = protocolRound();
+      if (kind === "invalid_quote")
+        round.identity.companyName.evidence.quote = "not in this body";
+      const text = JSON.stringify(
+        kind === "round_limit"
+          ? { error: "round_limit" }
+          : {
+              version: 2,
+              rounds: Array.from(
+                { length: kind === "eleven" ? 11 : 1 },
+                () => round,
+              ),
+            },
+      );
+      await expect(
+        extractFundingRounds(pEnv(), id, NOW, {
+          models: {
+            generateText: async () => ({
+              text,
+              finishReason: ["MAX_TOKENS", "SAFETY"].includes(kind)
+                ? kind
+                : "STOP",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            }),
+          },
+        }),
+      ).rejects.toThrow();
+      expect(await allRounds()).toEqual([]);
+      expect(await observations()).toEqual([]);
+      expect(
+        (await env.DB.prepare(
+          "SELECT count(*) n FROM settings WHERE key LIKE 'funding:done:%'",
+        ).first<{ n: number }>())!.n,
+      ).toBe(0);
+    },
+  );
+
+  it.each(["capture", "application", "receipt", "marker"])(
+    "reuses the completed ledger response after a %s failure",
+    async (point) => {
+      const id = await seedArticle();
+      let calls = 0;
+      const transport: ModelTransport = {
+        run: async () => {
+          calls++;
+          return {
+            candidates: [
+              {
+                content: {
+                  role: "model",
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        version: 2,
+                        rounds: [protocolRound()],
+                      }),
+                    },
+                  ],
+                },
+                finishReason: "STOP",
+              },
+            ],
+            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+          };
+        },
+      };
+      const trigger =
+        point === "capture"
+          ? "BEFORE INSERT ON funding_observations"
+          : point === "application"
+            ? "BEFORE INSERT ON funding_rounds"
+            : point === "receipt"
+              ? "BEFORE UPDATE ON funding_observations WHEN NEW.state='applied'"
+              : "BEFORE INSERT ON settings WHEN NEW.key LIKE 'funding:done:%'";
+      await env.DB.prepare(
+        `CREATE TRIGGER fail_observation ${trigger} BEGIN SELECT RAISE(ABORT,'injected ${point}'); END`,
+      ).run();
+      try {
+        await expect(
+          extractFundingRounds(pEnv(), id, NOW, { transport }),
+        ).rejects.toThrow(/injected/);
+      } finally {
+        await env.DB.prepare("DROP TRIGGER fail_observation").run();
+      }
+      if (point === "receipt") expect(await allRounds()).toEqual([]);
+      await extractFundingRounds(pEnv(), id, NOW + 1, { transport });
+      expect(calls).toBe(1);
+      expect(await allRounds()).toHaveLength(1);
+      const rows = await observations();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ state: "applied", decision_revision: 1 });
+      expect(JSON.parse((await allRounds())[0].source_articles)).toHaveLength(
+        1,
+      );
+    },
+  );
+
+  it.each([false, true])(
+    "keeps capture immutable and blocks a stale decision (same target=%s)",
+    async (sameTarget) => {
+      const id = await seedArticle();
+      const round = protocolRound();
+      round.identity.announcedDate = null;
+      await extractFundingRounds(pEnv(), id, NOW, {
+        models: protocolModels([round]),
+      });
+      const captured = (await observations())[0];
+      await decideFundingObservation(
+        env.DB,
+        captured.id,
+        0,
+        manualTarget,
+        "Confirmed unknown date",
+        NOW,
+      );
+      const changed = protocolRound();
+      changed.reportedFacts.amount!.value = 999;
+      const retry = await captureFundingObservation(
+        env.DB,
+        id,
+        captured.body_sha,
+        FUNDING_PROMPT_VERSION,
+        0,
+        changed,
+        FUNDING_BODY,
+        NOW,
+      );
+      expect(retry.payload_json).toBe(captured.payload_json);
+      expect(retry.decision_revision).toBe(1);
+      const other = sameTarget
+        ? manualTarget
+        : {
+            ...manualTarget,
+            companyKey: "manual:other",
+            roundKey: "manual:other-event",
+          };
+      const db = interleaveAfterEmptyRead(async () => {
+        await decideFundingObservation(
+          env.DB,
+          captured.id,
+          1,
+          other,
+          "Explicit different entity",
+          NOW,
+        );
+      });
+      expect(
+        await applyFundingObservation(db, env.BODIES, captured.id, 1, NOW),
+      ).toBe("ignored");
+      expect(await allRounds()).toEqual([]);
+      await applyFundingObservation(env.DB, env.BODIES, captured.id, 2, NOW);
+      expect((await allRounds())[0].company_key).toBe(other.companyKey);
+      expect(
+        await applyFundingObservation(env.DB, env.BODIES, captured.id, 1, NOW),
+      ).toBe("ignored");
+    },
+  );
+
+  it("does not pay to reanalyze a legacy completed body but allows a different body", async () => {
+    const id = await seedArticle();
+    const article = await env.DB.prepare(
+      "SELECT body_sha FROM articles WHERE id=?1",
+    )
+      .bind(id)
+      .first<{ body_sha: string }>();
+    await env.DB.prepare(
+      "INSERT INTO settings(key,value,updated_at) VALUES (?1,'true',0)",
+    )
+      .bind(`funding:done:${id}:funding-v1:${article!.body_sha}`)
+      .run();
+    const models = fakeModels([{ companyName: "Acme", roundName: "Seed" }]);
+    expect(
+      await extractFundingRounds(pEnv(), id, NOW, { models: models.models }),
+    ).toMatchObject({ status: "skipped", reason: "already_completed" });
+    expect(models.calls).toEqual([]);
+    const sent: GenerateMessage[] = [];
+    const queue = {
+      ...pEnv(),
+      Q_GENERATE: {
+        sendBatch: async (items: { body: GenerateMessage }[]) => {
+          sent.push(...items.map((item) => item.body));
+        },
+      },
+    } as unknown as PipelineEnv;
+    expect(await enqueueDueFunding(queue, NOW)).toEqual([]);
+    await env.DB.prepare("UPDATE articles SET body_sha='v2-new' WHERE id=?1")
+      .bind(id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO reviews(article_id,body_sha,decision,reviewer,created_at) VALUES (?1,'v2-new','approved','test',0)",
+    )
+      .bind(id)
+      .run();
+    await env.BODIES.put(`bodies/${id}/v2-new.md`, FUNDING_BODY);
+    expect(await enqueueDueFunding(queue, NOW)).toEqual([id]);
+    await extractFundingRounds(pEnv(), id, NOW, {
+      models: protocolModels([protocolRound()]),
+    });
+    expect(await allRounds()).toHaveLength(1);
+  });
+
+  it("a stale page cannot reassign an applied observation", async () => {
+    const id = await seedArticle();
+    const round = protocolRound();
+    round.identity.announcedDate = null;
+    await extractFundingRounds(pEnv(), id, NOW, {
+      models: protocolModels([round]),
+    });
+    const [captured] = await observations();
+    expect(
+      await decideFundingObservation(
+        env.DB,
+        captured.id,
+        0,
+        manualTarget,
+        "Confirmed unknown date",
+        NOW,
+      ),
+    ).toBe(true);
+    expect(
+      await applyFundingObservation(env.DB, env.BODIES, captured.id, 1, NOW),
+    ).toBe("inserted");
+    const before = await allRounds();
+    const other = {
+      ...manualTarget,
+      companyKey: "manual:other",
+      roundKey: "manual:other-event",
+    };
+    expect(
+      await decideFundingObservation(
+        env.DB,
+        captured.id,
+        1,
+        other,
+        "Stale page decision",
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      await applyFundingObservation(env.DB, env.BODIES, captured.id, 2, NOW),
+    ).toBe("ignored");
+    expect(await allRounds()).toEqual(before);
+    expect((await observations())[0]).toMatchObject({
+      state: "applied",
+      decision_revision: 1,
+    });
+  });
+
+  it("keeps one source per article when its body version changes, and stays public", async () => {
+    const id = await seedArticle();
+    const { models } = fakeModels([
+      { companyName: "Acme", roundName: "Seed", amount: 10, currency: "USD" },
+    ]);
+    await extractFundingRounds(pEnv(), id, NOW, { models });
+    const [round] = await allRounds();
+    expect(await decideFundingRound(env.DB, round.id, "published")).toBe(true);
+    await env.DB.prepare("UPDATE articles SET body_sha='new-body' WHERE id=?1")
+      .bind(id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO reviews(article_id,body_sha,decision,reviewer,created_at) VALUES (?1,'new-body','approved','test',0)",
+    )
+      .bind(id)
+      .run();
+    await env.BODIES.put(`bodies/${id}/new-body.md`, FUNDING_BODY);
+    await extractFundingRounds(pEnv(), id, NOW + 1, { models });
+    const active = (await allRounds()).filter((r) => r.superseded_by === null);
+    expect(active).toHaveLength(1);
+    const sources = JSON.parse(active[0].source_articles);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ articleId: id, bodySha: "new-body" });
+    expect(
+      (await getPublishedFundingRounds(getDb(env.DB))).items.map((r) => r.id),
+    ).toEqual([active[0].id]);
+  });
+
+  it("a new record has no correction reason", async () => {
+    const id = await seedArticle();
+    const round = protocolRound();
+    round.correctionReason = null;
+    await extractFundingRounds(pEnv(), id, NOW, {
+      models: protocolModels([round]),
+    });
+    const rows = await allRounds();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].correction_reason).toBeNull();
   });
 });
 
@@ -423,7 +1047,7 @@ describe("extractFundingRounds", () => {
     )
       .bind(id)
       .run();
-    await env.BODIES.put(`bodies/${id}/new-body.md`, "updated report");
+    await env.BODIES.put(`bodies/${id}/new-body.md`, FUNDING_BODY);
     await extractFundingRounds(pEnv(), id, NOW + 1, { models: model(12) });
     expect(
       (await allRounds()).find((r) => r.superseded_by === null)!.amount,
@@ -485,21 +1109,38 @@ describe("extractFundingRounds", () => {
     },
   );
 
-  it("compares cross-currency large rounds without nullable numeric caches", async () => {
+  it("holds native-currency conflicts for review despite approximate FX equivalence", async () => {
     for (const [amount, currency] of [
       [13_000_000_000, "USD"],
       [10_000_000_000, "GBP"],
     ] as const) {
       const id = await seedArticle();
       await extractFundingRounds(pEnv(), id, NOW, {
-        models: fakeModels([
-          { companyName: "Acme", roundName: "Seed", amount, currency },
-        ]).models,
+        models: {
+          generateText: async () => {
+            const batch = v2Envelope({
+              rounds: [
+                { companyName: "Acme", roundName: "Seed", amount, currency },
+              ],
+            });
+            batch.rounds[0].correctionPatch = {};
+            return {
+              text: JSON.stringify(batch),
+              finishReason: "STOP",
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        },
       });
     }
     expect(await allRounds()).toMatchObject([
       { amount: 13_000_000_000, currency: "USD", amount_micros: null },
     ]);
+    expect(
+      (await env.DB.prepare(
+        "SELECT count(*) n FROM funding_observations WHERE state='unresolved'",
+      ).first<{ n: number }>())!.n,
+    ).toBe(1);
   });
 
   it("retains an explicit non-amount correction reason when existing rules create a pending version", async () => {
@@ -640,8 +1281,8 @@ describe("extractFundingRounds", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0];
     expect(row.superseded_by).toBeNull();
-    expect(row.company_key).toBe("acme-ai");
-    expect(row.round_key).toBe("series_a");
+    expect(row.company_key).toBe("entity:acme-ai");
+    expect(row.round_key).toBe("event:series_a:2026-10-19");
     expect(row.status).toBe("pending_review");
     expect(row.amount_micros).toBe(12_000_000_000_000);
     expect(JSON.parse(row.source_articles)).toHaveLength(10);
@@ -847,13 +1488,14 @@ describe("extractFundingRounds", () => {
       },
     ]);
     await extractFundingRounds(pEnv(), id, NOW, { models });
-    const [row] = await allRounds();
-    expect(row.amount).toBeNull();
-    expect(row.amount_micros).toBeNull();
-    expect(row.round_key).toBe("undisclosed");
-    expect(row.stage).toBe("undisclosed");
-    // Falls back to the article's own publication date.
-    expect(row.announced_date).toBe("2026-10-20");
+    expect(await allRounds()).toEqual([]);
+    const observation = await env.DB.prepare(
+      "SELECT state,payload_json FROM funding_observations",
+    ).first<{ state: string; payload_json: string }>();
+    expect(observation!.state).toBe("unresolved");
+    expect(
+      JSON.parse(observation!.payload_json).identity.announcedDate,
+    ).toBeNull();
   });
 
   it("an amount may be filled later on an unpublished record", async () => {
@@ -944,17 +1586,19 @@ describe("extractFundingRounds", () => {
                 role: "model",
                 parts: [
                   {
-                    text: JSON.stringify({
-                      rounds: [
-                        {
-                          isFundingAnnouncement: true,
-                          companyName: "Acme AI",
-                          roundName: "Seed",
-                          amount: 1_000_000,
-                          currency: "USD",
-                        },
-                      ],
-                    }),
+                    text: JSON.stringify(
+                      v2Envelope({
+                        rounds: [
+                          {
+                            isFundingAnnouncement: true,
+                            companyName: "Acme AI",
+                            roundName: "Seed",
+                            amount: 1_000_000,
+                            currency: "USD",
+                          },
+                        ],
+                      }),
+                    ),
                   },
                 ],
               },
@@ -1018,24 +1662,26 @@ describe("enqueueDueFunding", () => {
                 role: "model",
                 parts: [
                   {
-                    text: JSON.stringify({
-                      rounds: [
-                        {
-                          isFundingAnnouncement: true,
-                          companyName: "Acme",
-                          roundName: "Seed",
-                          amount: 10,
-                          currency: "USD",
-                        },
-                        {
-                          isFundingAnnouncement: true,
-                          companyName: "Broken",
-                          roundName: "Seed",
-                          amount: 1,
-                          currency: "USD",
-                        },
-                      ],
-                    }),
+                    text: JSON.stringify(
+                      v2Envelope({
+                        rounds: [
+                          {
+                            isFundingAnnouncement: true,
+                            companyName: "Acme",
+                            roundName: "Seed",
+                            amount: 10,
+                            currency: "USD",
+                          },
+                          {
+                            isFundingAnnouncement: true,
+                            companyName: "Broken",
+                            roundName: "Seed",
+                            amount: 1,
+                            currency: "USD",
+                          },
+                        ],
+                      }),
+                    ),
                   },
                 ],
               },
@@ -1047,7 +1693,7 @@ describe("enqueueDueFunding", () => {
       },
     };
     await env.DB.prepare(
-      "CREATE TRIGGER funding_fail BEFORE INSERT ON funding_rounds WHEN NEW.company_key = 'broken' BEGIN SELECT RAISE(ABORT, 'business failure'); END",
+      "CREATE TRIGGER funding_fail BEFORE INSERT ON funding_rounds WHEN NEW.company_name = 'Broken' BEGIN SELECT RAISE(ABORT, 'business failure'); END",
     ).run();
     try {
       await expect(
@@ -1085,7 +1731,10 @@ describe("enqueueDueFunding", () => {
       run: async () => ({
         candidates: [
           {
-            content: { role: "model", parts: [{ text: '{"rounds":[]}' }] },
+            content: {
+              role: "model",
+              parts: [{ text: '{"version":2,"rounds":[]}' }],
+            },
             finishReason: "STOP",
           },
         ],
@@ -1115,17 +1764,19 @@ describe("enqueueDueFunding", () => {
               role: "model",
               parts: [
                 {
-                  text: JSON.stringify({
-                    rounds: [
-                      {
-                        isFundingAnnouncement: true,
-                        companyName: "Acme AI",
-                        roundName: "Seed",
-                        amount: 1_000_000,
-                        currency: "USD",
-                      },
-                    ],
-                  }),
+                  text: JSON.stringify(
+                    v2Envelope({
+                      rounds: [
+                        {
+                          isFundingAnnouncement: true,
+                          companyName: "Acme AI",
+                          roundName: "Seed",
+                          amount: 1_000_000,
+                          currency: "USD",
+                        },
+                      ],
+                    }),
+                  ),
                 },
               ],
             },

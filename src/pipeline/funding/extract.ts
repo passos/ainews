@@ -1,18 +1,26 @@
+import {
+  applyFundingPatch,
+  reportedFundingFacts,
+  validateFundingEvidence,
+} from "../../lib/funding/identity";
+import {
+  captureFundingObservation,
+  fundingDecisionGuard,
+  fundingReceiptStatement,
+  fundingStatement,
+  holdFundingObservation,
+  observationPayload,
+  readFundingObservation,
+  type ObservationApplication,
+} from "./observations";
 import { sql, type SQL } from "drizzle-orm";
-import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+
 import { approvedArticleWhere } from "../../server/publication/articles";
 import { isEnabled } from "../../lib/flags";
-import {
-  convertToMicroUsd,
-  convertToMicroUsdExact,
-  mergeNames,
-  normalizeCompanyKey,
-  normalizeRoundKey,
-  normalizeSector,
-  stageForRoundKey,
-} from "../../lib/funding/normalize";
+import { convertToMicroUsd, mergeNames } from "../../lib/funding/normalize";
 import type {
-  ExtractedRound,
+  ConfirmedFundingIdentity,
+  FundingFacts,
   FundingSourceArticle,
   FundingStatus,
 } from "../../lib/funding/types";
@@ -60,7 +68,7 @@ export interface FundingRow {
   valuation: number | null;
   valuation_micros: number | null;
   sector: string;
-  stage: string;
+  stage: FundingFacts["stage"];
   investors: string;
   lead_investors: string;
   announced_date: string | null;
@@ -70,6 +78,8 @@ export interface FundingRow {
   status: FundingStatus;
   superseded_by: number | null;
   updated_at: number;
+  identity_confirmed: number;
+  identity_json: string | null;
 }
 
 /** The model ledger key. Business completion is recorded separately. */
@@ -116,25 +126,10 @@ function parseSources(json: string): FundingSourceArticle[] {
   }
 }
 
-/** Same amount, or one side unknown. Different currencies: within 10%. */
-function sameAmount(
-  existing: Pick<FundingRow, "amount" | "currency" | "amount_micros">,
-  next: { amount: number | null; currency: string; micros: number | null },
-): boolean {
-  if (existing.amount === null || next.amount === null) return true;
-  if (existing.currency === next.currency)
-    return existing.amount === next.amount;
-  const before = convertToMicroUsdExact(existing.amount, existing.currency);
-  const after = convertToMicroUsdExact(next.amount, next.currency);
-  if (before === null || after === null) return false;
-  const difference = before > after ? before - after : after - before;
-  return difference * 10n <= (before > after ? before : after);
-}
-
 const COLUMNS = `company_name, company_key, round_name, round_key, amount, currency,
   amount_micros, valuation, valuation_micros, sector, stage, investors,
   lead_investors, announced_date, article_id, source_url, source_articles,
-  status, superseded_by, correction_reason, created_at, updated_at`;
+  status, superseded_by, correction_reason, created_at, updated_at, identity_confirmed, identity_json`;
 
 export interface NewRow {
   companyName: string;
@@ -155,16 +150,16 @@ export interface NewRow {
   sourceUrl: string;
   sources: FundingSourceArticle[];
   correctionReason: string | null;
+  identityConfirmed?: number;
+  identityJson?: string | null;
 }
 
-function statement(db: D1Database, query: SQL): D1PreparedStatement {
-  const compiled = new SQLiteSyncDialect().sqlToQuery(query);
-  return db.prepare(compiled.sql).bind(...compiled.params);
-}
+const statement = fundingStatement;
 
 interface CurrentArticle {
   id: number;
   bodySha: string;
+  application?: ObservationApplication;
 }
 function approvalGuard(article?: CurrentArticle): SQL {
   return article
@@ -174,20 +169,12 @@ function approvalGuard(article?: CurrentArticle): SQL {
     : sql`1`;
 }
 
-/** The receipt check must share the mutation's snapshot; the earlier read is only a fast path. */
 function unappliedGuard(
-  companyKey: string,
-  roundKey: string,
+  _companyKey: string,
+  _roundKey: string,
   article?: CurrentArticle,
 ): SQL {
-  return article
-    ? sql`NOT EXISTS (
-    SELECT 1 FROM funding_rounds f, json_each(f.source_articles) s
-    WHERE f.company_key = ${companyKey} AND f.round_key = ${roundKey}
-      AND json_extract(s.value, '$.articleId') = ${article.id}
-      AND json_extract(s.value, '$.bodySha') = ${article.bodySha}
-  )`
-    : sql`1`;
+  return fundingDecisionGuard(article?.application);
 }
 
 function expectedRow(row: FundingRow): SQL {
@@ -220,8 +207,8 @@ function insertStatement(
       ${r.amount}, ${r.currency}, ${r.amountMicros}, ${r.valuation}, ${r.valuationMicros},
       ${r.sector}, ${r.stage}, ${JSON.stringify(r.investors)}, ${JSON.stringify(r.leadInvestors)},
       ${r.announcedDate}, ${r.articleId}, ${r.sourceUrl}, ${JSON.stringify(r.sources)},
-      'pending_review', NULL, ${r.correctionReason}, ${now}, ${now}
-    WHERE ${gated ? sql`changes() = 1` : sql`1`} AND ${approvalGuard(article)}
+      'pending_review', NULL, ${r.correctionReason}, ${now}, ${now}, ${r.identityConfirmed ?? 0}, ${r.identityJson ?? null}
+    WHERE ${gated ? sql`changes() = 1` : sql`1`} AND ${approvalGuard(article)} AND ${fundingDecisionGuard(article?.application)}
     ${gated ? sql`` : sql`ON CONFLICT DO NOTHING`}`,
   );
 }
@@ -263,8 +250,11 @@ export async function extractFundingRounds(
   const completionKey = fundingCompletionKey(article.id, article.body_sha);
   if (
     await deps.db
-      .prepare("SELECT key FROM settings WHERE key = ?1")
-      .bind(completionKey)
+      .prepare("SELECT key FROM settings WHERE key IN (?1,?2)")
+      .bind(
+        completionKey,
+        `funding:done:${article.id}:funding-v1:${article.body_sha}`,
+      )
       .first()
   ) {
     return { status: "skipped", articleId, reason: "already_completed" };
@@ -280,9 +270,9 @@ export async function extractFundingRounds(
   const body = await obj.text();
 
   const publishedDate =
-    article.published_at !== null
-      ? new Date(article.published_at).toISOString().slice(0, 10)
-      : null;
+    article.published_at === null
+      ? null
+      : new Date(article.published_at).toISOString().slice(0, 10);
 
   const res = await deps.models.generateText(
     "reason",
@@ -301,32 +291,34 @@ export async function extractFundingRounds(
   if (!parsed) throw new Error("Invalid funding output");
   await assertCurrentApproval(deps.db, current);
 
-  const out = { inserted: 0, merged: 0, superseded: 0, ignored: 0 };
-  const seenAt = deps.now();
-  const source: FundingSourceArticle = {
-    articleId: article.id,
-    bodySha: article.body_sha,
-    url: article.canonical_url,
-    title: article.title,
-    seenAt,
-  };
-
-  // One round at a time: two rounds of the same company must not race.
-  for (const round of parsed.rounds) {
-    if (!round.isFundingAnnouncement) continue;
-    const companyKey = normalizeCompanyKey(round.companyName);
-    if (!companyKey) continue;
-    const result = await applyRound(
-      deps,
-      round,
-      companyKey,
-      article,
-      publishedDate,
-      source,
-      current,
+  // Validate the complete response before any capture or financial side effect.
+  for (const payload of parsed.rounds) validateFundingEvidence(payload, body);
+  const captured = [];
+  for (const [index, payload] of parsed.rounds.entries()) {
+    captured.push(
+      await captureFundingObservation(
+        deps.db,
+        article.id,
+        article.body_sha,
+        FUNDING_PROMPT_VERSION,
+        index,
+        payload,
+        body,
+        deps.now(),
+      ),
     );
-    out[result]++;
   }
+  const out = { inserted: 0, merged: 0, superseded: 0, ignored: 0 };
+  for (const observation of captured)
+    out[
+      await applyFundingObservation(
+        deps.db,
+        deps.bodies,
+        observation.id,
+        observation.decision_revision,
+        deps.now(),
+      )
+    ]++;
   const marker = await statement(
     deps.db,
     sql`INSERT INTO settings (key, value, updated_at)
@@ -349,185 +341,197 @@ async function assertCurrentApproval(db: D1Database, article: CurrentArticle) {
   }
 }
 
-async function applyRound(
-  deps: FundingDeps,
-  round: ExtractedRound,
-  companyKey: string,
-  article: { id: number; canonical_url: string },
-  publishedDate: string | null,
-  source: FundingSourceArticle,
-  current: CurrentArticle,
+/** A stale queue message never chooses a newer decision or recomputes its stable target. */
+export async function applyFundingObservation(
+  db: D1Database,
+  bodies: R2Bucket,
+  id: string,
+  expectedRevision: number,
+  now: number,
 ): Promise<"inserted" | "merged" | "superseded" | "ignored"> {
-  const roundKey = normalizeRoundKey(round.roundName);
-  const currency = (round.currency ?? "").toUpperCase();
-  // An amount without a currency is not guessed at.
-  const amount =
-    round.amount != null && currency ? Math.round(round.amount) : null;
-  const valuation =
-    round.valuation != null && currency ? Math.round(round.valuation) : null;
-  const next = {
-    amount,
-    currency: currency || "USD",
-    micros: amount !== null ? convertToMicroUsd(amount, currency) : null,
-  };
-  const valuationMicros =
-    valuation !== null ? convertToMicroUsd(valuation, currency) : null;
-  const now = deps.now();
-
   for (let attempt = 0; attempt < 16; attempt++) {
-    await assertCurrentApproval(deps.db, current);
-    // Provenance on historical and rejected rows is also an applied-result receipt.
+    const observation = await readFundingObservation(db, id);
     if (
-      await statement(
-        deps.db,
-        sql`SELECT 1 FROM funding_rounds f, json_each(f.source_articles) s
-      WHERE f.company_key = ${companyKey} AND f.round_key = ${roundKey}
-        AND json_extract(s.value, '$.articleId') = ${source.articleId}
-        AND json_extract(s.value, '$.bodySha') = ${source.bodySha} LIMIT 1`,
-      ).first()
+      !observation ||
+      observation.decision_revision !== expectedRevision ||
+      observation.state !== "ready" ||
+      !observation.resolution_json
     )
       return "ignored";
-    const existing = await deps.db
-      .prepare(
-        `SELECT * FROM funding_rounds
-       WHERE company_key = ?1 AND round_key = ?2 AND superseded_by IS NULL`,
-      )
-      .bind(companyKey, roundKey)
-      .first<FundingRow>();
-
-    const fresh: NewRow = {
-      companyName: round.companyName.trim(),
-      companyKey,
-      roundName: round.roundName.trim(),
-      roundKey,
-      amount,
-      currency: next.currency,
-      amountMicros: next.micros,
-      valuation,
-      valuationMicros,
-      sector: normalizeSector(round.sector),
-      stage: stageForRoundKey(roundKey),
-      investors: mergeNames([], round.investors),
-      leadInvestors: mergeNames([], round.leadInvestors),
-      announcedDate: round.announcedDate ?? publishedDate,
-      articleId: article.id,
-      sourceUrl: article.canonical_url,
-      sources: [source],
-      correctionReason: null,
+    const identity: ConfirmedFundingIdentity = JSON.parse(
+      observation.resolution_json,
+    );
+    const application: ObservationApplication = {
+      id,
+      revision: expectedRevision,
+      companyKey: identity.companyKey,
+      roundKey: identity.roundKey,
     };
-
+    const current: CurrentArticle = {
+      id: observation.article_id,
+      bodySha: observation.body_sha,
+      application,
+    };
+    await assertCurrentApproval(db, current);
+    const article = await db
+      .prepare("SELECT canonical_url,title FROM articles WHERE id=?1")
+      .bind(current.id)
+      .first<{ canonical_url: string; title: string }>();
+    const body = await bodies.get(`bodies/${current.id}/${current.bodySha}.md`);
+    if (!article || !body) throw new Error("Approved funding body missing");
+    const payload = observationPayload(observation);
+    validateFundingEvidence(payload, await body.text());
+    const next = reportedFundingFacts(payload, identity);
+    const existing = await db
+      .prepare(
+        `SELECT * FROM funding_rounds WHERE company_key=?1 AND round_key=?2 AND superseded_by IS NULL`,
+      )
+      .bind(identity.companyKey, identity.roundKey)
+      .first<FundingRow>();
+    const source: FundingSourceArticle = {
+      articleId: current.id,
+      bodySha: current.bodySha,
+      url: article.canonical_url,
+      title: article.title,
+      seenAt: now,
+      observationId: id,
+      decisionRevision: expectedRevision,
+    };
+    if (existing?.status === "rejected") {
+      // Target was rejected; choose a reviewed target.
+      await holdFundingObservation(db, application, now);
+      return "ignored";
+    }
+    if (
+      existing &&
+      identity.source === "automatic" &&
+      !payload.correctionPatch.amount &&
+      next.amount !== null &&
+      existing.amount !== null &&
+      (next.amount !== existing.amount || next.currency !== existing.currency)
+    ) {
+      // Conflicting native amount/currency requires human confirmation.
+      await holdFundingObservation(db, application, now);
+      return "ignored";
+    }
+    const base: FundingFacts = existing
+      ? {
+          companyName: existing.company_name,
+          roundName: existing.round_name,
+          amount: existing.amount ?? next.amount,
+          currency:
+            existing.amount === null ? next.currency : existing.currency,
+          valuation: existing.valuation ?? next.valuation,
+          sector: existing.sector,
+          stage: existing.stage,
+          announcedDate: existing.announced_date ?? next.announcedDate,
+          investors: mergeNames(
+            parseStrings(existing.investors),
+            next.investors,
+          ),
+          leadInvestors: mergeNames(
+            parseStrings(existing.lead_investors),
+            next.leadInvestors,
+          ),
+        }
+      : next;
+    if (
+      existing &&
+      identity.source === "manual" &&
+      next.amount !== null &&
+      !payload.correctionPatch.amount
+    ) {
+      base.amount = next.amount;
+      base.currency = next.currency;
+    }
+    const facts = applyFundingPatch(base, payload.correctionPatch);
+    const explicitChange = JSON.stringify(facts) !== JSON.stringify(base);
+    const oldSources = existing ? parseSources(existing.source_articles) : [];
+    const sources = [
+      ...oldSources.filter((source) => source.articleId !== current.id),
+      source,
+    ];
+    const version: NewRow = {
+      ...facts,
+      companyKey: identity.companyKey,
+      roundKey: identity.roundKey,
+      amountMicros:
+        facts.amount === null
+          ? null
+          : convertToMicroUsd(facts.amount, facts.currency),
+      valuationMicros:
+        facts.valuation === null
+          ? null
+          : convertToMicroUsd(facts.valuation, facts.currency),
+      articleId: existing?.article_id ?? current.id,
+      sourceUrl: existing?.source_url ?? article.canonical_url,
+      sources,
+      correctionReason: existing
+        ? (payload.correctionReason ??
+          `Amount revised per ${article.canonical_url}`)
+        : null,
+      identityConfirmed: 1,
+      identityJson: JSON.stringify({
+        ...identity,
+        companyName: facts.companyName,
+        roundName: facts.roundName,
+        announcedDate: facts.announcedDate,
+      }),
+    };
     if (!existing) {
-      const inserted = await insertStatement(
-        deps.db,
-        fresh,
-        now,
-        current,
-      ).run();
+      const [inserted] = await db.batch([
+        insertStatement(db, version, now, current),
+        fundingReceiptStatement(db, application, now),
+      ]);
       if (inserted.meta.changes === 1) return "inserted";
       continue;
     }
-    // A rejected record is not amended or revived.
-    if (existing.status === "rejected") return "ignored";
-
-    const oldSources = parseSources(existing.source_articles);
-    const sources = oldSources.some(
-      (s) => s.articleId === source.articleId && s.bodySha === source.bodySha,
-    )
-      ? oldSources
-      : [...oldSources, source];
-    const investors = mergeNames(
-      parseStrings(existing.investors),
-      round.investors,
-    );
-    const leadInvestors = mergeNames(
-      parseStrings(existing.lead_investors),
-      round.leadInvestors,
-    );
-    const amountConflict = !sameAmount(existing, next);
-    // An unknown amount is filled from this report; a known one is kept.
-    const base =
-      existing.amount === null
-        ? { amount, currency: next.currency, micros: next.micros }
-        : {
-            amount: existing.amount,
-            currency: existing.currency,
-            micros: existing.amount_micros,
-          };
-    const mergedAmount = base.amount;
-    const mergedValuation = existing.valuation ?? valuation;
-    const mergedDate = existing.announced_date ?? fresh.announcedDate;
-
-    const sourceChanged = sources !== oldSources;
     const factChanged =
-      JSON.stringify(investors) !== existing.investors ||
-      JSON.stringify(leadInvestors) !== existing.lead_investors ||
-      mergedAmount !== existing.amount ||
-      mergedValuation !== existing.valuation ||
-      mergedDate !== existing.announced_date;
-
-    const needsNewVersion =
-      amountConflict || (existing.status === "published" && factChanged);
-
-    if (!needsNewVersion) {
-      if (!factChanged && !sourceChanged) return "ignored";
-      const changed = await statement(
-        deps.db,
-        sql`UPDATE funding_rounds SET source_articles = ${JSON.stringify(sources)}, updated_at = ${now}
-      ${
-        factChanged
-          ? sql`, investors = ${JSON.stringify(investors)}, lead_investors = ${JSON.stringify(leadInvestors)},
-        amount = ${base.amount}, currency = ${base.currency}, amount_micros = ${base.micros},
-        valuation = ${mergedValuation}, valuation_micros = ${existing.valuation === null ? valuationMicros : existing.valuation_micros},
-        announced_date = ${mergedDate}`
-          : sql``
-      }
-      WHERE ${expectedRow(existing)} AND ${approvalGuard(current)}
-        AND ${unappliedGuard(companyKey, roundKey, current)}`,
-      ).run();
-      if (changed.meta.changes !== 1) continue;
-      return "merged";
-    }
-
-    // A new version. Old row keeps its data and points at the new row; the
-    // unique index covers only superseded_by IS NULL, so the old row is
-    // pointed at itself first, then at the new row once that exists.
-    const useNewAmount = amountConflict;
-    const reason = amountConflict
-      ? (round.correctionReason ??
-        `Amount revised per ${article.canonical_url}`)
-      : (round.correctionReason ?? "Added details from an additional report");
-    const version: NewRow = {
-      ...fresh,
-      amount: useNewAmount ? amount : base.amount,
-      currency: useNewAmount ? next.currency : base.currency,
-      amountMicros: useNewAmount ? next.micros : base.micros,
-      valuation: mergedValuation,
-      valuationMicros:
-        existing.valuation === null
-          ? valuationMicros
-          : existing.valuation_micros,
-      investors,
-      leadInvestors,
-      announcedDate: mergedDate,
-      sector: existing.sector,
-      sources,
-      articleId: existing.article_id ?? article.id,
-      sourceUrl: existing.source_url,
-      correctionReason: reason,
-    };
+      existing.identity_confirmed !== 1 ||
+      facts.amount !== existing.amount ||
+      facts.currency !== existing.currency ||
+      facts.valuation !== existing.valuation ||
+      facts.announcedDate !== existing.announced_date ||
+      facts.companyName !== existing.company_name ||
+      facts.roundName !== existing.round_name ||
+      facts.sector !== existing.sector ||
+      facts.stage !== existing.stage ||
+      JSON.stringify(facts.investors) !== existing.investors ||
+      JSON.stringify(facts.leadInvestors) !== existing.lead_investors;
     if (
-      await supersedeFundingRound(
-        deps.db,
-        existing.id,
-        version,
-        now,
-        existing,
-        current,
+      factChanged &&
+      (existing.status === "published" ||
+        explicitChange ||
+        (existing.amount !== null &&
+          (facts.amount !== existing.amount ||
+            facts.currency !== existing.currency)))
+    ) {
+      if (
+        await supersedeFundingRound(
+          db,
+          existing.id,
+          version,
+          now,
+          existing,
+          current,
+        )
       )
-    )
-      return "superseded";
+        return "superseded";
+      continue;
+    }
+    const [changed] = await db.batch([
+      statement(
+        db,
+        sql`UPDATE funding_rounds SET source_articles=${JSON.stringify(sources)},updated_at=${now},
+      investors=${JSON.stringify(facts.investors)},lead_investors=${JSON.stringify(facts.leadInvestors)},amount=${facts.amount},currency=${facts.currency},amount_micros=${version.amountMicros},
+      valuation=${facts.valuation},valuation_micros=${version.valuationMicros},announced_date=${facts.announcedDate},identity_confirmed=1,identity_json=${version.identityJson}
+      WHERE ${expectedRow(existing)} AND ${approvalGuard(current)} AND ${unappliedGuard(identity.companyKey, identity.roundKey, current)}`,
+      ),
+      fundingReceiptStatement(db, application, now),
+    ]);
+    if (changed.meta.changes === 1) return "merged";
   }
-  throw new Error("Funding round changed during concurrent updates; retry");
+  throw new Error("Funding decision changed concurrently; retry");
 }
 
 /** Replace a snapshot atomically under the immediate FK and partial unique index. */
@@ -546,6 +550,11 @@ export async function supersedeFundingRound(
       .bind(oldId)
       .first<FundingRow>());
   if (!old) return false;
+  row = {
+    ...row,
+    identityConfirmed: row.identityConfirmed ?? old.identity_confirmed,
+    identityJson: row.identityJson ?? old.identity_json,
+  };
   const [update, inserted, linked] = await db.batch([
     statement(
       db,
@@ -561,6 +570,9 @@ export async function supersedeFundingRound(
         AND round_key = ${row.roundKey} AND superseded_by IS NULL)
       WHERE id = ${oldId} AND superseded_by = id AND changes() = 1`,
     ),
+    ...(article?.application
+      ? [fundingReceiptStatement(db, article.application, now)]
+      : []),
     statement(
       db,
       sql`INSERT INTO corrections (target_type, target_id, body, created_at)

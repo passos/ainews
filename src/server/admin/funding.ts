@@ -1,7 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
-import { fundingCorrectionSchema } from "../../lib/funding/types";
+import {
+  fundingCorrectionSchema,
+  fundingObservationActionSchema,
+} from "../../lib/funding/types";
 import { accessMiddleware } from "./fn";
 import * as ops from "./ops";
 
@@ -27,3 +30,14 @@ export const correctFundingRound = createServerFn({ method: "POST" })
   .handler(async ({ data }) => ({
     updated: await ops.correctFundingRound(env.DB, data),
   }));
+
+export const listFundingObservations = createServerFn({ method: "GET" })
+  .middleware([accessMiddleware])
+  .handler(async () => ops.listFundingObservations(env.DB));
+
+export const resolveFundingObservation = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .validator(fundingObservationActionSchema)
+  .handler(async ({ data }) =>
+    ops.resolveFundingObservation(env.DB, env.BODIES, data),
+  );
