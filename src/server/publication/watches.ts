@@ -3,7 +3,7 @@ import { escapeXml } from "../../lib/xml";
 import { safeHttpUrl } from "../../lib/url";
 import { industries } from "../db/schema/industries";
 import { watches } from "../db/schema/watches";
-import { approvedArticleWhere, type Db } from "./articles";
+import { approvedArticleWhere, SOURCE_NAME, type Db } from "./articles";
 import { SITE_NAME } from "../../lib/site";
 
 export interface WatchHitItem {
@@ -132,7 +132,7 @@ export async function getWatchView(
         COALESCE(NULLIF(a.title_override, ''), a.title) AS title,
         COALESCE(NULLIF(a.summary_override, ''), a.summary) AS summary,
         a.canonical_url AS canonical_url,
-        s.name AS source_name,
+        ${SOURCE_NAME} AS source_name,
         a.published_at AS published_at,
         a.fetched_at AS fetched_at
       FROM event_articles ea

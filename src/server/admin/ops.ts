@@ -319,6 +319,16 @@ export async function deleteSource(database: D1Database, id: number) {
 }
 
 export async function resumeSource(database: D1Database, id: number) {
+  // System placeholder sources (e.g. primary documents) never get collected.
+  const placeholder = await database
+    .prepare("SELECT 1 FROM sources WHERE id = ?1 AND feed_url LIKE 'system:%'")
+    .bind(id)
+    .first();
+  if (placeholder) {
+    throw new Response("Cannot resume a system placeholder source", {
+      status: 400,
+    });
+  }
   await database
     .prepare(
       `UPDATE sources

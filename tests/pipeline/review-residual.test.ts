@@ -63,6 +63,10 @@ beforeEach(async () => {
     `INSERT INTO sources (id,industry_id,name,feed_url,site_domain,kind,status,created_at)
     VALUES(1,1,'Reporter','https://reporter.test/feed','reporter.test','rss','active',1000)`,
   ).run();
+  await env.DB.prepare(
+    `INSERT INTO sources (industry_id,name,feed_url,site_domain,kind,status,created_at)
+    VALUES(1,'arXiv cs.AI','https://rss.arxiv.org/rss/cs.AI','arxiv.org','rss','active',1000)`,
+  ).run();
   eventId = (await env.DB.prepare(
     `INSERT INTO events (industry_id,title,revision,created_at,updated_at) VALUES(1,'Event',1,1000,1000) RETURNING id`,
   ).first<{ id: number }>())!.id;

@@ -60,10 +60,38 @@ interface ApprovedArticleRow {
   body_sha: string;
   published_at: number | null;
   source_name: string;
-  source_domain: string;
+  source_domain: string | null;
+  source_feed_url: string;
+  canonical_url: string;
   total_score: number | null;
   content_type: string | null;
   evidence_tags: string | null;
+}
+
+/** Lower-case host of `url` without "www."; "unknown" when it does not parse. */
+function documentHost(url: string): string {
+  try {
+    return (
+      new URL(url).hostname.toLowerCase().replace(/^www\./, "") || "unknown"
+    );
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * A placeholder source (no site_domain, or feed_url 'system:…' such as the
+ * primary-documents source) names nothing real: use the document's own host
+ * as source domain and name.
+ */
+function attributeSource(
+  r: ApprovedArticleRow,
+): ApprovedArticleRow & { source_domain: string } {
+  if (r.source_domain === null || r.source_feed_url.startsWith("system:")) {
+    const host = documentHost(r.canonical_url);
+    return { ...r, source_domain: host, source_name: host };
+  }
+  return { ...r, source_domain: r.source_domain };
 }
 
 interface ClaimRow {
@@ -168,6 +196,8 @@ export async function generateEventArtifacts(
              a.published_at,
              COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
              s.site_domain AS source_domain,
+             s.feed_url AS source_feed_url,
+             a.canonical_url,
              an.total_score,
              an.content_type,
              an.evidence_tags
@@ -206,8 +236,9 @@ export async function generateEventArtifacts(
     return { status: "skipped", eventId, reason: "event_not_found" };
   }
 
-  const articleRows =
-    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? [];
+  const articleRows = (
+    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? []
+  ).map(attributeSource);
   if (articleRows.length === 0) {
     return { status: "skipped", eventId, reason: "no_approved_articles" };
   }

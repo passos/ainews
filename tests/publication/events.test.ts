@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getHome, getSection } from "../../src/server/publication/articles";
 import { getEvent, getEventSources } from "../../src/server/publication/events";
@@ -104,6 +105,37 @@ describe("getEvent and getEventSources", () => {
 
     const sources = await getEventSources(db(), eventId);
     expect(sources).toEqual([{ name: "Technology Wire", count: 2 }]);
+  });
+
+  it("a system placeholder source shows the document host, not its name", async () => {
+    const placeholder = await db().get<{ id: number }>(
+      sql`INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+          VALUES (${tech.industryId}, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 0)
+          RETURNING id`,
+    );
+    const eventId = await seedEvent(tech.industryId, "Primary Event", 0);
+    const nasa = await seedArticle({
+      industryId: tech.industryId,
+      sourceId: placeholder.id,
+      title: "NASA report",
+      url: "https://www.nasa.gov/report",
+    });
+    const wire = await seedArticle({ ...tech, title: "Wire report" });
+    for (const [i, id] of [nasa, wire].entries()) {
+      await seedEventArticle(eventId, id, 1000 + i);
+      await seedReview(id, "approved");
+    }
+
+    expect(await getEventSources(db(), eventId)).toEqual([
+      { name: "Technology Wire", count: 1 },
+      { name: "nasa.gov", count: 1 },
+    ]);
+    const section = await getSection(db(), { slug: "technology", page: 1 });
+    const card = section!.articles.find((a) => a.id === nasa);
+    expect(card?.sourceName).toBe("nasa.gov");
+    expect(section!.articles.find((a) => a.id === wire)?.sourceName).toBe(
+      "Technology Wire",
+    );
   });
 
   it("getSection and getHome return eventId and eventReportCount; card shows event link when >= 2 reports", async () => {

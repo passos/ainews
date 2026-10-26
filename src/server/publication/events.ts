@@ -24,6 +24,7 @@ import {
   approvedArticleWhere,
   CARD_COLUMNS,
   CARD_FROM,
+  SOURCE_NAME,
   toViews,
   type ArticleView,
   type CardRow,
@@ -322,7 +323,7 @@ export async function getEventSources(
 ): Promise<EventSourceView[]> {
   const rows = await db.all<{ name: string; count: number }>(sql`
     SELECT
-      COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS name,
+      ${SOURCE_NAME} AS name,
       count(*) AS count
     FROM articles a
     JOIN sources s ON s.id = a.source_id

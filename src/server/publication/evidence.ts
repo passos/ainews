@@ -9,7 +9,7 @@ import type {
   RealityCheckStatus,
   SourceRole,
 } from "../../lib/evidence/types";
-import { approvedArticleWhere, type Db } from "./articles";
+import { approvedArticleWhere, SOURCE_NAME, type Db } from "./articles";
 
 export async function getEventEvidence(
   db: Db,
@@ -77,7 +77,7 @@ export async function getEventEvidence(
         ce.verified,
         COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS article_title,
         a.canonical_url AS article_url,
-        COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
+        ${SOURCE_NAME} AS source_name,
         s.site_domain AS source_domain
       FROM claim_evidence ce
       JOIN articles a ON a.id = ce.article_id AND ce.body_sha = a.body_sha AND ${approvedArticleWhere}

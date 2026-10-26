@@ -5,6 +5,7 @@ import {
   listSourceCandidates,
   approveCandidate,
   rejectCandidate,
+  resumeSource,
   triggerDiscovery,
 } from "../../src/server/admin/ops";
 import { adminOr403 } from "../../src/server/admin/access";
@@ -171,6 +172,49 @@ describe("Admin Discover & Source Operations", () => {
     await expect(approveCandidate(env.DB, cHtml!.id, 2000)).rejects.toSatisfy(
       (err: unknown) => err instanceof Response && err.status === 400,
     );
+  });
+
+  it("refuses to resume a system placeholder source", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('resume-ind', 'Resume Industry', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    // Same row the primary tracker creates lazily for a section.
+    const placeholder = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+       VALUES (?1, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const otherSystem = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+       VALUES (?1, 'Other system row', 'system:other', 'html', 'paused', 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const normal = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, paused_reason, fail_count, created_at)
+       VALUES (?1, 'Normal', 'https://normal.example/feed', 'normal.example', 'rss', 'paused', 'failing', 5, 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const statusOf = async (id: number) =>
+      (await env.DB.prepare("SELECT status FROM sources WHERE id = ?1")
+        .bind(id)
+        .first<{ status: string }>())!.status;
+
+    for (const id of [placeholder!.id, otherSystem!.id]) {
+      await expect(resumeSource(env.DB, id)).rejects.toSatisfy(
+        (err: unknown) => err instanceof Response && err.status === 400,
+      );
+      expect(await statusOf(id)).toBe("paused");
+    }
+
+    await resumeSource(env.DB, normal!.id);
+    expect(await statusOf(normal!.id)).toBe("active");
   });
 
   it("triggerDiscovery enqueues message, and fails when DISCOVERY_ENABLED is false", async () => {

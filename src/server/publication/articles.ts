@@ -29,6 +29,21 @@ export const approvedArticleWhere: SQL = sql`EXISTS (
 // or SQLite sorts instead of reading the index.
 export const NEWEST_FIRST = sql`COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC`;
 
+// Host of the article (canonical_url always has a "/" after the host).
+const URL_REST = sql`substr(a.canonical_url, instr(a.canonical_url, '://') + 3)`;
+const URL_HOST = sql`lower(substr(${URL_REST}, 1, instr(${URL_REST} || '/', '/') - 1))`;
+
+/**
+ * Reader-facing source name for `s` (sources) and `a` (articles). A system
+ * placeholder source (feed_url 'system:…', e.g. primary documents) shows the
+ * document's host without "www.", never the placeholder's own name.
+ */
+export const SOURCE_NAME = sql`CASE
+  WHEN s.feed_url LIKE 'system:%'
+    THEN (CASE WHEN ${URL_HOST} LIKE 'www.%' THEN substr(${URL_HOST}, 5) ELSE ${URL_HOST} END)
+  ELSE COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source')
+END`;
+
 // Card text: admin override, then the newest analysis, then the feed's own.
 export const CARD_COLUMNS = sql`
   a.id AS id,
@@ -37,7 +52,7 @@ export const CARD_COLUMNS = sql`
   a.url AS url,
   a.published_at AS published_at,
   a.fetched_at AS fetched_at,
-  COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
+  ${SOURCE_NAME} AS source_name,
   an.evidence_tags AS evidence_tags,
   i.slug AS section_slug,
   i.name AS section_name,

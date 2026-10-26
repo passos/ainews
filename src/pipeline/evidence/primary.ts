@@ -1,5 +1,5 @@
 import type { PipelineEnv } from "../messages";
-import { checkRobots, claimHostSlot } from "../body/robots";
+import { checkRobots, claimHostSlot, hostAllowed } from "../body/robots";
 import {
   fetchPage,
   MAX_BODY_BYTES,
@@ -10,7 +10,7 @@ import { extractWhitelistedUrls } from "./verify";
 import { syncRevisionDiff } from "./diff";
 import { normalizeUrl } from "../../lib/url";
 import { isEnabled } from "../../lib/flags";
-import { FINANCE_SLUG } from "../../server/admin/ops";
+import { effectivePublishMode } from "../analyze/analyze";
 import { toMarkdown } from "../../providers/tomarkdown";
 
 export interface PrimaryTrackerDeps {
@@ -27,7 +27,7 @@ interface EventRow {
   id: number;
   industry_id: number;
   industry_slug: string;
-  industry_publish_mode: string;
+  industry_publish_mode: "auto" | "review";
   revision: number;
   primary_domains: string;
 }
@@ -46,6 +46,58 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** Feed URL of the per-section placeholder source for primary documents. */
+const PRIMARY_DOCUMENTS_FEED_URL = "system:primary-documents";
+
+/**
+ * The section's existing source whose `site_domain` covers `host`, or null.
+ * Candidates are not admin-approved, so they never count.
+ */
+async function findAttributionSourceId(
+  db: D1Database,
+  industryId: number,
+  host: string,
+): Promise<number | null> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, site_domain FROM sources
+       WHERE industry_id = ?1 AND status IN ('active', 'paused')
+         AND site_domain IS NOT NULL AND site_domain != ''
+       ORDER BY id ASC`,
+    )
+    .bind(industryId)
+    .all<{ id: number; site_domain: string }>();
+  const row = results.find((r) => hostAllowed(host, [r.site_domain]));
+  return row ? row.id : null;
+}
+
+/**
+ * The section's placeholder source for primary documents, created on first
+ * use. It is 'paused' with no site_domain, so collection never claims it and
+ * it never widens a domain allowlist. DO NOTHING keeps admin edits.
+ */
+async function ensurePrimaryDocumentsSource(
+  db: D1Database,
+  industryId: number,
+  now: number,
+): Promise<number> {
+  const [, select] = await db.batch<{ id: number }>([
+    db
+      .prepare(
+        `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+         VALUES (?1, 'Primary documents (system)', ?2, 'html', 'paused', ?3)
+         ON CONFLICT (industry_id, feed_url) DO NOTHING`,
+      )
+      .bind(industryId, PRIMARY_DOCUMENTS_FEED_URL, now),
+    db
+      .prepare(
+        `SELECT id FROM sources WHERE industry_id = ?1 AND feed_url = ?2`,
+      )
+      .bind(industryId, PRIMARY_DOCUMENTS_FEED_URL),
+  ]);
+  return select.results[0].id;
 }
 
 function truncateUtf8Bytes(str: string, maxBytes: number): string {
@@ -85,6 +137,13 @@ export async function trackEventPrimarySources(
   if (!event) {
     return { trackedCount: 0 };
   }
+
+  // Only an auto section gets system approval; Finance never does.
+  const autoApprove =
+    effectivePublishMode({
+      slug: event.industry_slug,
+      publish_mode: event.industry_publish_mode,
+    }) === "auto";
 
   let effectivePrimaryDomains = primaryDomains;
   if (effectivePrimaryDomains.length === 0 && event.primary_domains) {
@@ -275,9 +334,7 @@ export async function trackEventPrimarySources(
         if (batchRes[0].meta.changes === 1) {
           event.revision += 1;
           trackedCount++;
-          const isFinance = event.industry_slug === FINANCE_SLUG;
-          const isAuto = !isFinance && event.industry_publish_mode === "auto";
-          const diffStatus = isAuto ? "published" : "pending_review";
+          const diffStatus = autoApprove ? "published" : "pending_review";
           await syncRevisionDiff(
             deps.db,
             eventId,
@@ -304,8 +361,7 @@ export async function trackEventPrimarySources(
           continue;
         }
 
-        const isFinance = event.industry_slug === FINANCE_SLUG;
-        if (!isFinance && !existingReview) {
+        if (autoApprove && !existingReview) {
           const bodySha = existing.body_sha || (await sha256Hex(canonical));
           const batchRes = await deps.db.batch([
             deps.db
@@ -351,8 +407,7 @@ export async function trackEventPrimarySources(
           if (batchRes[2].meta.changes === 1) {
             event.revision += 1;
             trackedCount++;
-            const isAuto = !isFinance && event.industry_publish_mode === "auto";
-            const diffStatus = isAuto ? "published" : "pending_review";
+            const diffStatus = autoApprove ? "published" : "pending_review";
             await syncRevisionDiff(
               deps.db,
               eventId,
@@ -369,9 +424,6 @@ export async function trackEventPrimarySources(
       continue;
     }
 
-    if (attempts >= MAX_ATTEMPTS) break;
-    attempts++;
-
     // New URL to fetch via ladder
     let parsedUrl: URL;
     try {
@@ -379,6 +431,19 @@ export async function trackEventPrimarySources(
     } catch {
       continue;
     }
+
+    // Attribute to the section's matching source, else to its placeholder.
+    // Never insert an active source: the source list is the admin's.
+    const sourceId =
+      (await findAttributionSourceId(
+        deps.db,
+        event.industry_id,
+        parsedUrl.hostname,
+      )) ??
+      (await ensurePrimaryDocumentsSource(deps.db, event.industry_id, now));
+
+    if (attempts >= MAX_ATTEMPTS) break;
+    attempts++;
 
     // Check robots.txt
     const robots = await checkRobots(
@@ -434,27 +499,7 @@ export async function trackEventPrimarySources(
         const titleMatch = bodyText.match(/^#\s+(.+)$/m);
         const title = titleMatch ? titleMatch[1].trim() : parsedUrl.hostname;
 
-        // Find or create source for this domain
-        const hostFeedUrl = `https://${parsedUrl.hostname}`;
-        await deps.db
-          .prepare(
-            `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
-             VALUES (?1, ?2, ?3, ?2, 'html', 'active', ?4)
-             ON CONFLICT (industry_id, feed_url) DO UPDATE SET name = excluded.name`,
-          )
-          .bind(event.industry_id, parsedUrl.hostname, hostFeedUrl, now)
-          .run();
-
-        const sourceRow = await deps.db
-          .prepare(
-            `SELECT id FROM sources WHERE industry_id = ?1 AND feed_url = ?2`,
-          )
-          .bind(event.industry_id, hostFeedUrl)
-          .first<{ id: number }>();
-
-        const sourceId = sourceRow ? sourceRow.id : 1;
-        const isFinance = event.industry_slug === FINANCE_SLUG;
-        const targetStage = isFinance ? "analyzed" : "grouped";
+        const targetStage = autoApprove ? "grouped" : "analyzed";
 
         // Insert new article
         const insertArtResult = await deps.db
@@ -504,8 +549,8 @@ export async function trackEventPrimarySources(
             }
           }
 
-          if (isFinance) {
-            // Finance section articles require human review (AGENTS.md §4).
+          if (!autoApprove) {
+            // A non-auto section (Finance always, see effectivePublishMode) needs human review.
             // Left in stage 'analyzed' with no review record, waiting for human decision in /admin/review.
             await deps.db
               .prepare(
@@ -562,8 +607,7 @@ export async function trackEventPrimarySources(
             trackedCount++;
 
             // Synchronize deterministic revision diff for the new revision
-            const isAuto = !isFinance && event.industry_publish_mode === "auto";
-            const diffStatus = isAuto ? "published" : "pending_review";
+            const diffStatus = autoApprove ? "published" : "pending_review";
             await syncRevisionDiff(
               deps.db,
               eventId,

@@ -35,6 +35,14 @@ it("historical intermediate diffs can complete editorial review", async () => {
     `bodies/${report}/sha-current.md`,
     "[Paper](https://arxiv.org/abs/new) [Release](https://whitehouse.gov/release)",
   );
+  // Both primary pages are already human-approved and unlinked, so tracking
+  // takes the existing-article branch (a review section gets no system approval).
+  for (const [title, url] of [
+    ["Paper", "https://arxiv.org/abs/new"],
+    ["Release", "https://whitehouse.gov/release"],
+  ]) {
+    await seedReview(await seedArticle({ ...tech, title, url }), "approved");
+  }
   const mockFetch = vi.fn(async (input: RequestInfo | URL) =>
     String(input).includes("robots.txt")
       ? new Response("User-agent: *\nAllow: /", { status: 200 })
@@ -55,6 +63,7 @@ it("historical intermediate diffs can complete editorial review", async () => {
       )
     ).trackedCount,
   ).toBe(2);
+  expect(mockFetch).not.toHaveBeenCalled();
   expect(
     await env.DB.prepare("SELECT revision FROM events WHERE id=?")
       .bind(eventId)
