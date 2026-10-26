@@ -533,7 +533,7 @@ describe("tests/routes/digest.test.ts", () => {
       summary?: string;
       eventRevision?: number;
       copyApprovedAt?: number;
-    }): Promise<void> {
+    }): Promise<number> {
       const eventId = await seedEvent(tech.industryId, "Copy Event 114", 1);
       const artId = await seedArticle({
         ...tech,
@@ -570,6 +570,7 @@ describe("tests/routes/digest.test.ts", () => {
           .bind(tech.industryId, DATE, itemsJson, o.copyApprovedAt)
           .run();
       }
+      return eventId;
     }
 
     async function techRss(): Promise<string> {
@@ -623,6 +624,32 @@ describe("tests/routes/digest.test.ts", () => {
 
       const rss = await techRss();
       expect(rss).not.toContain("MODEL LINER 114");
+    });
+
+    it("empty approved title never falls back to the stored item title", async () => {
+      // The stored title came from an article whose approval was later
+      // revoked; only the current approved article may name the item.
+      const eventId = await seedCopyDigest({ title: "" });
+      const revokedId = await seedArticle({
+        ...tech,
+        title: "Stored title 114",
+        publishedAt: 900,
+      });
+      await seedEventArticle(eventId, revokedId, 900);
+      await seedReview(revokedId, "rejected");
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].title).toBe("");
+      expect(data.items[0].oneLiner).toBe("Approved summary 114");
+      expect(JSON.stringify(data)).not.toContain("Stored title 114");
+
+      const rss = await techRss();
+      expect(rss).toContain("Approved summary 114");
+      expect(rss).not.toContain("Stored title 114");
     });
 
     it("approved copy: intro and one_liner appear", async () => {

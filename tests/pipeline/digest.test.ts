@@ -1668,6 +1668,28 @@ describe("buildDigest #114 item and publish rules", () => {
     expect(row!.published_at).toBeNull();
   });
 
+  it("Finance slug is normalised: 'Finance ' still stays unpublished", async () => {
+    // Trailing space and capital F: the guard trims and lowercases the slug.
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('Finance ', 'Finance Spaced', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    await seedApprovedEvent(ind!.id, "fs114", 80);
+
+    await buildDigest(
+      offEnv(),
+      msgFor(ind!.id),
+      Date.parse("2026-10-22T01:00:00Z"),
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT status, published_at FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(ind!.id)
+      .first<{ status: string; published_at: number | null }>();
+    expect(row!.status).toBe("ready");
+    expect(row!.published_at).toBeNull();
+  });
+
   it("items store the model one_liner and the article summary separately", async () => {
     const ind = await env.DB.prepare(
       "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('split-114', 'Split 114', 'auto', 1000) RETURNING id",
