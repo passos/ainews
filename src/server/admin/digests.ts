@@ -20,3 +20,16 @@ export const publishDigest = createServerFn({ method: "POST" })
     }
     return { success: true };
   });
+
+export const approveDigestCopy = createServerFn({ method: "POST" })
+  .middleware([accessMiddleware])
+  .validator(z.object({ digestId: z.number().int().positive() }))
+  .handler(async ({ data }) => {
+    const success = await ops.approveDigestCopy(env.DB, data.digestId);
+    if (!success) {
+      throw new Response("Digest copy already approved or not found", {
+        status: 400,
+      });
+    }
+    return { success: true };
+  });

@@ -1065,7 +1065,10 @@ export interface AdminDigestItem {
   eventId: number;
   eventRevision?: number;
   title: string;
-  oneLiner: string;
+  /** Approved article summary; absent on rows built before #114. */
+  summary?: string;
+  /** Model one_liner, or null (#114). Old rows may hold the summary here. */
+  oneLiner: string | null;
   sourceName: string;
   articleCount: number;
 }
@@ -1084,6 +1087,10 @@ export interface AdminDigestRow {
   createdAt: number;
   publishedAt: number | null;
   emailedAt: number | null;
+  /** Epoch ms when the admin approved intro + one-liners, or null (#114). */
+  copyApprovedAt: number | null;
+  /** The digest holds model copy (intro or any one_liner) that needs approval. */
+  hasCopy: boolean;
 }
 
 export async function listAdminDigests(database: D1Database): Promise<{
@@ -1105,7 +1112,8 @@ export async function listAdminDigests(database: D1Database): Promise<{
         d.items_json AS itemsJson,
         d.created_at AS createdAt,
         d.published_at AS publishedAt,
-        d.emailed_at AS emailedAt
+        d.emailed_at AS emailedAt,
+        d.copy_approved_at AS copyApprovedAt
       FROM digests d
       JOIN industries i ON i.id = d.industry_id
       WHERE d.status = 'ready'
@@ -1125,6 +1133,7 @@ export async function listAdminDigests(database: D1Database): Promise<{
       createdAt: number;
       publishedAt: number | null;
       emailedAt: number | null;
+      copyApprovedAt: number | null;
     }>();
 
   const pending: AdminDigestRow[] = [];
@@ -1137,6 +1146,11 @@ export async function listAdminDigests(database: D1Database): Promise<{
     } catch {
       items = [];
     }
+    const hasCopy =
+      r.intro.trim() !== "" ||
+      items.some(
+        (i) => typeof i.oneLiner === "string" && i.oneLiner.trim() !== "",
+      );
     const itemRow: AdminDigestRow = {
       id: r.id,
       industryId: r.industryId,
@@ -1151,8 +1165,12 @@ export async function listAdminDigests(database: D1Database): Promise<{
       createdAt: r.createdAt,
       publishedAt: r.publishedAt,
       emailedAt: r.emailedAt,
+      copyApprovedAt: r.copyApprovedAt,
+      hasCopy,
     };
-    if (r.publishedAt === null) {
+    // #114: pending = needs the admin: not published yet (Finance, old rows),
+    // or holds model copy that is not approved yet.
+    if (r.publishedAt === null || (hasCopy && r.copyApprovedAt === null)) {
       pending.push(itemRow);
     } else {
       published.push(itemRow);
@@ -1170,6 +1188,25 @@ export async function publishDigest(
   const res = await database
     .prepare(
       "UPDATE digests SET published_at = ?1 WHERE id = ?2 AND published_at IS NULL",
+    )
+    .bind(now, digestId)
+    .run();
+  return res.meta.changes === 1;
+}
+
+/**
+ * Approves the model copy (intro + all one_liners) of one ready digest, once
+ * (#114). intro and items_json never change after insert, so the approval
+ * covers exactly the text the admin saw.
+ */
+export async function approveDigestCopy(
+  database: D1Database,
+  digestId: number,
+  now = Date.now(),
+): Promise<boolean> {
+  const res = await database
+    .prepare(
+      "UPDATE digests SET copy_approved_at = ?1 WHERE id = ?2 AND status = 'ready' AND copy_approved_at IS NULL",
     )
     .bind(now, digestId)
     .run();

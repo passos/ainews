@@ -36,6 +36,8 @@ export const digests = sqliteTable(
     publishedAt: integer("published_at"),
     /** Epoch milliseconds when sent via email, or null. */
     emailedAt: integer("emailed_at"),
+    /** Epoch ms when the admin approved intro + one-liners; NULL = model copy hidden. */
+    copyApprovedAt: integer("copy_approved_at"),
   },
   (t) => [
     unique("digests_industry_kind_period_unique").on(

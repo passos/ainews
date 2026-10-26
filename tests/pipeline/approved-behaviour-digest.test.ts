@@ -1,6 +1,7 @@
 // #102: digest/build.ts counts only approved articles, in the item fields and
-// in the candidate event filters. No transport: the one-liner is the summary
+// in the candidate event filters. No transport: the item summary is the summary
 // of the newest approved article, so a model cannot hide a wrong summary.
+// #114: the summary has its own field; oneLiner holds only model text (null here).
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { buildDigest } from "../../src/pipeline/digest/build";
@@ -20,7 +21,8 @@ const WEEKLY_START = Date.parse("2026-10-19T00:00:00Z");
 interface Item {
   eventId: number;
   title: string;
-  oneLiner: string;
+  summary: string;
+  oneLiner: string | null;
   sourceName: string;
   articleCount: number;
 }
@@ -105,7 +107,8 @@ function expectContent(items: Item[], x: number, y: number) {
   expect(items.map((i) => i.eventId)).toEqual([y, x]);
   expect(items[1]).toMatchObject({
     title: "Zebra approved",
-    oneLiner: "Zebra summary",
+    summary: "Zebra summary",
+    oneLiner: null,
     sourceName: "Zebra Wire",
     articleCount: 1,
   });

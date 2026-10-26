@@ -1,4 +1,5 @@
 import { isEnabled } from "../../lib/flags";
+import { FINANCE_SLUG } from "../analyze/analyze";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { dayBoundsUtc, weekBoundsUtc } from "../../lib/time";
 import { CallInProgressError, createModelClient } from "../../providers/models";
@@ -399,13 +400,19 @@ export async function buildDigest(
     eventId: c.id,
     eventRevision: c.revision,
     title: c.title,
-    oneLiner: oneLiners.get(c.id) || c.summary,
+    summary: c.summary,
+    // #114: model copy stays separate from the article summary, so readers can
+    // hide it until the admin approves it.
+    oneLiner: oneLiners.get(c.id) || null,
     sourceName: c.sourceName,
     articleCount: c.articleCount,
   }));
 
-  // 7. Auto vs Review publishing
-  const publishedAt = industry.publish_mode === "auto" ? now : null;
+  // 7. Publishing (#114): items come only from approved articles, so the digest
+  // is published at build. Finance always waits for the admin, whatever
+  // publish_mode says. Model copy is approved separately (copy_approved_at).
+  const isFinance = industry.slug.trim().toLowerCase() === FINANCE_SLUG;
+  const publishedAt = isFinance ? null : now;
 
   await env.DB.prepare(
     `INSERT INTO digests (

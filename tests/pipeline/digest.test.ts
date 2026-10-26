@@ -305,11 +305,8 @@ describe("buildDailyDigest", () => {
       periodStart: "2026-10-21",
     };
 
-    await buildDailyDigest(
-      pipelineEnv,
-      msg,
-      Date.parse("2026-10-22T01:00:00Z"),
-    );
+    const now = Date.parse("2026-10-22T01:00:00Z");
+    await buildDailyDigest(pipelineEnv, msg, now);
 
     expect(fakeEmail.sent).toHaveLength(0);
     const row = await env.DB.prepare(
@@ -319,8 +316,8 @@ describe("buildDailyDigest", () => {
       .first<{ emailed_at: number | null; published_at: number | null }>();
 
     expect(row!.emailed_at).toBeNull();
-    // Review mode industry -> published_at is NULL until reviewed
-    expect(row!.published_at).toBeNull();
+    // #114: non-Finance digests are published at build, even in review mode
+    expect(row!.published_at).toBe(now);
   });
 
   it("email send failure reverts emailed_at to NULL and throws", async () => {
@@ -472,7 +469,8 @@ describe("buildDailyDigest", () => {
     expect(row!.intro).toBe("");
     const items = JSON.parse(row!.items_json);
     expect(items).toHaveLength(1);
-    expect(items[0].oneLiner).toBe("Fallback Article Summary");
+    expect(items[0].oneLiner).toBeNull();
+    expect(items[0].summary).toBe("Fallback Article Summary");
   });
 
   it("a digest item under a system placeholder source shows the document host", async () => {
@@ -1560,6 +1558,194 @@ describe("buildWeeklyDigest", () => {
   });
 });
 
+// #114: digest items keep the model one_liner and the article summary in
+// separate fields; non-Finance digests are published at build; Finance digests
+// always wait for the admin, whatever publish_mode says.
+describe("buildDigest #114 item and publish rules", () => {
+  async function seedApprovedEvent(
+    indId: number,
+    tag: string,
+    score: number,
+  ): Promise<number> {
+    const source = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, kind, name, feed_url, site_domain, created_at) VALUES (?1, 'rss', 'Src', ?2, ?3, 1000) RETURNING id",
+    )
+      .bind(indId, `http://${tag}.com/feed`, `${tag}.com`)
+      .first<{ id: number }>();
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (industry_id, source_id, url, canonical_url, title, summary, stage, body_sha, published_at, fetched_at, stage_updated_at)
+       VALUES (?1, ?2, ?3, ?3, ?4, ?5, 'grouped', 'sha114', 1729468800000, 1729468800000, 1729468800000) RETURNING id`,
+    )
+      .bind(
+        indId,
+        source!.id,
+        `http://${tag}.com/1`,
+        `Story ${tag}`,
+        `Summary ${tag}`,
+      )
+      .first<{ id: number }>();
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, ?2, 1, 1000, 1000) RETURNING id",
+    )
+      .bind(indId, `Event ${tag}`)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, 'sha114', 'approved', 'auto', ?2)",
+    )
+      .bind(art!.id, Date.parse("2026-10-21T05:00:00Z"))
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, created_at, selected)
+       VALUES (?1, 'v1', '{}', 'report', '{}', ?2, 1000, 1)`,
+    )
+      .bind(art!.id, score)
+      .run();
+    return event!.id;
+  }
+
+  const msgFor = (industryId: number): DigestMessage => ({
+    kind: "digest",
+    industryId,
+    digestKind: "daily",
+    periodStart: "2026-10-21",
+  });
+
+  const offEnv = (): PipelineEnv => ({
+    ...env,
+    EMAIL_ENABLED: "false",
+    MODEL_CALLS_ENABLED: "false",
+  });
+
+  it("non-Finance review section: digest is published at build, copy not approved", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('review-114', 'Review 114', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    await seedApprovedEvent(ind!.id, "r114", 80);
+
+    const now = Date.parse("2026-10-22T01:00:00Z");
+    await buildDigest(offEnv(), msgFor(ind!.id), now);
+
+    const row = await env.DB.prepare(
+      "SELECT id, status, published_at FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(ind!.id)
+      .first<{ id: number; status: string; published_at: number | null }>();
+    expect(row!.status).toBe("ready");
+    expect(row!.published_at).toBe(now);
+
+    // Separate read, so the publish assertion above is reached on the old schema.
+    const copy = await env.DB.prepare(
+      "SELECT copy_approved_at FROM digests WHERE id = ?1",
+    )
+      .bind(row!.id)
+      .first<{ copy_approved_at: number | null }>();
+    expect(copy!.copy_approved_at).toBeNull();
+  });
+
+  it("Finance digest stays unpublished even when publish_mode is auto", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('finance', 'Finance', 'auto', 1000) ON CONFLICT(slug) DO UPDATE SET publish_mode = 'auto' RETURNING id",
+    ).first<{ id: number }>();
+    await seedApprovedEvent(ind!.id, "f114", 80);
+
+    await buildDigest(
+      offEnv(),
+      msgFor(ind!.id),
+      Date.parse("2026-10-22T01:00:00Z"),
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT status, published_at FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(ind!.id)
+      .first<{ status: string; published_at: number | null }>();
+    expect(row!.status).toBe("ready");
+    expect(row!.published_at).toBeNull();
+  });
+
+  it("Finance slug is normalised: 'Finance ' still stays unpublished", async () => {
+    // Trailing space and capital F: the guard trims and lowercases the slug.
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('Finance ', 'Finance Spaced', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    await seedApprovedEvent(ind!.id, "fs114", 80);
+
+    await buildDigest(
+      offEnv(),
+      msgFor(ind!.id),
+      Date.parse("2026-10-22T01:00:00Z"),
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT status, published_at FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(ind!.id)
+      .first<{ status: string; published_at: number | null }>();
+    expect(row!.status).toBe("ready");
+    expect(row!.published_at).toBeNull();
+  });
+
+  it("items store the model one_liner and the article summary separately", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('split-114', 'Split 114', 'auto', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const first = await seedApprovedEvent(ind!.id, "s114a", 95);
+    const second = await seedApprovedEvent(ind!.id, "s114b", 60);
+
+    const transport: ModelTransport = {
+      run: async () => ({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [
+                {
+                  text: JSON.stringify({
+                    intro: "Intro 114.",
+                    // Only the first event gets a one_liner.
+                    items: [{ event_id: first, one_liner: "MODEL LINER 114" }],
+                  }),
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 10 },
+      }),
+    };
+
+    await buildDigest(
+      { ...env, EMAIL_ENABLED: "false", MODEL_CALLS_ENABLED: "true" },
+      msgFor(ind!.id),
+      Date.parse("2026-10-22T01:00:00Z"),
+      { transport },
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT model, items_json FROM digests WHERE industry_id = ?1 AND period_start = '2026-10-21'",
+    )
+      .bind(ind!.id)
+      .first<{ model: string | null; items_json: string }>();
+    expect(row!.model).toBe("write");
+    const items = JSON.parse(row!.items_json);
+    expect(items.map((i: { eventId: number }) => i.eventId)).toEqual([
+      first,
+      second,
+    ]);
+    // The event without a model one_liner stores null, not the summary.
+    expect(items[1].oneLiner).toBeNull();
+    expect(items[1].summary).toBe("Summary s114b");
+    expect(items[0].oneLiner).toBe("MODEL LINER 114");
+    expect(items[0].summary).toBe("Summary s114a");
+  });
+});
+
 describe("formatDigestEmail", () => {
   it("names the site in the subject, text and html", () => {
     const mail = formatDigestEmail(
@@ -1579,5 +1765,33 @@ describe("formatDigestEmail", () => {
     expect(mail.text).toContain(`${SITE_NAME} — Technology`);
     expect(mail.html).toContain(`View on ${SITE_NAME}`);
     expect(mail.subject + mail.text + mail.html).not.toContain("Personal News");
+  });
+  it("item without one_liner shows its summary", () => {
+    const mail = formatDigestEmail(
+      {
+        id: 1,
+        industryId: 1,
+        industrySlug: "technology",
+        industryName: "Technology",
+        periodStart: "2026-10-26",
+        publishedAt: 1,
+        intro: "",
+        items: [
+          {
+            eventId: 7,
+            title: "T114",
+            summary: "S114",
+            oneLiner: null,
+            sourceName: "Wire",
+            articleCount: 1,
+          },
+        ],
+      },
+      "https://news.ioenv.com",
+    );
+    expect(mail.text).toContain("S114");
+    expect(mail.html).toContain("S114");
+    expect(mail.text).not.toContain("null");
+    expect(mail.html).not.toContain("null");
   });
 });

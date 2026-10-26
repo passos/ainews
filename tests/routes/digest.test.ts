@@ -28,7 +28,7 @@ beforeEach(async () => {
 });
 
 describe("tests/routes/digest.test.ts", () => {
-  it("review section: unapproved digest (published_at is null) throws notFound and does not appear in RSS; appears after publish", async () => {
+  it("unpublished digest (published_at is null) throws notFound and does not appear in RSS; appears after publish", async () => {
     const eventId = await seedEvent(tech.industryId, "Tech Event 1", 0);
     const artId = await seedArticle({
       ...tech,
@@ -50,8 +50,8 @@ describe("tests/routes/digest.test.ts", () => {
 
     // Insert unpublished digest (published_at = NULL)
     const insRes = await env.DB.prepare(
-      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
-       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Daily summary', ?2, 1000, NULL) RETURNING id`,
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at, copy_approved_at)
+       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Daily summary', ?2, 1000, NULL, 1000) RETURNING id`,
     )
       .bind(tech.industryId, itemsJson)
       .first<{ id: number }>();
@@ -193,8 +193,8 @@ describe("tests/routes/digest.test.ts", () => {
     ]);
 
     await env.DB.prepare(
-      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
-       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Summary', ?2, 1000, 1000)`,
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at, copy_approved_at)
+       VALUES (?1, 'daily', '2026-10-21', 'UTC', 'ready', 'Summary', ?2, 1000, 1000, 1000)`,
     )
       .bind(tech.industryId, itemsJson)
       .run();
@@ -282,8 +282,8 @@ describe("tests/routes/digest.test.ts", () => {
     ]);
 
     await env.DB.prepare(
-      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
-       VALUES (?1, 'daily', '2026-10-22', 'UTC', 'ready', 'Synthesized editorial intro mentioning retracted claims.', ?2, 1000, 1000)`,
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at, copy_approved_at)
+       VALUES (?1, 'daily', '2026-10-22', 'UTC', 'ready', 'Synthesized editorial intro mentioning retracted claims.', ?2, 1000, 1000, 1000)`,
     )
       .bind(tech.industryId, itemsJson)
       .run();
@@ -375,8 +375,8 @@ describe("tests/routes/digest.test.ts", () => {
 
     // Insert unpublished weekly digest
     const insRes = await env.DB.prepare(
-      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
-       VALUES (?1, 'weekly', '2026-10-19', 'UTC', 'ready', 'Weekly overview narrative', ?2, 1000, NULL) RETURNING id`,
+      `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at, copy_approved_at)
+       VALUES (?1, 'weekly', '2026-10-19', 'UTC', 'ready', 'Weekly overview narrative', ?2, 1000, NULL, 1000) RETURNING id`,
     )
       .bind(tech.industryId, itemsJson)
       .first<{ id: number }>();
@@ -516,5 +516,168 @@ describe("tests/routes/digest.test.ts", () => {
 
     expect(result.data.kind).toBe("daily");
     expect(result.data.periodStart).toBe("2026-10-21");
+  });
+
+  // #114: model-written copy (intro + one_liner) is shown only after the admin
+  // approves it (digests.copy_approved_at). Article approval decides which items
+  // appear; copy approval decides only whether the model text is shown.
+  describe("#114 model copy approval", () => {
+    const DATE = "2026-10-25";
+    const fns = {
+      getDigest: (slug: string, date: string) => getDigest(db(), slug, date),
+      getRecentDigests: (slug: string) => getRecentDigests(db(), slug),
+    };
+
+    async function seedCopyDigest(o: {
+      title?: string;
+      summary?: string;
+      eventRevision?: number;
+      copyApprovedAt?: number;
+    }): Promise<number> {
+      const eventId = await seedEvent(tech.industryId, "Copy Event 114", 1);
+      const artId = await seedArticle({
+        ...tech,
+        title: o.title ?? "Approved title 114",
+        summary: o.summary ?? "Approved summary 114",
+        publishedAt: 1000,
+      });
+      await seedEventArticle(eventId, artId, 1000);
+      await seedReview(artId, "approved");
+      const itemsJson = JSON.stringify([
+        {
+          eventId,
+          eventRevision: o.eventRevision ?? 1,
+          title: "Stored title 114",
+          oneLiner: "MODEL LINER 114",
+          sourceName: "Technology Wire",
+          articleCount: 1,
+        },
+      ]);
+      // copy_approved_at is named only when the test sets it, so the
+      // unapproved cases run against the current schema.
+      if (o.copyApprovedAt === undefined) {
+        await env.DB.prepare(
+          `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at)
+           VALUES (?1, 'daily', ?2, 'UTC', 'ready', 'MODEL INTRO 114', ?3, 1000, 1000)`,
+        )
+          .bind(tech.industryId, DATE, itemsJson)
+          .run();
+      } else {
+        await env.DB.prepare(
+          `INSERT INTO digests (industry_id, kind, period_start, timezone, status, intro, items_json, created_at, published_at, copy_approved_at)
+           VALUES (?1, 'daily', ?2, 'UTC', 'ready', 'MODEL INTRO 114', ?3, 1000, 1000, ?4)`,
+        )
+          .bind(tech.industryId, DATE, itemsJson, o.copyApprovedAt)
+          .run();
+      }
+      return eventId;
+    }
+
+    async function techRss(): Promise<string> {
+      const res = await digestFeedResponse(
+        db(),
+        "https://news.ioenv.com",
+        "technology",
+      );
+      expect(res.status).toBe(200);
+      return res.text();
+    }
+
+    it("unapproved copy: intro is hidden on page and RSS", async () => {
+      await seedCopyDigest({});
+
+      const view = await getDigest(db(), "technology", DATE);
+      expect(view).not.toBeNull();
+      expect(view!.intro).toBe("");
+
+      const rss = await techRss();
+      expect(rss).toContain(`Daily Digest — ${DATE}`);
+      expect(rss).not.toContain("MODEL INTRO 114");
+    });
+
+    it("unapproved copy: item shows the approved article summary, not the one_liner", async () => {
+      await seedCopyDigest({});
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].oneLiner).toBe("Approved summary 114");
+      expect(JSON.stringify(data)).not.toContain("MODEL LINER 114");
+
+      const rss = await techRss();
+      expect(rss).toContain("Approved summary 114");
+      expect(rss).not.toContain("MODEL LINER 114");
+    });
+
+    it("unapproved copy: empty article title and summary never fall back to the one_liner", async () => {
+      await seedCopyDigest({ title: "", summary: "" });
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].oneLiner).not.toContain("MODEL LINER 114");
+      expect(JSON.stringify(data)).not.toContain("MODEL LINER 114");
+
+      const rss = await techRss();
+      expect(rss).not.toContain("MODEL LINER 114");
+    });
+
+    it("empty approved title never falls back to the stored item title", async () => {
+      // The stored title came from an article whose approval was later
+      // revoked; only the current approved article may name the item.
+      const eventId = await seedCopyDigest({ title: "" });
+      const revokedId = await seedArticle({
+        ...tech,
+        title: "Stored title 114",
+        publishedAt: 900,
+      });
+      await seedEventArticle(eventId, revokedId, 900);
+      await seedReview(revokedId, "rejected");
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].title).toBe("");
+      expect(data.items[0].oneLiner).toBe("Approved summary 114");
+      expect(JSON.stringify(data)).not.toContain("Stored title 114");
+
+      const rss = await techRss();
+      expect(rss).toContain("Approved summary 114");
+      expect(rss).not.toContain("Stored title 114");
+    });
+
+    it("approved copy: intro and one_liner appear", async () => {
+      await seedCopyDigest({ copyApprovedAt: 2000 });
+
+      const view = await getDigest(db(), "technology", DATE);
+      expect(view).not.toBeNull();
+      expect(view!.intro).toBe("MODEL INTRO 114");
+      expect(view!.items[0].oneLiner).toBe("MODEL LINER 114");
+
+      const rss = await techRss();
+      expect(rss).toContain("MODEL INTRO 114");
+      expect(rss).toContain("MODEL LINER 114");
+    });
+
+    it("approved copy, event revision changed: item falls back to summary and intro hidden", async () => {
+      // Stored item was built at revision 0; the event is now at revision 1.
+      await seedCopyDigest({ copyApprovedAt: 2000, eventRevision: 0 });
+
+      const view = await getDigest(db(), "technology", DATE);
+      expect(view).not.toBeNull();
+      expect(view!.intro).toBe("");
+      expect(view!.items[0].oneLiner).toBe("Approved summary 114");
+
+      const rss = await techRss();
+      expect(rss).not.toContain("MODEL INTRO 114");
+      expect(rss).not.toContain("MODEL LINER 114");
+      expect(rss).toContain("Approved summary 114");
+    });
   });
 });
