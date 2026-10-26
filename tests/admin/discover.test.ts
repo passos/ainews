@@ -4,6 +4,7 @@ import {
   createIndustry,
   listSourceCandidates,
   approveCandidate,
+  createSource,
   rejectCandidate,
   deleteSource,
   resumeSource,
@@ -331,6 +332,118 @@ describe("Admin Discover & Source Operations", () => {
     expect(await refused(resumeSource(env.DB, missing))).toBe(
       "Source not found or not resumable",
     );
+  });
+
+  it("createSource refuses a system feed URL in any case and still creates a normal source", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('create-guard-ind', 'Create Guard', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const countSources = async () =>
+      (await env.DB.prepare(
+        "SELECT count(*) n FROM sources WHERE industry_id = ?1",
+      )
+        .bind(ind!.id)
+        .first<{ n: number }>())!.n;
+
+    for (const feedUrl of [
+      "system:primary-documents",
+      "SYSTEM:other",
+      "System:Primary-Documents",
+    ]) {
+      const err = await createSource(env.DB, {
+        industryId: ind!.id,
+        name: "Fake system",
+        feedUrl,
+        kind: "html",
+      }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err, feedUrl).toBeInstanceOf(Response);
+      expect((err as Response).status, feedUrl).toBe(400);
+    }
+    expect(await countSources()).toBe(0);
+
+    const id = await createSource(env.DB, {
+      industryId: ind!.id,
+      name: "Real",
+      feedUrl: "https://real.example/feed",
+      kind: "rss",
+    });
+    const row = await env.DB.prepare(
+      "SELECT feed_url, status FROM sources WHERE id = ?1",
+    )
+      .bind(id)
+      .first();
+    expect(row).toEqual({
+      feed_url: "https://real.example/feed",
+      status: "candidate",
+    });
+  });
+
+  it("approveCandidate refuses a system feed candidate and writes or activates no source", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('approve-guard-ind', 'Approve Guard', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    // The placeholder the primary tracker creates; a candidate with the same
+    // feed_url would hit ON CONFLICT and set it to active.
+    const placeholder = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+       VALUES (?1, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    // Discovery never writes these; build them directly.
+    const addCandidate = async (feedUrl: string) =>
+      (await env.DB.prepare(
+        `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+         VALUES (?1, 'Candidate', ?2, NULL, 'rss', 0, 0, 90, 'pending', 1000) RETURNING id`,
+      )
+        .bind(ind!.id, feedUrl)
+        .first<{ id: number }>())!.id;
+    const sourcesSnapshot = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT id, feed_url, status FROM sources WHERE industry_id = ?1 ORDER BY id",
+        )
+          .bind(ind!.id)
+          .all()
+      ).results;
+    const before = await sourcesSnapshot();
+    expect(before).toEqual([
+      {
+        id: placeholder!.id,
+        feed_url: "system:primary-documents",
+        status: "paused",
+      },
+    ]);
+
+    for (const feedUrl of ["system:primary-documents", "SYSTEM:other"]) {
+      const candidateId = await addCandidate(feedUrl);
+      const err = await approveCandidate(env.DB, candidateId, 2000).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err, feedUrl).toBeInstanceOf(Response);
+      expect((err as Response).status, feedUrl).toBe(400);
+      expect(await sourcesSnapshot(), feedUrl).toEqual(before);
+      const cand = await env.DB.prepare(
+        "SELECT status FROM source_candidates WHERE id = ?1",
+      )
+        .bind(candidateId)
+        .first<{ status: string }>();
+      expect(cand!.status, feedUrl).toBe("pending");
+    }
+
+    const realId = await addCandidate("https://real-candidate.example/feed");
+    await approveCandidate(env.DB, realId, 2000);
+    const real = await env.DB.prepare(
+      "SELECT status FROM sources WHERE industry_id = ?1 AND feed_url = ?2",
+    )
+      .bind(ind!.id, "https://real-candidate.example/feed")
+      .first<{ status: string }>();
+    expect(real!.status).toBe("active");
   });
 
   it("triggerDiscovery enqueues message, and fails when DISCOVERY_ENABLED is false", async () => {
