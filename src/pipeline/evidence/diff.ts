@@ -1,5 +1,5 @@
 import type { RevisionDiff } from "../../lib/artifacts/types";
-import { readerSourceName } from "../source-attribution";
+import { readerSourceName } from "../../lib/source-attribution";
 
 interface ArticleRow {
   title: string;

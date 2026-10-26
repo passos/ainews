@@ -24,7 +24,7 @@ import {
   type FactWithMetadata,
 } from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
-import { attributeSource } from "../source-attribution";
+import { attributeSource } from "../../lib/source-attribution";
 
 export interface ArtifactDeps {
   db?: D1Database;

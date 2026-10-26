@@ -24,12 +24,14 @@ import {
   approvedArticleWhere,
   CARD_COLUMNS,
   CARD_FROM,
-  SOURCE_NAME,
+  publicSource,
+  SOURCE_COLUMNS,
   toViews,
   type ArticleView,
   type CardRow,
   type Db,
   type SectionInfo,
+  type SourceColumnsRow,
 } from "./articles";
 import { getEventEvidence } from "./evidence";
 
@@ -321,20 +323,24 @@ export async function getEventSources(
   db: Db,
   eventId: number,
 ): Promise<EventSourceView[]> {
-  const rows = await db.all<{ name: string; count: number }>(sql`
-    SELECT
-      ${SOURCE_NAME} AS name,
-      count(*) AS count
+  const rows = await db.all<SourceColumnsRow>(sql`
+    SELECT ${SOURCE_COLUMNS}
     FROM articles a
     JOIN sources s ON s.id = a.source_id
     JOIN event_articles ea ON ea.article_id = a.id
     WHERE ea.event_id = ${eventId} AND ${approvedArticleWhere}
-    GROUP BY name
-    ORDER BY count DESC, name ASC
   `);
 
-  return rows.map((r) => ({
-    name: r.name,
-    count: Number(r.count),
-  }));
+  // Grouped here, not in SQL: the reader-facing name comes from publicSource().
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const name = publicSource(r).name;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([name, count]) => ({ name, count }))
+    .sort(
+      (x, y) =>
+        y.count - x.count || (x.name < y.name ? -1 : x.name > y.name ? 1 : 0),
+    );
 }

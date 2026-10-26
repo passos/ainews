@@ -3,7 +3,7 @@ import { dayBoundsUtc, weekBoundsUtc } from "../../lib/time";
 import { CallInProgressError, createModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
 import type { DigestMessage, PipelineEnv } from "../messages";
-import { readerSourceName } from "../source-attribution";
+import { readerSourceName } from "../../lib/source-attribution";
 import { sendDigestEmail, type DigestItemData } from "./email";
 import {
   buildDigestRequest,

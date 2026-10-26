@@ -281,6 +281,11 @@ export async function createSource(
   return res[0]?.id;
 }
 
+/** Same match as SQL `feed_url LIKE 'system:%'` (LIKE ignores ASCII case). */
+function isSystemFeedUrl(feedUrl: string): boolean {
+  return feedUrl.toLowerCase().startsWith("system:");
+}
+
 export async function updateSource(
   database: D1Database,
   data: {
@@ -294,12 +299,16 @@ export async function updateSource(
     jinaEnabled?: number;
   },
 ) {
-  await database
+  // System placeholder sources are reserved: no edit creates or changes one.
+  if (isSystemFeedUrl(data.feedUrl)) {
+    throw new Response("System feed URLs are reserved", { status: 400 });
+  }
+  const res = await database
     .prepare(
       `UPDATE sources
        SET name = ?1, feed_url = ?2, site_domain = ?3, interval_minutes = COALESCE(?4, interval_minutes),
            utc_offset = COALESCE(?5, utc_offset), config = COALESCE(?6, config), jina_enabled = COALESCE(?7, jina_enabled)
-       WHERE id = ?8`,
+       WHERE id = ?8 AND feed_url NOT LIKE 'system:%'`,
     )
     .bind(
       data.name,
@@ -312,10 +321,21 @@ export async function updateSource(
       data.id,
     )
     .run();
+  if (res.meta.changes === 0) {
+    throw new Response("Source not found or not editable", { status: 400 });
+  }
 }
 
 export async function deleteSource(database: D1Database, id: number) {
-  await database.prepare("DELETE FROM sources WHERE id = ?1").bind(id).run();
+  const res = await database
+    .prepare(
+      "DELETE FROM sources WHERE id = ?1 AND feed_url NOT LIKE 'system:%'",
+    )
+    .bind(id)
+    .run();
+  if (res.meta.changes === 0) {
+    throw new Response("Source not found or not deletable", { status: 400 });
+  }
 }
 
 export async function resumeSource(database: D1Database, id: number) {
@@ -329,9 +349,7 @@ export async function resumeSource(database: D1Database, id: number) {
     .bind(id)
     .run();
   if (res.meta.changes === 0) {
-    throw new Response("Cannot resume a system placeholder source", {
-      status: 400,
-    });
+    throw new Response("Source not found or not resumable", { status: 400 });
   }
 }
 

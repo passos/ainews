@@ -7,7 +7,7 @@ import {
 } from "../../providers/transport";
 import { FINANCE_SLUG } from "../../server/admin/ops";
 import type { PipelineEnv } from "../messages";
-import { attributeSource } from "../source-attribution";
+import { attributeSource } from "../../lib/source-attribution";
 import { indexArticleChunks, sha256Hex } from "./chunks";
 import {
   buildClaimsExtractionRequest,

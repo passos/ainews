@@ -44,6 +44,6 @@ export function attributeSource(s: {
   const host = () => documentHost(s.canonicalUrl);
   return {
     name: system ? host() : s.name,
-    domain: system || s.siteDomain === null ? host() : s.siteDomain,
+    domain: system || !s.siteDomain ? host() : s.siteDomain,
   };
 }
