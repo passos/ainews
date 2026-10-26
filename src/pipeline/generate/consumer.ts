@@ -83,8 +83,9 @@ export async function handleGenerateBatch(
       msg.ack();
     } catch (e) {
       if (e instanceof BudgetExceededError) {
-        // Not retried: the cron due-event scans resend artifacts, evidence
-        // and watch kinds once the budget allows (#116).
+        // Not retried: the cron due-event scans resend the artifacts and
+        // watch kinds once the budget allows (#116). The evidence build
+        // catches the model error itself, so it never gets here.
         console.warn({ generate: body, error: e.name, message: e.message });
         msg.ack();
       } else if (e instanceof CallInProgressError) {

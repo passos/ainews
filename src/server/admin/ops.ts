@@ -1,11 +1,8 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { utcDay } from "../../providers/budget";
-import {
-  DEFAULT_TIER_RESERVES,
-  SETTING_TIER_RESERVES,
-} from "../../providers/defaults";
-import { tierReservesSchema } from "../../providers/models";
+import { SETTING_TIER_RESERVES } from "../../providers/defaults";
+import { resolveTierReserves } from "../../providers/models";
 import {
   TIER_LABELS,
   tierFloorMicros,
@@ -980,16 +977,20 @@ async function loadTierReserves(database: D1Database): Promise<{
     .bind(SETTING_TIER_RESERVES)
     .first<{ value: string }>();
   if (!row) {
-    return { stored: null, effective: DEFAULT_TIER_RESERVES, error: null };
+    return {
+      stored: null,
+      effective: resolveTierReserves(undefined),
+      error: null,
+    };
   }
   try {
-    const stored = tierReservesSchema.parse(JSON.parse(row.value));
+    const stored = resolveTierReserves(JSON.parse(row.value));
     return { stored, effective: stored, error: null };
   } catch (e) {
     // Every model call throws in loadSlot until the value is fixed.
     return {
       stored: null,
-      effective: DEFAULT_TIER_RESERVES,
+      effective: resolveTierReserves(undefined),
       error: e instanceof Error ? e.message : String(e),
     };
   }

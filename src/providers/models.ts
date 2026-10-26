@@ -136,6 +136,17 @@ export const tierReservesSchema = z
   })
   .strict() satisfies z.ZodType<TierReserves>;
 
+/**
+ * The reserves a call applies: the default ones when `settings` has no
+ * `budget.tier_reserves` row (`stored` undefined), else the parsed row, which
+ * throws if malformed. The one resolver for the client and the admin page.
+ */
+export function resolveTierReserves(stored: unknown): TierReserves {
+  return stored === undefined
+    ? DEFAULT_TIER_RESERVES
+    : tierReservesSchema.parse(stored);
+}
+
 interface SlotSettings extends SlotConfig {
   price: Price;
   capMicros: number;
@@ -156,12 +167,7 @@ async function loadSlot(db: D1Database, slot: Slot): Promise<SlotSettings> {
   const slots = slotsSchema.parse(values.get(SETTING_SLOTS) ?? {});
   const prices = pricesSchema.parse(values.get(SETTING_PRICES) ?? {});
   const caps = capsSchema.parse(values.get(SETTING_BUDGET_CAPS) ?? {});
-  // Optional: without the row, the default reserves apply.
-  const stored = values.get(SETTING_TIER_RESERVES);
-  const tierReserves =
-    stored === undefined
-      ? DEFAULT_TIER_RESERVES
-      : tierReservesSchema.parse(stored);
+  const tierReserves = resolveTierReserves(values.get(SETTING_TIER_RESERVES));
   const config = slots[slot];
   if (!config) throw new ModelConfigError(`slot ${slot} is not configured`);
   const price = prices[config.model];
