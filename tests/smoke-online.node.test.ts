@@ -46,7 +46,7 @@ function funding(cards = 1): string {
   const rounds = cards
     ? `<ul>${Array.from({ length: cards }, (_, i) => `<li><h3>Company ${i + 1}</h3><span>$5,000,000</span></li>`).join("")}</ul>`
     : "<p>No funding rounds match.</p>";
-  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header>${SITE_NAME}</header><main><div data-section="finance"><h1>Funding Round Tracker</h1><aside role="note">${notice}</aside><section aria-label="Trends"><ul><li><a href="/funding?sector=fintech">fintech</a></li></ul></section><section aria-label="Rounds"><h2>Reported rounds</h2>${rounds}</section></div></main></body></html>`;
+  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header><a href="/">${SITE_NAME}</a></header><main><div data-section="finance"><h1>Funding Round Tracker</h1><aside role="note">${notice}</aside><section aria-label="Trends"><ul><li><a href="/funding?sector=fintech">fintech</a></li></ul></section><section aria-label="Rounds"><h2>Reported rounds</h2>${rounds}</section></div></main></body></html>`;
 }
 function html(path: string): string {
   if (path === "/funding") return funding();
@@ -56,7 +56,7 @@ function html(path: string): string {
     : path.startsWith("/s/")
       ? section
       : "Sample story";
-  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header>${SITE_NAME}</header><main>
+  return `<!DOCTYPE html><html><head><title>${SITE_NAME}</title></head><body><header><a href="/">${SITE_NAME}</a></header><main>
     ${sections.map((s) => `<a href="/s/${s}">${s}</a>`).join("")}
     <div data-section="${sections.includes(section) ? section : "technology"}"><h1>${heading}</h1>
     <p>${notice}</p><h2>Timeline</h2><h2>Material Developments</h2><p>Criterion for Update:</p>
@@ -698,6 +698,44 @@ test("each_page_guard_rejects_a_minimal_counterexample", async () => {
   await rejectsBody(
     "/rss/technology.xml",
     tech.replace(`${SITE_NAME} — technology`, `${SITE_NAME} — education`),
+    options,
+    "RSS_TITLE",
+  );
+  // The brand must sit in the masthead link and the <title>, not just
+  // anywhere on the page: "Daily Digest" is ordinary page text.
+  const masthead = `<header><a href="/">${SITE_NAME}</a></header>`;
+  await rejectsBody(
+    "/",
+    html("/")
+      .replace(masthead, '<header><a href="/">Personal News</a></header>')
+      .replace("<main>", "<main><p>Daily Digest</p>"),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/",
+    html("/").replace(
+      masthead,
+      `<header><a href="/">${SITE_NAME} Digest</a></header>`,
+    ),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/",
+    html("/").replace(
+      `<title>${SITE_NAME}</title>`,
+      `<title>${SITE_NAME} Digest</title>`,
+    ),
+    options,
+    "HTML_SSR",
+  );
+  await rejectsBody(
+    "/rss/technology.xml",
+    tech.replace(
+      `${SITE_NAME} — technology`,
+      `${SITE_NAME} Digest — technology`,
+    ),
     options,
     "RSS_TITLE",
   );

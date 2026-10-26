@@ -193,7 +193,20 @@ async function main() {
   const type = home.headers.get("content-type") ?? "";
   if (!type.includes("text/html")) fail(`GET / content-type is "${type}"`);
   if (!/<!doctype html/i.test(body)) fail("GET / has no <!doctype html>");
-  if (!body.includes(SITE_NAME)) fail(`GET / has no "${SITE_NAME}"`);
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1]?.trim();
+  if (title !== SITE_NAME) fail(`GET / <title> is "${title}"`);
+  if (
+    !Array.from(
+      body.matchAll(/<header\b[\s\S]*?<\/header>/gi),
+      (m) => m[0],
+    ).some((h) =>
+      Array.from(
+        h.matchAll(/<a\b[^>]*\bhref="\/"[^>]*>([\s\S]*?)<\/a>/gi),
+      ).some((m) => m[1].replace(/<[^>]*>/g, "").trim() === SITE_NAME),
+    )
+  ) {
+    fail(`GET / has no header link "${SITE_NAME}" to /`);
+  }
   const csp = home.headers.get("content-security-policy") ?? "";
   if (!csp.includes("default-src 'self'")) {
     fail(`GET / content-security-policy is "${csp}"`);
