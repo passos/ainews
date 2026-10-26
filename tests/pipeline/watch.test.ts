@@ -76,7 +76,7 @@ describe("pipeline: watch evaluation", () => {
     // 3. Setup watch scoped to industry 1
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('tech-watch', 'Question?', 'Criteria', '["AI"]', 1, 'active', 1000, 1000)`,
+       VALUES ('tech-watch', 'Question?', 'Criteria', '["AI"]', 1, 'active', 500, 500)`,
     ).run();
 
     const mockJudge = vi.fn();
@@ -128,7 +128,7 @@ describe("pipeline: watch evaluation", () => {
     // Setup watch with unrelated keywords
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('biotech-watch', 'Cancer drug discoveries', 'Criteria', '["oncology", "clinical trial"]', 1, 'active', 1000, 1000)`,
+       VALUES ('biotech-watch', 'Cancer drug discoveries', 'Criteria', '["oncology", "clinical trial"]', 1, 'active', 500, 500)`,
     ).run();
 
     const mockJudge = vi.fn();
@@ -177,16 +177,16 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('gpt-5-idem', 'GPT-5 Benchmarks', 'Criteria', '["benchmark", "gpt-5"]', 1, 'active', 1000, 1000)`,
+       VALUES ('gpt-5-idem', 'GPT-5 Benchmarks', 'Criteria', '["benchmark", "gpt-5"]', 1, 'active', 500, 500)`,
     ).run();
     const watchId = Number(watchRes.meta.last_row_id);
 
-    // Pre-insert hit for revision 2
+    // Pre-insert hit for revision 2 that cites the only new article
     await env.DB.prepare(
       `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
-       VALUES (?1, ?2, 2, 1000, 'Prior summary', '{}')`,
+       VALUES (?1, ?2, 2, 1000, 'Prior summary', ?3)`,
     )
-      .bind(watchId, eventId)
+      .bind(watchId, eventId, JSON.stringify({ articleIds: [articleId] }))
       .run();
 
     const mockJudge = vi.fn();
@@ -235,7 +235,7 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('gpu-pricing', 'Official GPU Pricing', 'Must be official manufacturer announcement', '["GPU", "pricing"]', 1, 'active', 1000, 1000)`,
+       VALUES ('gpu-pricing', 'Official GPU Pricing', 'Must be official manufacturer announcement', '["GPU", "pricing"]', 1, 'active', 500, 500)`,
     ).run();
     const watchId = Number(watchRes.meta.last_row_id);
 
@@ -296,7 +296,7 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('official-blackwell', 'Official Blackwell Pricing', 'Must be official manufacturer announcement', '["Blackwell", "pricing"]', 1, 'active', 1000, 1000)`,
+       VALUES ('official-blackwell', 'Official Blackwell Pricing', 'Must be official manufacturer announcement', '["Blackwell", "pricing"]', 1, 'active', 500, 500)`,
     ).run();
     const watchId = Number(watchRes.meta.last_row_id);
 
@@ -345,7 +345,7 @@ describe("pipeline: watch evaluation", () => {
     // Insert active watch with keywords
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('enqueue-watch', 'Question?', 'Criteria', '["active"]', 1, 'active', 1000, 1000)`,
+       VALUES ('enqueue-watch', 'Question?', 'Criteria', '["active"]', 1, 'active', 500, 500)`,
     ).run();
 
     // Insert event and approved article
@@ -427,7 +427,7 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('breakthrough-watch', 'Model Releases', 'Must be a new model release', '["Breakthrough", "Model"]', 1, 'active', 1000, 1000)
+       VALUES ('breakthrough-watch', 'Model Releases', 'Must be a new model release', '["Breakthrough", "Model"]', 1, 'active', 500, 500)
        RETURNING id`,
     ).first<{ id: number }>();
     const watchId = watchRes!.id;
@@ -548,7 +548,7 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('criteria-key-test', 'Fab Status', 'Initial criteria A', '["Fab"]', 1, 'active', 1000, 1000)
+       VALUES ('criteria-key-test', 'Fab Status', 'Initial criteria A', '["Fab"]', 1, 'active', 500, 500)
        RETURNING id`,
     ).first<{ id: number }>();
     const watchId = watchRes!.id;
@@ -614,7 +614,7 @@ describe("pipeline: watch evaluation", () => {
 
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('empty-kw-watch', 'Question?', 'Criteria', '[]', 1, 'active', 1000, 1000)`,
+       VALUES ('empty-kw-watch', 'Question?', 'Criteria', '[]', 1, 'active', 500, 500)`,
     ).run();
 
     const mockJudge = vi.fn();
@@ -662,19 +662,19 @@ describe("pipeline: watch evaluation", () => {
     // 1. Symbol keyword "C#"
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('csharp-watch', 'C# Updates', 'Criteria', '["C#"]', 1, 'active', 1000, 1000)`,
+       VALUES ('csharp-watch', 'C# Updates', 'Criteria', '["C#"]', 1, 'active', 500, 500)`,
     ).run();
 
     // 2. Symbol keyword ".NET"
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('dotnet-watch', '.NET Updates', 'Criteria', '[".NET"]', 1, 'active', 1000, 1000)`,
+       VALUES ('dotnet-watch', '.NET Updates', 'Criteria', '[".NET"]', 1, 'active', 500, 500)`,
     ).run();
 
     // 3. Word-bounded "AI" should NOT match "chain"
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('ai-watch', 'AI Updates', 'Criteria', '["AI"]', 1, 'active', 1000, 1000)`,
+       VALUES ('ai-watch', 'AI Updates', 'Criteria', '["AI"]', 1, 'active', 500, 500)`,
     ).run();
 
     const mockJudge = vi.fn().mockResolvedValue({ progress: { noul: 0.1 } });
@@ -772,7 +772,7 @@ describe("pipeline: watch evaluation", () => {
 
     const watchRes = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('trunc-watch', 'Benchmark Results', 'Empirical numbers', '["Benchmark"]', 1, 'active', 1000, 1000)
+       VALUES ('trunc-watch', 'Benchmark Results', 'Empirical numbers', '["Benchmark"]', 1, 'active', 500, 500)
        RETURNING id`,
     ).first<{ id: number }>();
     const watchId = watchRes!.id;
@@ -868,7 +868,7 @@ describe("pipeline: watch evaluation", () => {
 
     await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES ('late-group-watch', 'Question?', 'Criteria', '["Breakthrough"]', 1, 'active', 1000, 1000)`,
+       VALUES ('late-group-watch', 'Question?', 'Criteria', '["Breakthrough"]', 1, 'active', 500, 500)`,
     ).run();
 
     const mockJudge = vi.fn().mockResolvedValue({ progress: { noul: 0.95 } });
@@ -980,13 +980,17 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     return art!.id;
   }
 
-  async function seedWatch(slug: string, industryId: number | null = null) {
+  async function seedWatch(
+    slug: string,
+    industryId: number | null = null,
+    createdAt = 500,
+  ) {
     const row = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
-       VALUES (?1, 'Marker question?', 'Marker criteria', '["Marker"]', ?2, 'active', 1000, 1000)
+       VALUES (?1, 'Marker question?', 'Marker criteria', '["Marker"]', ?2, 'active', ?3, ?3)
        RETURNING id`,
     )
-      .bind(slug, industryId)
+      .bind(slug, industryId, createdAt)
       .first<{ id: number }>();
     return row!.id;
   }
@@ -1275,5 +1279,155 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     await evaluateEventWatches(env, ev2, 4000, { models: m.client });
     expect(m.judge).not.toHaveBeenCalled();
     expect(await marker(ev2)).toEqual({ revision: 2, through: 2000 });
+  });
+
+  async function hitsOf(eventId: number) {
+    const { results } = await env.DB.prepare(
+      `SELECT watch_id, event_revision, rationale FROM watch_hits
+       WHERE event_id = ?1 ORDER BY id`,
+    )
+      .bind(eventId)
+      .all<{ watch_id: number; event_revision: number; rationale: string }>();
+    return results.map((h) => ({
+      watchId: h.watch_id,
+      revision: h.event_revision,
+      articleIds: (JSON.parse(h.rationale) as { articleIds: number[] })
+        .articleIds,
+    }));
+  }
+
+  // A hit records "a development at revision R" and does not expire
+  // (invariant 3), so a concurrent bump must not drop it.
+  it("keeps the hit when the event revision is bumped while the judge runs", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    const b = await seedApproved(eventId, 1, "Marker article B", 1000);
+    const w = await seedWatch("f1-watch");
+    const m = models(0.9);
+    m.judge.mockImplementation(async () => {
+      // An approval lands between the judge call and the hit insert.
+      await env.DB.prepare(
+        `UPDATE events SET revision = revision + 1 WHERE id = ?1`,
+      )
+        .bind(eventId)
+        .run();
+      return { progress: { noul: 0.9 } };
+    });
+
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+    expect(await hitsOf(eventId)).toEqual([
+      { watchId: w, revision: 1, articleIds: [b] },
+    ]);
+
+    // Revision 2 brings nothing new: B is prior reporting, no second hit.
+    m.judge.mockReset();
+    m.judge.mockResolvedValue({ progress: { noul: 0.9 } });
+    await evaluateEventWatches(env, eventId, 2000, { models: m.client });
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(await hitsOf(eventId)).toEqual([
+      { watchId: w, revision: 1, articleIds: [b] },
+    ]);
+  });
+
+  it("does not hit again on an article that an earlier unmarked revision already hit", async () => {
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article A", 1000);
+    const w1 = await seedWatch("f3-watch-1");
+    const w2 = await seedWatch("f3-watch-2");
+    const m = models(0.1);
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+
+    // Revision 2: W1 hits B, W2 fails with a retryable error.
+    const b = await seedApproved(eventId, 1, "Marker article B", 2000);
+    await env.DB.prepare(
+      `UPDATE events SET revision = 2, updated_at = 2000 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+    m.judge.mockReset();
+    m.judge.mockImplementation(async (key: string) => {
+      if (key.startsWith(`watch:judge:${w2}:`)) {
+        throw new BudgetExceededError("gateway", "2026-10-26", 1);
+      }
+      return { progress: { noul: 0.9 } };
+    });
+    await expect(
+      evaluateEventWatches(env, eventId, 2000, { models: m.client }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
+    expect((await marker(eventId))!.revision).toBe(1);
+    expect(await hitsOf(eventId)).toEqual([
+      { watchId: w1, revision: 2, articleIds: [b] },
+    ]);
+
+    // Revision 3 adds C; the retry evaluates it.
+    const c = await seedApproved(eventId, 1, "Marker article C", 3000);
+    await env.DB.prepare(
+      `UPDATE events SET revision = 3, updated_at = 3000 WHERE id = ?1`,
+    )
+      .bind(eventId)
+      .run();
+    m.judge.mockReset();
+    m.judge.mockResolvedValue({ progress: { noul: 0.9 } });
+    await evaluateEventWatches(env, eventId, 3000, { models: m.client });
+
+    const w1Call = m.judge.mock.calls.find((call) =>
+      (call[0] as string).startsWith(`watch:judge:${w1}:`),
+    );
+    const [newPart, priorPart = ""] = (
+      w1Call![1] as { body: string }
+    ).body.split("=== PRIOR REPORTING (ALREADY KNOWN) ===");
+    expect(newPart).toContain("Marker article C");
+    expect(newPart).not.toContain("Marker article B");
+    expect(priorPart).toContain("Marker article B");
+
+    const hits = await hitsOf(eventId);
+    expect(hits.filter((h) => h.watchId === w1)).toEqual([
+      { watchId: w1, revision: 2, articleIds: [b] },
+      { watchId: w1, revision: 3, articleIds: [c] },
+    ]);
+    // W2 never hit before, so B and C are both new to it.
+    expect(hits.filter((h) => h.watchId === w2)).toEqual([
+      { watchId: w2, revision: 3, articleIds: [b, c] },
+    ]);
+  });
+
+  it("does not judge articles approved before the watch was created", async () => {
+    // t=1000 approve, t=2000 create the watch, t=3000 consume the event.
+    const eventId = await seedEvent(1, 1, 1000);
+    await seedApproved(eventId, 1, "Marker article", 1000);
+    await seedWatch("f4-watch", null, 2000);
+    const m = models(0.9);
+
+    const res = await evaluateEventWatches(env, eventId, 3000, {
+      models: m.client,
+    });
+
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(res.evaluatedCount).toBe(0);
+    expect(await hitsOf(eventId)).toEqual([]);
+    expect((await marker(eventId))!.revision).toBe(1);
+  });
+
+  it("marks a first-evaluated retraction revision without calling the judge", async () => {
+    // Revision 2, never evaluated, newest approval older than updated_at.
+    const eventId = await seedEvent(1, 2, 20000);
+    await seedApproved(eventId, 1, "Marker article", 10000);
+    await seedWatch("c1-watch");
+    const m = models(0.9);
+
+    await evaluateEventWatches(env, eventId, 20000, { models: m.client });
+
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(await marker(eventId)).toEqual({ revision: 2, through: 10000 });
+  });
+
+  it("marks an event that has no approved article", async () => {
+    const eventId = await seedEvent(1, 2, 1000);
+    await seedWatch("c3-watch");
+    const m = models(0.9);
+
+    await evaluateEventWatches(env, eventId, 1000, { models: m.client });
+
+    expect(m.judge).not.toHaveBeenCalled();
+    expect(await marker(eventId)).toEqual({ revision: 2, through: null });
   });
 });

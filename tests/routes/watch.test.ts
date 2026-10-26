@@ -9,6 +9,7 @@ import {
   renderWatchFeed,
   watchFeedResponse,
 } from "../../src/server/publication/watches";
+import { loadSiteShell } from "../../src/server/publication/shell";
 import {
   db,
   resetPublication,
@@ -491,5 +492,26 @@ describe("tests/routes/watch.test.ts", () => {
     expect(list[0].criteria).toBe("Active criteria");
     expect(list[0].industryName).toBe("Finance");
     expect(list[0].industryDisclaimer).toContain("Not investment advice");
+  });
+
+  // Ruling 3 (#85): the header shows the Watches link only while an active
+  // watch exists. __root.tsx renders the link from this flag.
+  it("loadSiteShell sets hasWatches only while an active watch exists", async () => {
+    expect((await loadSiteShell()).hasWatches).toBe(false);
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('shell-paused-1', 'Paused?', 'Paused criteria', '["x"]', NULL, 'paused', 500, 500),
+              ('shell-paused-2', 'Paused?', 'Paused criteria', '["x"]', ?1, 'paused', 600, 600)`,
+    )
+      .bind(tech.industryId)
+      .run();
+    expect((await loadSiteShell()).hasWatches).toBe(false);
+
+    await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('shell-active', 'Active?', 'Active criteria', '["y"]', NULL, 'active', 700, 700)`,
+    ).run();
+    expect((await loadSiteShell()).hasWatches).toBe(true);
   });
 });
