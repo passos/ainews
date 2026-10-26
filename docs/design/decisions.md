@@ -189,10 +189,17 @@ CF worker name ainews-app
 - 每个候选都用项目 UA 验证：robots、feed、正文抓取梯，不需要浏览器才算通过。ainews-design 从验证通过的里定名单。
   写生产时，先 dry-run，执行一次，前后的计数都要贴出来。
 
-## 钱与开关（金额已向使用者说明）
+## 钱与开关
 
-- 新增的读者功能和信源会让花费明显上升。**建议**每日上限从 $2 提到 $8：`gateway` $7.50，`workers_ai` $0.50。
-  这是 ainews-design 的建议，使用者已表示"全部采纳"，但在改 `budget.caps` 的生产写入之前再请使用者确认一次金额。
+- **每日预算仍是 $2**（使用者原话，2026-10-26："预算按 $2 执行"）：`gateway` $1.90，`workers_ai` $0.10，`jina` $0。
+  上面的读者功能都在这个上限内做。设计方因此补一条：**按读者价值分配预算**，额度不够时先保证排在前面的：
+  1. 文章预筛、评分与摘要（Stage 1）；
+  2. 读者 Ask 的当日保留额度（`gateway` 里保留 $0.30，未用完的部分 18:00 UTC 后释放给其他用途）；
+  3. 已批准事件的 Story Brief 与三档解释；
+  4. 论断与证据；
+  5. 学习材料、板块编辑产品、watch 判定；
+  6. 日报和周报的导语。
+  额度用完后，后面的任务排队到第二天，不丢数据。后台预算页要显示每一档当天的花费。
 - 所有新的 write 和 reason 调用，做一次批量真实探测，确认 `finishReason=STOP`，预计花费不超过 $0.10。
 - `DISCOVERY_ENABLED` 保持 `"false"`。重新打开之前要先满足：probe 遵守 crawl-delay、带项目 UA、跨主机查 robots；
   有当天预算；websearch 经过 `createModelClient` 记账。改这个开关仍然要单独开 PR，并经使用者同意。
@@ -207,4 +214,3 @@ CF worker name ainews-app
 
 - 在 `ioenv.com` 上接好 Email Service，并确认发件地址。
 - 提供能读 AI Gateway 日志的凭据，用于 M1 关口的对账，并确认 embed 的计费渠道。
-- 确认每日预算的金额（建议 $8）。
