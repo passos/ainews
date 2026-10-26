@@ -161,6 +161,23 @@ export function renderArticleMarkdown(
 const EXCERPT_MAX_WORDS = 300;
 const EXCERPT_MAX_SHARE = 0.25;
 
+/**
+ * The licensing rule of an excerpt: at most 300 visible words and at most
+ * 25% (rounded down) of the body's visible words.
+ */
+export function excerptWithinCap(
+  visibleWords: number,
+  totalVisibleWords: number,
+): boolean {
+  return (
+    visibleWords <=
+    Math.min(
+      EXCERPT_MAX_WORDS,
+      Math.floor(totalVisibleWords * EXCERPT_MAX_SHARE),
+    )
+  );
+}
+
 const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
 /** What a reader sees of inline tokens: text, code and image alt text. */
@@ -232,5 +249,5 @@ export function renderArticleExcerpt(src: string): string | null {
   );
   // Licensing is a hard rule: whatever the counting above got wrong, the
   // words a reader would see must fit the cap, or no excerpt is shown.
-  return htmlWords(html) > cap ? null : html;
+  return excerptWithinCap(htmlWords(html), total) ? html : null;
 }
