@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { findCjk } from "./helpers/cjk-scan";
 import { checkImportRules } from "./helpers/import-rules";
 
 const files = (entries: Record<string, string>) =>
@@ -298,5 +299,52 @@ describe("the real repository", () => {
     expect(real.has("src/routes/index.tsx")).toBe(true);
     expect(real.has("src/server/admin/identity.ts")).toBe(true);
     expect(checkImportRules(real)).toEqual([]);
+  });
+});
+
+describe("reader-visible text is English", () => {
+  it("ignores CJK in comments and flags it in strings and JSX text", () => {
+    const v = findCjk(
+      files({
+        "src/components/a.tsx": [
+          "// 行注释",
+          "/* 块注释",
+          "   第二行 */",
+          'const url = "http://example.com"; // 注释',
+          "export const A = () => (",
+          "  <p>{/* 注释 */}</p>",
+          ");",
+          'export const b = "中文";',
+          "export const c = () => <p>全角：</p>;",
+        ].join("\n"),
+      }),
+    );
+    expect(v).toEqual(["src/components/a.tsx:8", "src/components/a.tsx:9"]);
+  });
+
+  it("finds no CJK in reader-visible source outside admin", () => {
+    const root = join(import.meta.dirname, "..");
+    const real = new Map<string, string>();
+    for (const dir of [
+      "src/components",
+      "src/routes",
+      "src/lib",
+      "src/server/publication",
+    ]) {
+      for (const entry of readdirSync(join(root, dir), { recursive: true })) {
+        const rel = `${dir}/${String(entry).split("\\").join("/")}`;
+        if (!/\.tsx?$/.test(rel)) continue;
+        if (rel.startsWith("src/routes/admin/")) continue;
+        if (rel.startsWith("src/components/admin/")) continue;
+        real.set(rel, readFileSync(join(root, rel), "utf8"));
+      }
+    }
+    expect(real.has("src/components/artifacts/IndustryImpactCard.tsx")).toBe(
+      true,
+    );
+    expect(real.has("src/routes/index.tsx")).toBe(true);
+    expect(real.has("src/lib/site.ts")).toBe(true);
+    expect(real.has("src/server/publication/feed.ts")).toBe(true);
+    expect(findCjk(real)).toEqual([]);
   });
 });

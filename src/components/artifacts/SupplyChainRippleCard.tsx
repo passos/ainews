@@ -24,10 +24,11 @@ export function SupplyChainRippleCard({
       {/* Prominent Hypothesis Banner (Newsren §3 mandate) */}
       <div className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
         <span className="font-mono font-bold uppercase tracking-wider">
-          ⚠️ 假说推演 / Working Hypothesis:
+          ⚠️ Working hypothesis:
         </span>{" "}
         <span className="leading-relaxed">
-          供应链上下游波及效应均为推演模型与传导假说，非审计后确凿事实。
+          Upstream and downstream ripple effects in the supply chain come from
+          an inferred model and transmission hypotheses, not from audited facts.
         </span>
       </div>
 
