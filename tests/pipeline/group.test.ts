@@ -435,6 +435,15 @@ describe("groupArticle core logic", () => {
       .all();
     expect(eaRows.results.length).toBe(1);
 
+    // Verify revision bumped once (approved article), not again on redelivery
+    if (res1.status !== "grouped") throw new Error("expected grouped");
+    const evRow = await env.DB.prepare(
+      "SELECT revision FROM events WHERE id = ?1",
+    )
+      .bind(res1.eventId)
+      .first<{ revision: number }>();
+    expect(evRow?.revision).toBe(1);
+
     // Verify Jev called only once
     const jevCalls = calls.filter((c) => c.slot === "judge");
     expect(jevCalls.length).toBe(1);
