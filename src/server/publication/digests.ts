@@ -140,7 +140,9 @@ async function filterSurvivingItems(
     survivingItems.push({
       eventId: it.eventId,
       eventRevision: revisionChanged ? info.revision : it.eventRevision,
-      title: info.firstTitle || it.title,
+      // Only the approved article names the item (#114); the stored title may
+      // belong to an article whose approval was later revoked.
+      title: info.firstTitle,
       oneLiner: useModelLine
         ? (it.oneLiner as string)
         : info.latestSummary || info.firstTitle,
