@@ -174,7 +174,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **多表更新**用 D1 `batch()` 一次提交。
 - **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{sha256hex(canonical_url)}.html`（#5 写，在插入 `articles` 之前写，每次抓取覆盖写），它是正文抓取第 0 档的原始输入，不是正文版本；#6 按 `canonical_url` 算出键去读，有就用。
 
-本节下面用的别名：`a` = `articles`，`e` = `events`，`ea` = `event_articles`，`art` = `event_artifacts`，`c` = `claims`，`ce` = `claim_evidence`。SQL 里比较可能为 NULL 的值一律写 `IS` / `IS NOT`。标「#113 新增」的符号和列现在还不存在，由 #113 实现。
+本节下面用的别名：`a` = `articles`，`e` = `events`，`ea` = `event_articles`，`art` = `event_artifacts`，`c` = `claims`，`ce` = `claim_evidence`。SQL 里比较可能为 NULL 的值一律写 `IS` / `IS NOT`。片段里的 `?articleId` 这类参数名只是说明，实现用编号参数 `?1`、`?2`…。标「#113 新增」的符号和列现在还不存在，由 #113 实现。
 
 ### 事件 revision
 
@@ -182,15 +182,15 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 
 | 写法 | 什么时候用 | SET |
 |---|---|---|
-| **增长** | 只增加了已批准文章 | `revision = revision + 1, updated_at = ?now, ${PENDING_SINCE_SET_SQL}` |
-| **变更** | 去掉了已批准文章，或已批准文章的分析行、正文、改写变了 | `revision = revision + 1, withdrawn_through = revision, updated_at = ?now, ${PENDING_SINCE_SET_SQL}` |
+| **增长** | 只增加了已批准文章 | `revision = revision + 1, updated_at = ?n, ${pendingSinceSetSql(n)}` |
+| **变更** | 去掉了已批准文章，或已批准文章的分析行、正文、改写变了 | `revision = revision + 1, withdrawn_through = revision, updated_at = ?n, ${pendingSinceSetSql(n)}` |
 | **只撤下** | 输入还没变，但旧版本必须立刻下线（重新分析重置） | `withdrawn_through = revision`。不加 1，不写 `updated_at`，不写 `<kind>_pending_since` |
 
 - 每种写法都和触发它的写入放在同一个 `batch()`，用 `changes() = 1` 或 `EXISTS(…)` 串起来：触发写入没生效，就不加 1。
 - `events.withdrawn_through`（#113 新增，`integer NOT NULL DEFAULT 0`）只增不减，且 `withdrawn_through <= revision`。三种写法都保持这两条：增长不动它；变更写成旧 `revision`；只撤下写成当前 `revision`。SQLite 的 `UPDATE … SET revision = revision + 1, withdrawn_through = revision` 右边读的是旧值（**推断**，#113 用测试证明）。
 - 函数：#113 在 `src/server/db/events.ts` 新增 `growRevisionStatement`、`changeRevisionStatement`、`withdrawStatement`，签名同 `revisionBumpStatement`，替换它。`conditionalReviewRevisionBumpStatement` 保留，加参数 `analysisId: number | null`，按下表第 1–4 行扩展条件。
-- `PENDING_SINCE_SET_SQL`（#113 新增，`src/server/db/events.ts`）是共享 SET 片段：`artifacts_pending_since = COALESCE(artifacts_pending_since, ?now), evidence_pending_since = COALESCE(evidence_pending_since, ?now)`，参数名由调用方绑定。每一条加 1 语句都插值它：现有的加 1（`src/server/db/events.ts` 2 处、`src/pipeline/group/group-article.ts` 2 处、`src/pipeline/evidence/primary.ts` 3 处；`reanalyzeArticle` 那 1 处按第 7 行改为只撤下）、下表新增的加 1、下面第 9/10 行共用的语句、「读者看到的分析行」迁移里的变更。不写内联副本。
-- 下表之外不许出现 `revision = revision + 1`。#113 加扫描测试，按文件固定加 1 语句和 `PENDING_SINCE_SET_SQL` 的引用次数（同 `tests/approved-definition.node.test.ts` 的 `EXPECTED_USES`）。
+- `pendingSinceSetSql(n: number): string`（#113 新增，`src/server/db/events.ts`）返回共享 SET 片段：`artifacts_pending_since = COALESCE(artifacts_pending_since, ?n), evidence_pending_since = COALESCE(evidence_pending_since, ?n)`。`n` 是调用方语句里绑定 `now` 的参数序号（上表的 `?n` 是同一个参数）；片段不增加参数，调用方的参数顺序不变。每一条加 1 语句都插值它：现有的加 1（`src/server/db/events.ts` 2 处、`src/pipeline/group/group-article.ts` 2 处、`src/pipeline/evidence/primary.ts` 3 处；`reanalyzeArticle` 那 1 处按第 7 行改为只撤下）、下表新增的加 1、下面第 9/10 行共用的语句、「读者看到的分析行」迁移里的变更。不写内联副本。
+- 下表之外不许出现 `revision = revision + 1`。#113 加扫描测试，按文件固定加 1 语句和 `pendingSinceSetSql(` 的引用次数（同 `tests/approved-definition.node.test.ts` 的 `EXPECTED_USES`）。
 - 后台的审核写入不发生成消息。`artifacts`、`evidence` 消息只由 cron 的 `enqueueDueEvents` 发（见「去抖」）。
 
 写路径（全部 16 条）：
@@ -205,14 +205,14 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 | 6 | `changeArticleIndustry`（`ops.ts`） | 改板块 | 不加 1；409 + 守卫 | batch 外查到文章在事件里就 409（保留）。batch 里每条语句（改 `industry_id`、删 auto 批准）都加 `AND NOT EXISTS (SELECT 1 FROM event_articles WHERE article_id = ?articleId)`，改 `industry_id` 那条 0 行就返回 409。删掉 Finance 分支里的 `revisionBumpStatement`：守卫成立时文章不在任何事件里 |
 | 7 | `reanalyzeArticle`（`ops.ts`） | 重新分析重置 | 只撤下 | 只在文章已批准时：`changes() = 1 AND ${APPROVED_ARTICLE_SQL}`。新分析获批时才加 1（第 2、10 行）；新分析一直没落库时，由审核队列第 3 项兜住（「读者看到的分析行」） |
 | 8 | `analyzeArticle` 提交（`src/pipeline/analyze/analyze.ts`），`review` 模式 | 新分析落库 | 不加 1 | 新行只是候选，进审核队列 |
-| 9 | 同上，`auto` 模式（`effectivePublishMode(row) === "auto"`） | 文章已在事件里、当前正文还没有批准记录，新分析被 auto 批准 | 增长 | auto 批准改成 `INSERT … SELECT … WHERE changes() = 1 ON CONFLICT (article_id, body_sha) DO UPDATE SET analysis_id = excluded.analysis_id WHERE reviews.decision = 'approved' AND reviews.analysis_id IS NOT excluded.analysis_id`，`analysis_id` = 同一 batch 刚插入的行。加 1 用下面的共用语句 |
-| 10 | 同上，`auto` 模式 | 文章当前正文已批准，新分析落库 | 变更 | 同一条 upsert 走 `DO UPDATE`，`analysis_id` 换成新行；已有的拒绝不推翻。加 1 用下面的共用语句。Finance 走不到这里（`effectivePublishMode`） |
+| 9 | 同上，`auto` 模式（`effectivePublishMode(row) === "auto"`，只是预判） | 文章已在事件里、当前正文还没有批准记录，新分析被 auto 批准 | 增长 | auto 批准改成 `INSERT … SELECT … FROM articles a JOIN industries i ON i.id = a.industry_id WHERE <现有条件> AND i.publish_mode = 'auto' AND lower(trim(i.slug)) IS NOT 'finance' AND changes() = 1 ON CONFLICT (article_id, body_sha) DO UPDATE SET analysis_id = excluded.analysis_id WHERE reviews.decision = 'approved' AND reviews.analysis_id IS NOT excluded.analysis_id`，`analysis_id` = 同一 batch 刚插入的行。板块在提交时用 SQL 重新判断：分析开始后，管理员可能把未归组的文章改到 Finance 或 `review` 板块（`changeArticleIndustry` 只删已有的 auto 批准，这时还没有）。加 1 用下面的共用语句 |
+| 10 | 同上，`auto` 模式 | 文章当前正文已批准，新分析落库 | 变更 | 同一条 upsert 走 `DO UPDATE`，`analysis_id` 换成新行；已有的拒绝不推翻。加 1 用下面的共用语句。Finance 和 `review` 板块走不到这里：以提交时第 9 行的 SQL 板块条件为准，`effectivePublishMode` 只是预判 |
 | 11 | `groupArticle`（`src/pipeline/group/group-article.ts`）并入分支、新建分支 | 已批准文章进事件 | 增长 | 不变：`changes() = 1` 和 `EXISTS(已批准)` |
 | 12 | `src/pipeline/evidence/primary.ts`，一手文件挂进事件（2 处） | 一手文件挂进事件 | 增长 | 不变：CAS / `changes() = 1` |
 | 13 | 同文件，新建的一手文章自动批准并挂进事件 | 一手文章进事件 | 增长 | 补 `changes() = 1`（前一条是 `event_articles` INSERT）。现在没有任何条件 |
-| 14 | `ingestCompanyFilings`（`src/pipeline/edgar/ingest.ts`） | EDGAR 正文变了 | 变更 | 只在旧正文已批准时。upsert 改进 `batch()`，在它之前放 `changeRevisionStatement`，条件 `(SELECT body_sha FROM articles WHERE canonical_url = ?3) IS NOT ?11`（`?3` = `canonical_url`，`?11` = 新 `body_sha`）且旧正文有 `decision = 'approved'` 的 review。实现：#113 |
+| 14 | `ingestCompanyFilings`（`src/pipeline/edgar/ingest.ts`） | EDGAR 正文变了 | 变更 | 只在旧正文或新正文任一有批准记录时：正文从 h1 换成 h2、再换回 h1 时，h1 的旧批准重新生效，也是变更。upsert 改进 `batch()`，在它之前放 `changeRevisionStatement`，条件 `(SELECT body_sha FROM articles WHERE canonical_url = ?3) IS NOT ?11`（`?3` = `canonical_url`，`?11` = 新 `body_sha`）且 `EXISTS (SELECT 1 FROM reviews r JOIN articles a ON a.id = r.article_id WHERE a.canonical_url = ?3 AND r.body_sha IN (a.body_sha, ?11) AND r.decision = 'approved')`（`a.body_sha` 是 batch 执行前的旧正文）。实现：#113 |
 | 15 | `decideReview` 里重算 `financial_facts.superseded_by` | 批准或拒绝 EDGAR 修订文件 | 变更 | 对包含原文件文章的事件做变更。见「已知缺口」第 1 条。实现：W4 EDGAR 跟进 |
-| 16 | `src/pipeline/body/body.ts` 的 `force` 分支 | 后期重抓正文，换 `body_sha` | 变更 | 规则同第 14 行。现在没有调用方传 `force: true`，#113 不改；加调用方时按第 14 行实现 |
+| 16 | `src/pipeline/body/body.ts` 的 `force` 分支 | 后期重抓正文，换 `body_sha` | 变更 | 规则同第 14 行（旧正文或新正文任一有批准记录）。现在没有调用方传 `force: true`，#113 不改；没有实现 issue，见「已知缺口」第 3 条 |
 
 第 9、10 行共用的加 1 语句：一条语句同时判别和加 1，不靠 `changes()` 区分 insert 和 update（两者的 `changes()` 都是 1）。
 
@@ -221,21 +221,24 @@ UPDATE events
 SET revision = revision + 1,
     withdrawn_through = CASE WHEN EXISTS (
       SELECT 1 FROM reviews r
-      WHERE r.article_id = ?articleId AND r.body_sha = ?bodySha AND r.decision = 'approved'
+      WHERE r.article_id = ?1 AND r.body_sha = ?2 AND r.decision = 'approved'
     ) THEN revision ELSE withdrawn_through END,
-    updated_at = ?now, ${PENDING_SINCE_SET_SQL}
-WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?articleId)
+    updated_at = ?3, ${pendingSinceSetSql(3)}
+WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?1)
   AND <upsert 一定会生效>
 ```
 
+参数顺序：`?1` = 文章 id，`?2` = 分析用的 `body_sha`，`?3` = `now`，`?4` = `analysis_generation`，`?5` = 本次的 `prompt_version`（`analysed`）。
+
 - `EXISTS` 为真 = 当前正文已有批准记录 = 变更（第 10 行）；为假 = 增长（第 9 行）。
 - 位置：batch 的第一条，排在 stage CAS 之前，只在 `approve` 为真时加入。现在的 batch 是「stage CAS → `INSERT INTO analyses … WHERE changes() = 1` → reviews upsert `… AND changes() = 1`」一条链；加 1 插在中间，upsert 的 `changes()` 就会读到加 1 的行数。
-- `<upsert 一定会生效>` 用 batch 执行前的状态写成三条，都成立时后面三条语句按链依次生效（**推断**，#113 用测试证明）：
-  - `EXISTS (SELECT 1 FROM articles WHERE id = ?articleId AND stage = 'body_ready' AND body_sha = ?bodySha AND analysis_generation = ?generation)`（stage CAS 的同一组条件）；
-  - `NOT EXISTS (SELECT 1 FROM analyses WHERE article_id = ?articleId AND prompt_version = ?analysed)`；
-  - `NOT EXISTS (SELECT 1 FROM reviews WHERE article_id = ?articleId AND body_sha = ?bodySha AND decision = 'rejected')`。
+- `<upsert 一定会生效>` 用 batch 执行前的状态写成四条，都成立时后面三条语句按链依次生效（**推断**，#113 用测试证明）：
+  - `EXISTS (SELECT 1 FROM articles WHERE id = ?1 AND stage = 'body_ready' AND body_sha = ?2 AND analysis_generation = ?4)`（stage CAS 的同一组条件）；
+  - `NOT EXISTS (SELECT 1 FROM analyses WHERE article_id = ?1 AND prompt_version = ?5)`；
+  - `NOT EXISTS (SELECT 1 FROM reviews WHERE article_id = ?1 AND body_sha = ?2 AND decision = 'rejected')`；
+  - `EXISTS (SELECT 1 FROM articles a JOIN industries i ON i.id = a.industry_id WHERE a.id = ?1 AND i.publish_mode = 'auto' AND lower(trim(i.slug)) IS NOT 'finance')`（第 9 行 upsert 的板块条件）。少了这一条，板块不再是 auto 时 upsert 不生效，revision 却加了 1。
 
-实现：#113（第 15 行除外）。
+实现：#113（第 15、16 行除外）。第 9、10 行的板块条件先写测试，按「分析开始，读到 auto 配置 → 管理员把未归组的文章改到 Finance → 分析提交」的顺序复现，提交后不得有 `reviewer = 'auto'` 的批准记录。
 
 ### 已发布版本
 
@@ -243,7 +246,7 @@ WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?articleId)
 
 - 已批准输入只增加时（「事件 revision」的增长），`withdrawn_through` 不变，旧版本继续显示，直到新 revision 的版本被批准。
 - 拒绝或撤下已批准文章、人工改写已批准文章、批准新的分析行、正文变化、重新分析，都在同一个 `batch()` 里把 `withdrawn_through` 推到旧 revision 或当前 revision，旧版本立刻不可见。
-- 改板块要立刻撤下旧版本（第六轮），由「在事件里的文章不能改板块」满足：`changeArticleIndustry` 返回 409，batch 里每条语句都带 `NOT EXISTS (event_articles)` 守卫，所以改了板块的文章不在任何事件里，没有要撤下的版本。
+- 改板块要立刻撤下旧版本（第六轮），由「在事件里的文章不能改板块」满足：`changeArticleIndustry` 返回 409，batch 里每条语句都带 `NOT EXISTS (event_articles)` 守卫，所以改了板块的文章不在任何事件里，没有已发布版本要撤下，第六轮的要求已经满足。
 - `revision_diff` 是时间线历史，不受窗口限制，仍按「该 revision 有已批准文章」显示。
 - 窗口为空（`withdrawn_through = revision`）时，事件页只显示已批准文章，不显示任何产物和论断。
 
@@ -285,10 +288,11 @@ c.input_revision = (
 `artifacts` 和 `evidence` 的到期条件，在 #107 的终态检查之外再加一条：`e.updated_at <= now - ARTIFACTS_DEBOUNCE_MS` **或** `e.<kind>_pending_since <= now - ARTIFACTS_MAX_WAIT_MS`。
 
 - `ARTIFACTS_DEBOUNCE_MS = 30 * 60 * 1000`，`ARTIFACTS_MAX_WAIT_MS = 2 * 60 * 60 * 1000`，都从 `src/pipeline/due-events.ts` 导出（#113 新增）。
-- `events.artifacts_pending_since`、`events.evidence_pending_since`（#113 新增，`integer`，可空）= 上次入队之后第一次加 1 的时刻；NULL = 上次入队之后没有加 1。第二项是最长等待：从第一次还没生成的加 1 算起，最长 2 小时必出一次。
+- 这两项取代第六轮「只看 `updated_at` 距今 ≥ 30 分钟」的写法（`docs/design/decisions.md` 第六轮「去抖」）：只看静默时间时，一直有人审核的事件永远不到期。这一改动记入第八轮决定。
+- `events.artifacts_pending_since`、`events.evidence_pending_since`（#113 新增，`integer`，可空）= 该类上次写终态标记之后第一次加 1 的时刻；NULL = 该类上次写终态标记之后没有加 1。第二项是最长等待：从第一次还没生成的加 1 算起，最长 2 小时必到期一次。
 - 去抖只是 `DUE_KINDS.artifacts` 和 `DUE_KINDS.evidence` 的附加条件。#107 的不变量不变：到期 = 当前 revision 没有终态（`doneSql`）；排序 = `<kind>_scheduled_at ASC, id ASC`；不引入时间窗选择。`watch` 不去抖。
-- **一次审核会话**：同一事件上一串 revision 加 1，相邻两次相隔不到 30 分钟。会话里加 1 N 次，cron 在最后一次加 1 后 30 分钟起，或会话第一次加 1 后满 2 小时起（先到者），把事件入队一次，生成当时 revision 的版本。cron 每 10 分钟跑一次（`wrangler.jsonc` `"crons": ["*/10 * * * *"]`），所以实际延迟是 30–40 分钟。
-- `artifacts`、`evidence` 消息带入队时的 `revision`（`src/pipeline/messages.ts` 的 `ArtifactsMessage`、`EvidenceMessage`）。`generateEventArtifacts`、`generateEventEvidence` 在输入快照里读到的 `e.revision` 不等于消息的 `revision`，或消息没有 `revision`，就跳过：不写任何终态（不调用 `markArtifactsEvaluated`，不写任何 `claims` 行，包括 `EVIDENCE_TERMINAL_SQL` 的终态行），不调用模型，下一轮 cron 再判断。可重试错误（#107）导致同一 revision 再次入队，不算第二次触发。
+- **一次审核会话**：同一事件上一串 revision 加 1，相邻两次相隔不到 30 分钟。会话里加 1 N 次，cron 在最后一次加 1 后 30 分钟起，或会话第一次加 1 后满 2 小时起（先到者），开始把事件入队，生成当时 revision 的版本；到该类写终态标记之前，同一 revision 每轮 cron 都可能再次入队（见下面「已知行为」）。cron 每 10 分钟跑一次（`wrangler.jsonc` `"crons": ["*/10 * * * *"]`），所以实际延迟是 30–40 分钟。
+- `artifacts`、`evidence` 消息带入队时的 `revision`（`src/pipeline/messages.ts` 的 `ArtifactsMessage`、`EvidenceMessage`）。`generateEventArtifacts`、`generateEventEvidence` 在输入快照里读到的 `e.revision` 不等于消息的 `revision`，或消息没有 `revision`，就跳过：不写任何终态（不调用 `markArtifactsEvaluated`，不写任何 `claims` 行，包括 `EVIDENCE_TERMINAL_SQL` 的终态行），不调用模型，下一轮 cron 再判断。跳过时 `<kind>_pending_since` 保留，下一轮 cron 按新的 revision 重新入队。可重试错误（#107）导致同一 revision 再次入队，不算第二次触发。
 - 即时发送全部删除：`handleGroupBatch`（`src/pipeline/group/consumer.ts`）的 `artifacts`、`evidence` 两条，`src/pipeline/evidence/primary.ts` 的 `qArtifacts?.send`、`qEvidence?.send`。`handleGroupBatch` 的 `watch` 保留。
 
 写入与清空：
@@ -296,8 +300,8 @@ c.input_revision = (
 | 列 | 谁写 |
 |---|---|
 | `events.updated_at` | 只有 revision 加 1 和 `INSERT INTO events`。只撤下不写 |
-| `<kind>_pending_since` 写入 | 只在 revision 变大时写。每条加 1 经 `PENDING_SINCE_SET_SQL` 写 `COALESCE(…, ?now)`，只记会话里第一次加 1。`revision = 0` 的 `INSERT INTO events`（`groupArticle` 新建分支）不写；`revision >= 1` 的 INSERT 等于一次加 1，两列写 `?now`。只撤下不写 |
-| `<kind>_pending_since` 清空 | 只有一处：`enqueueDueEvents` 发送成功后写 `<kind>_scheduled_at` 的同一条 UPDATE，加 `, <kind>_pending_since = CASE WHEN revision = ?selectedRevision THEN NULL ELSE ?now END`。`?selectedRevision` 是这一行事件在本次 SELECT 里读到的 `e.revision`；SELECT 之后又加了 1 时从现在重新计时，这次加 1 不丢。`watch` 不加 |
+| `<kind>_pending_since` 写入 | 只在 revision 变大时写。每条加 1 经 `pendingSinceSetSql(n)` 写 `COALESCE(…, ?n)`，只记终态标记之后第一次加 1。`revision = 0` 的 `INSERT INTO events`（`groupArticle` 新建分支）不写；`revision >= 1` 的 INSERT 等于一次加 1，两列写 `now`。只撤下不写 |
+| `<kind>_pending_since` 清空 | 只在该类写终态标记时，条件是 `revision = 标记的 revision`。artifacts：`markArtifactsEvaluated`（`src/pipeline/artifacts/build.ts`）的 UPDATE 在 SET 里加 `artifacts_pending_since = CASE WHEN revision = ?2 THEN NULL ELSE artifacts_pending_since END`（`?2` = 标记的 revision），WHERE 不变。evidence：写 `EVIDENCE_TERMINAL_SQL` 终态行的同一个 `batch()` 末尾加 `UPDATE events SET evidence_pending_since = NULL WHERE id = ?1 AND revision = ?2 AND EXISTS (SELECT 1 FROM claims WHERE event_id = ?1 AND input_revision = ?2 AND claim_text IN (${EVIDENCE_TERMINAL_SQL}))`（`?1` = 事件 id，`?2` = 标记的 revision）。标记写入时 revision 已经变大，就不清空，新的加 1 不丢。`enqueueDueEvents` 不清空（取代第三批裁决的「入队时清空」）。`watch` 不加 |
 | `<kind>_scheduled_at` | 只有 `enqueueDueEvents` |
 
 `enqueueDueEvents` 的改法：`DUE_KINDS` 的值类型加可选字段 `debounce?: { quietMs: number; maxWaitMs: number; pendingColumn: string }`，`artifacts`、`evidence` 设置，`watch` 不设。WHERE 在 `NOT (${doneSql})` 后加 `AND (?2 IS NULL OR e.updated_at <= ?4 - ?2 OR e.${pendingColumn} <= ?4 - ?3)`，绑定 `quietMs ?? null`、`maxWaitMs ?? null`、`now`；`watch` 绑定 NULL，不插值 `pendingColumn`，行为不变。SELECT 改成 `e.id, e.revision`，消息写成 `{ kind, eventId, revision }`。
@@ -316,9 +320,11 @@ WHERE e.revision > 0
 -- 部署前计数：SELECT count(*) FROM events e WHERE <同上条件>
 ```
 
-- 「一次会话只触发一次」的前提：每次加 1 都写 `updated_at` 和 `PENDING_SINCE_SET_SQL`；`artifacts`、`evidence` 消息只由 cron 发；旧消息不生成新 revision；`generateEventArtifacts` 生成完写 `artifacts_evaluated_revision = revision`，到下一次加 1 前不再到期。
+- 「不超过 2 小时的会话只触发一次」的前提：每次加 1 都写 `updated_at` 和 `pendingSinceSetSql(n)`；`artifacts`、`evidence` 消息只由 cron 发；旧消息不生成新 revision；`generateEventArtifacts` 生成完写 `artifacts_evaluated_revision = revision`，到下一次加 1 前不再到期；`<kind>_pending_since` 只在该类写终态标记时清空；生成器对 `(event, revision, 类型)` 幂等（下面第二条「已知行为」）。
 - 代价：`auto` 板块的首次产物延迟 30–40 分钟（D3 已接受）。
 - **已知行为**：事件里最后一篇已批准文章被拒后，事件不再到期，但这次变更写下的 `<kind>_pending_since` 不清空。事件下一次重新到期时，第一次加 1 经 `COALESCE` 保留旧值，最长等待立刻成立，这一次跳过 30 分钟去抖。上限：每次「不到期 → 重新到期」最多提前触发一次，最多多生成一次。不加清空机制。
+- **已知行为**：同一 revision 会被重复入队。到期之后、写终态标记之前，cron 每轮都重发这个事件（`enqueueDueEvents`，`src/pipeline/due-events.ts:50-84`，现状如此）。前提是生成器对 `(event, revision, 类型)` 幂等：evidence 已有 `already_exists`（`src/pipeline/evidence/build.ts:243`）；artifacts 逐类型跳过已存在的产物（`src/pipeline/artifacts/build.ts:674-683`，INSERT 带 `ON CONFLICT … DO NOTHING`）。#113 给 artifacts 的幂等补一个测试：同一 `(event, revision)` 跑两次，第二次对已有产物的类型不调用模型、不新增产物行。
+- **已知行为**：超过 2 小时的审核会话可能入队不止一次。每次写终态标记后，会话里下一次加 1 重新开始计时，满 2 小时再次到期。上限：最长等待每 2 小时最多触发一次；会话结束后，静默 30 分钟再触发一次。
 
 实现：#113。
 
@@ -353,15 +359,15 @@ EXISTS (
 | `src/pipeline/evidence/diff.ts` 读论断 | 加 `AND ${VERIFIED_CLAIM_SQL}` |
 | `generateEventEvidence` `INSERT INTO claims` 的状态 | 不变：`auto` 且共识不是 `unverified` 时直接 `published`，这时守卫已成立 |
 
-**已知行为**：论断审核不改 revision。产物只读生成时已发布的论断（`generateEventArtifacts` 读 `status = 'published'` 且 `input_revision` = 当前 revision 的论断），所以产物生成之后才获批的论断，要等事件下一次加 1、产物重新生成时才进入产物。被拒的论断在被拒之前一直是 `pending_review`，从未发布，也从未进过产物输入（`reviewClaim` 只改 `status = 'pending_review'` 的论断）。
+**已知行为**：论断审核不改 revision。产物只读 `input_revision` = 当前 revision 的已发布论断（`generateEventArtifacts`，`src/pipeline/artifacts/build.ts:233-239`）。所以 R 的产物生成之后才批准的论断，不进入任何产物；到 R+1，证据重新抽取，新论断要重新审核。被拒的论断在被拒之前一直是 `pending_review`，从未发布，也从未进过产物输入（`reviewClaim` 只改 `status = 'pending_review'` 的论断）。
 
 实现：#113。
 
 ### 读者看到的分析行
 
-读者看到的分析行 = 文章当前正文的批准记录里写的那一行：`reviews.analysis_id`（#113 新增，`integer`，可空，不加外键）。公开页、RSS、日报、产物、证据和后台的非审核页面，都用 `READER_ANALYSIS_ID_SQL`。没有批准记录，或 `analysis_id` 为 NULL，就不用任何分析行，文字退回到人工改写，再退回到信源自己的标题和摘要。
+读者看到的分析行 = 文章当前正文的批准记录里写的那一行：`reviews.analysis_id`（#113 新增，`integer`，可空，不加外键）。凡是显示读者看到或将会看到的内容的页面和生成器，都用 `READER_ANALYSIS_ID_SQL`，论断审核页也算：公开页、RSS、日报、产物、证据、后台的非审核页面和论断审核页（`listPendingClaims`）。没有批准记录，或 `analysis_id` 为 NULL，就不用任何分析行，文字退回到人工改写，再退回到信源自己的标题和摘要。
 
-待审的分析行 = `CANDIDATE_ANALYSIS_ID_SQL`：最新一行，`primary_tracker` 行排在 Jev 行后面。只有审核队列和归组用它。
+待审的分析行 = `CANDIDATE_ANALYSIS_ID_SQL`：最新一行，`primary_tracker` 行排在 Jev 行后面。只有文章审核队列（`listPendingArticles`）和归组用它。
 
 新分析落库不改变读者文本（`auto` 板块除外，见「事件 revision」第 10 行）。管理员批准时，`decideReview` 把 `analysis_id` 写成审核页上显示的那一行；在那之前读者继续看到旧的已批准行。
 
@@ -424,7 +430,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 
 - (a) 有更新候选行的文章数：已批准、且 `${CANDIDATE_ANALYSIS_ID_SQL} IS NOT <回填行>`。这些文章部署后进审核队列第 2 项，属于正确行为。
 - (b) 回填行与当前读者行不同的文章所在的事件数：已批准、且 `<回填行> IS NOT (SELECT id FROM analyses WHERE article_id = a.id ORDER BY created_at DESC, id DESC LIMIT 1)`（`CARD_FROM` 现在选中的行）的文章，按 `event_articles` 去重数事件。
-- (b) > 0 时，迁移在回填之后对这些事件做变更（`revision = revision + 1, withdrawn_through = revision, updated_at = 迁移时刻, ${PENDING_SINCE_SET_SQL}`）。这些事件之后会按去抖重新生成产物和论断，会花模型费用：dry-run 计数里同时列出事件 id，使用者确认后再合并 #113（合并即部署、即执行迁移）。
+- (b) > 0 时，迁移在回填之后对这些事件做变更（`revision = revision + 1, withdrawn_through = revision, updated_at = ?n, ${pendingSinceSetSql(n)}`，`?n` = 迁移时刻）。这些事件之后会按去抖重新生成产物和论断，会花模型费用：dry-run 计数里同时列出事件 id，使用者确认后再合并 #113（合并即部署、即执行迁移）。
 
 实现：#113。
 
@@ -432,10 +438,11 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 
 1. **修订获批后原事件不加 1**（「事件 revision」第 15 行，第七轮 EDGAR 一节）：批准或拒绝 EDGAR 修订文件后，`financial_facts.superseded_by` 变了，但包含原文件的事件不加 1。实现：W4 EDGAR 跟进。
 2. **跨事件依赖**：事件 E2 的同比数字取自事件 E1 的 filing；E1 的文章后来被拒，E1 加 1，E2 不加 1，E2 的产物不撤下。实现：W4 EDGAR 跟进。
+3. **后期重抓正文不加 1**（「事件 revision」第 16 行）：`src/pipeline/body/body.ts` 的 `force` 分支换 `body_sha` 时不加 1。现在没有调用方传 `force: true`，所以没有实际暴露。没有实现 issue；加调用方的 PR 按第 14 行实现。
 
 ## 7. 发布与审核
 
-- 每个板块有 `publish_mode = auto | review`。Finance 固定为 `review`（N§4 guardrails）。上线时所有板块都设为 `review`。
+- 每个板块有 `publish_mode = auto | review`。Finance 固定为 `review`（N§4 guardrails）。自动批准在提交时用 SQL 重新判断文章当前的板块（`publish_mode = 'auto'` 且 slug 不是 `finance`），不只看分析开始时读到的配置（第 6 节「事件 revision」第 9、10 行）。上线时所有板块都设为 `review`。
 - 审核记录绑定内容版本：`reviews(article_id, body_sha, decision)`。`auto` 模式由规则写一条自动批准记录。
 - 公开读取层只读已批准的输入：事件页、Brief、时间线、RSS、日报和 watch 只用已批准的文章及基于它们生成的产物。Finance 的产物发布前同样要审核。已批准的输入、可见产物、可公开论断的定义见第 6 节。
 - 模型输出和信源内容一律当不可信数据处理：markdown 渲染前先净化，只允许 `http`/`https` 链接；后台的写操作校验 `Origin`。
