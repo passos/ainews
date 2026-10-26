@@ -24,6 +24,18 @@ export const events = sqliteTable(
      * articles at that evaluation. Articles after it are new reporting.
      */
     watchEvaluatedThrough: integer("watch_evaluated_through"),
+    /** Highest revision whose artifact generation reached a definite outcome (#92). Only grows. */
+    artifactsEvaluatedRevision: integer("artifacts_evaluated_revision")
+      .notNull()
+      .default(0),
+    /** Epoch ms of the last cron enqueue for artifacts; rotation key (#92). 0 = never. */
+    artifactsScheduledAt: integer("artifacts_scheduled_at")
+      .notNull()
+      .default(0),
+    /** Epoch ms of the last cron enqueue for evidence; rotation key (#92). 0 = never. */
+    evidenceScheduledAt: integer("evidence_scheduled_at").notNull().default(0),
+    /** Epoch ms of the last cron enqueue for watch evaluation; rotation key (#92). 0 = never. */
+    watchScheduledAt: integer("watch_scheduled_at").notNull().default(0),
   },
   (t) => [
     index("events_industry_created_at_idx").on(t.industryId, t.createdAt),

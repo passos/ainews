@@ -1,6 +1,10 @@
 import { isEnabled } from "../../lib/flags";
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
-import { createModelClient, type ModelClient } from "../../providers/models";
+import {
+  CallFailedError,
+  createModelClient,
+  type ModelClient,
+} from "../../providers/models";
 import {
   bindingTransport,
   type ModelTransport,
@@ -116,6 +120,19 @@ export function defaultEvidenceDeps(
 export const NO_CLAIMS_SENTINEL = "[no_verifiable_claims]";
 export const EVIDENCE_COMPLETE_SENTINEL = "[evidence_batch_complete]";
 export const EVIDENCE_INCOMPLETE_SENTINEL = "[evidence_incomplete]";
+/** The ledger used up its attempts for this revision's claims call (#92). */
+export const EVIDENCE_FAILED_SENTINEL = "[evidence_failed]";
+/** Sentinels that end evidence generation for a revision. */
+export const EVIDENCE_TERMINAL_SENTINELS = [
+  NO_CLAIMS_SENTINEL,
+  EVIDENCE_COMPLETE_SENTINEL,
+  EVIDENCE_INCOMPLETE_SENTINEL,
+  EVIDENCE_FAILED_SENTINEL,
+] as const;
+/** SQL list body for `claim_text IN (...)`; the values are constants, never input. */
+export const EVIDENCE_TERMINAL_SQL = EVIDENCE_TERMINAL_SENTINELS.map(
+  (s) => `'${s}'`,
+).join(", ");
 
 export async function generateEventEvidence(
   env: PipelineEnv,
@@ -210,7 +227,7 @@ export async function generateEventEvidence(
       `SELECT id FROM claims
        WHERE event_id = ?1
          AND input_revision = ?2
-         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+         AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
        LIMIT 1`,
     )
     .bind(eventId, inputRevision)
@@ -361,6 +378,29 @@ export async function generateEventEvidence(
       logicalKey,
       error: err instanceof Error ? err.message : String(err),
     });
+    if (err instanceof CallFailedError) {
+      // The ledger used up its attempts: this key never succeeds. A terminal
+      // sentinel stops the cron from re-enqueueing this revision (#92).
+      await deps.db
+        .prepare(
+          `INSERT INTO claims (
+             event_id, claim_text, claim_type, consensus_status, primary_source_preferred, status, input_revision, prompt_version, model, created_at
+           )
+           SELECT ?1, ?2, 'fact', 'unverified', 0, 'published', ?3, ?4, ?5, ?6
+           WHERE (SELECT revision FROM events WHERE id = ?1) = ?3
+           ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
+        )
+        .bind(
+          eventId,
+          EVIDENCE_FAILED_SENTINEL,
+          inputRevision,
+          CLAIMS_PROMPT_VERSION,
+          modelName,
+          now,
+        )
+        .run();
+      return { status: "skipped", eventId, reason: "model_calls_exhausted" };
+    }
     return {
       status: "skipped",
       eventId,
@@ -438,7 +478,7 @@ export async function generateEventEvidence(
       `SELECT id FROM claims
        WHERE event_id = ?1
          AND input_revision = ?2
-         AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+         AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
        LIMIT 1`,
     )
     .bind(eventId, inputRevision)
@@ -469,13 +509,13 @@ export async function generateEventEvidence(
            WHERE event_id = ?1
              AND input_revision = ?2
              AND status = 'pending_review'
-             AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+             AND claim_text NOT IN (${EVIDENCE_TERMINAL_SQL})
          )
          AND NOT EXISTS (
            SELECT 1 FROM claims
            WHERE event_id = ?1
              AND input_revision = ?2
-             AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+             AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
          )`,
       )
       .bind(eventId, inputRevision),
@@ -489,12 +529,12 @@ export async function generateEventEvidence(
          WHERE event_id = ?1
            AND input_revision = ?2
            AND status = 'pending_review'
-           AND claim_text NOT IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+           AND claim_text NOT IN (${EVIDENCE_TERMINAL_SQL})
            AND NOT EXISTS (
              SELECT 1 FROM claims
              WHERE event_id = ?1
                AND input_revision = ?2
-               AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+               AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
            )`,
       )
       .bind(eventId, inputRevision),
@@ -640,7 +680,7 @@ export async function generateEventEvidence(
                SELECT 1 FROM claims
                WHERE event_id = ?1
                  AND input_revision = ?7
-                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+                 AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
         )
@@ -681,7 +721,7 @@ export async function generateEventEvidence(
                  SELECT 1 FROM claims
                  WHERE event_id = ?12
                    AND input_revision = ?13
-                   AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+                   AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
                )`,
           )
           .bind(
@@ -730,7 +770,7 @@ export async function generateEventEvidence(
                SELECT 1 FROM claims
                WHERE event_id = ?1
                  AND input_revision = ?3
-                 AND claim_text IN ('${NO_CLAIMS_SENTINEL}', '${EVIDENCE_COMPLETE_SENTINEL}', '${EVIDENCE_INCOMPLETE_SENTINEL}')
+                 AND claim_text IN (${EVIDENCE_TERMINAL_SQL})
              )
            ON CONFLICT (event_id, input_revision, claim_text, prompt_version, model) DO NOTHING`,
         )

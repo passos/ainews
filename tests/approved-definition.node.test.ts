@@ -121,16 +121,14 @@ it("public code has no copy outside the whitelisted constants", () => {
 // (or a new file) needs a new row on purpose.
 const EXPECTED_USES: Record<string, number> = {
   "src/pipeline/artifacts/build.ts": 2,
-  "src/pipeline/artifacts/schedule.ts": 1,
   "src/pipeline/ask/answer.ts": 1,
   "src/pipeline/digest/build.ts": 15,
+  "src/pipeline/due-events.ts": 1,
   "src/pipeline/evidence/build.ts": 1,
   "src/pipeline/evidence/diff.ts": 2,
   "src/pipeline/evidence/primary.ts": 4,
-  "src/pipeline/evidence/schedule.ts": 1,
   "src/pipeline/group/group-article.ts": 3,
   "src/pipeline/watch/evaluate.ts": 1,
-  "src/pipeline/watch/schedule.ts": 1,
 };
 
 it("each pipeline file uses the shared approved condition as often as expected", () => {

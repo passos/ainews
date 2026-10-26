@@ -2,7 +2,11 @@ import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import { FINANCE_SLUG } from "../../server/admin/ops";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import { parseAnalysisConfig } from "../analyze/config";
-import { createModelClient, type ModelClient } from "../../providers/models";
+import {
+  CallFailedError,
+  createModelClient,
+  type ModelClient,
+} from "../../providers/models";
 import {
   bindingTransport,
   type ModelTransport,
@@ -141,6 +145,24 @@ function defaultDeps(
     });
 
   return { db, bodies, models, transport, now };
+}
+
+/**
+ * Records that artifact generation for `revision` reached a definite outcome
+ * (#92). The marker only grows; revision and updated_at stay as they are.
+ */
+export async function markArtifactsEvaluated(
+  db: D1Database,
+  eventId: number,
+  revision: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE events SET artifacts_evaluated_revision = ?2
+       WHERE id = ?1 AND artifacts_evaluated_revision < ?2`,
+    )
+    .bind(eventId, revision)
+    .run();
 }
 
 export async function generateEventArtifacts(
@@ -296,18 +318,15 @@ export async function generateEventArtifacts(
     industryName: event.industry_name,
   };
 
-  // 3. Fetch body text from R2 (if available) or fallback to summary
+  // 3. Fetch body text from R2, or fall back to the summary when the object
+  // is missing. An R2 read error propagates: no marker, so the cron retries.
   const articleMaterials: ArtifactArticleMaterial[] = await Promise.all(
     articleRows.map(async (r) => {
       let bodyText: string | null = null;
       if (r.body_sha && deps.bodies) {
-        try {
-          const obj = await deps.bodies.get(`bodies/${r.id}/${r.body_sha}.md`);
-          if (obj) {
-            bodyText = await obj.text();
-          }
-        } catch {
-          // fallback to summary
+        const obj = await deps.bodies.get(`bodies/${r.id}/${r.body_sha}.md`);
+        if (obj) {
+          bodyText = await obj.text();
         }
       }
       return {
@@ -669,7 +688,22 @@ export async function generateEventArtifacts(
       const logicalKey = `artifact:${eventId}:${def.type}:${aud || "default"}:${inputRevision}:${inputSha}:${def.promptVersion}`;
 
       const slot = def.slot ?? "write";
-      const res = await deps.models.generateText(slot, logicalKey, req);
+      let res: Awaited<ReturnType<ModelClient["generateText"]>>;
+      try {
+        res = await deps.models.generateText(slot, logicalKey, req);
+      } catch (e) {
+        // The ledger used up its attempts: this key never succeeds, so the
+        // type is done for this revision. Every other error is retryable.
+        if (!(e instanceof CallFailedError)) throw e;
+        console.error({
+          error: "artifact generation exhausted",
+          eventId,
+          type: def.type,
+          audience: aud,
+          message: e.message,
+        });
+        continue;
+      }
 
       // Verify completion reason
       if (res.finishReason !== "STOP") {
@@ -740,6 +774,8 @@ export async function generateEventArtifacts(
       await syncRevisionDiff(deps.db, eventId, r, initialStatus, deps.now());
     }
   }
+
+  await markArtifactsEvaluated(deps.db, eventId, inputRevision);
 
   return {
     status: generatedCount > 0 ? "generated" : "already_up_to_date",

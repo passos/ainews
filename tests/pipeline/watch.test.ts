@@ -1098,7 +1098,7 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
     const old = now - 2 * 3600 * 1000;
     const created: number[] = [];
     for (let i = 0; i < 21; i++) {
-      // Distinct updated_at: the newest 20 come first.
+      // Never enqueued yet: the 20 lowest ids come first.
       const eventId = await seedEvent(1, 1, old + i);
       await seedApproved(eventId, 1, `Marker article ${i}`, old + i);
       created.push(eventId);
@@ -1461,5 +1461,44 @@ describe("pipeline: watch hit status and revision marker (#85)", () => {
 
     expect(m.judge).not.toHaveBeenCalled();
     expect(await marker(eventId)).toEqual({ revision: 2, through: null });
+  });
+
+  // #92 ruling 1: watch is the third kind of enqueueDueEvents. Nested here to
+  // reuse this block's beforeEach (it deletes all events) and seed helpers.
+  describe("watch scheduling (#92)", () => {
+    it("enqueueDueWatches rotates by last enqueue time", async () => {
+      const ids: number[] = [];
+      for (let i = 0; i <= 20; i++) {
+        const eventId = await seedEvent(1, 1, 1000 + i);
+        await seedApproved(eventId, 1, `Rotation article ${i}`, 1000 + i);
+        ids.push(eventId);
+      }
+
+      const first = await enqueueDueWatches(queue().env, 2000, 20);
+      expect(first).toEqual(ids.slice(0, 20));
+
+      const { results } = await env.DB.prepare(
+        `SELECT id, watch_scheduled_at, updated_at, revision FROM events
+         WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id ASC`,
+      )
+        .bind(JSON.stringify(first))
+        .all<{
+          id: number;
+          watch_scheduled_at: number;
+          updated_at: number;
+          revision: number;
+        }>();
+      expect(results).toEqual(
+        first.map((id, i) => ({
+          id,
+          watch_scheduled_at: 2000,
+          updated_at: 1000 + i,
+          revision: 1,
+        })),
+      );
+
+      const second = await enqueueDueWatches(queue().env, 3000, 20);
+      expect(second[0]).toBe(ids[20]);
+    });
   });
 });

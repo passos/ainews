@@ -17,6 +17,11 @@ import {
 } from "../../src/pipeline/evidence/verify";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
+import {
+  BudgetExceededError,
+  CallFailedError,
+  type ModelClient,
+} from "../../src/providers/models";
 import type { ModelTransport } from "../../src/providers/transport";
 import { getDb } from "../../src/server/db/client";
 import { getEventEvidence } from "../../src/server/publication/evidence";
@@ -3135,5 +3140,186 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     const ev = panel.claims[0].evidence[0];
     expect(ev.sourceDomain).toBe("nasa.gov");
     expect(ev.sourceName).toBe("nasa.gov");
+  });
+});
+
+describe("evidence scheduling (#92)", () => {
+  // Every event here uses its own section, host and URLs. Each test first sets
+  // revision = 0 on all events so that events left by earlier tests in this
+  // file are not due.
+
+  async function seedSection(tag: string) {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES (?1, ?1, 'auto', 1000) RETURNING id",
+    )
+      .bind(`ev92-${tag}`)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, ?2, ?3, 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id, `https://ev92-${tag}.test/feed`, `ev92-${tag}.test`)
+      .first<{ id: number }>();
+    return { indId: ind!.id, srcId: src!.id, tag };
+  }
+
+  type Section = Awaited<ReturnType<typeof seedSection>>;
+
+  /** A due event (revision 1) with one approved article whose body is in `fakeR2`. */
+  async function seedDueEvent(
+    s: Section,
+    updatedAt: number,
+    fakeR2: FakeR2 = new FakeR2(),
+  ): Promise<number> {
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Ev92 Event', 1, ?2, ?2) RETURNING id",
+    )
+      .bind(s.indId, updatedAt)
+      .first<{ id: number }>();
+    const url = `https://ev92-${s.tag}.test/art-${event!.id}`;
+    const sha = `sha-ev92-${s.tag}-${event!.id}`;
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, ?3, ?3, 'Ev92 Article', 'Summary', ?4, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(s.srcId, s.indId, url, sha)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id, sha)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    fakeR2.put(
+      `bodies/${art!.id}/${sha}.md`,
+      "Intro line.\n\nA body paragraph long enough to quote in a claim.\n\nOutro line.",
+    );
+    return event!.id;
+  }
+
+  function schedEnv() {
+    const queue = new FakeQueue();
+    return { DB: env.DB, Q_GENERATE: queue as unknown as Queue };
+  }
+
+  function modelsThrowing(makeError: (key: string) => Error) {
+    const generateText = vi.fn(async (_slot: string, key: string) => {
+      throw makeError(key);
+    });
+    const models = {
+      embed: async (_key: string, texts: string[]) =>
+        texts.map(() => [0.1, 0.2, 0.3]),
+      generateText,
+    } as unknown as ModelClient;
+    return { models, generateText };
+  }
+
+  function run(eventId: number, fakeR2: FakeR2, models: ModelClient) {
+    return generateEventEvidence(
+      { ...testEnv, BODIES: fakeR2 as unknown as R2Bucket },
+      eventId,
+      1000,
+      {
+        models,
+        bodies: fakeR2 as unknown as R2Bucket,
+        vectors: new FakeVectors() as unknown as Pick<VectorizeIndex, "upsert">,
+      },
+    );
+  }
+
+  it("writes [evidence_failed] when the ledger is exhausted and stops re-enqueueing the revision", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("e1");
+    const fakeR2 = new FakeR2();
+    const id = await seedDueEvent(s, 1000, fakeR2);
+    const { models, generateText } = modelsThrowing(
+      (key) => new CallFailedError(key, "x"),
+    );
+
+    const res = await run(id, fakeR2, models);
+    // The run reached the model call (bodies were readable).
+    expect(generateText).toHaveBeenCalledTimes(1);
+
+    const sentinel = await env.DB.prepare(
+      "SELECT count(*) AS n FROM claims WHERE event_id = ?1 AND claim_text = '[evidence_failed]' AND input_revision = 1",
+    )
+      .bind(id)
+      .first<{ n: number }>();
+    expect(sentinel!.n).toBe(1);
+    expect(await enqueueDueEvidence(schedEnv(), 2000)).not.toContain(id);
+    expect(res).toMatchObject({
+      status: "skipped",
+      reason: "model_calls_exhausted",
+    });
+
+    const panel = await getEventEvidence(getDb(env.DB), id);
+    expect(JSON.stringify(panel)).not.toContain("[evidence_failed]");
+
+    const again = await run(id, fakeR2, models);
+    expect(again).toMatchObject({
+      status: "skipped",
+      reason: "already_exists",
+    });
+    expect(generateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("BudgetExceededError writes no sentinel and keeps the revision due", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("e2");
+    const fakeR2 = new FakeR2();
+    const id = await seedDueEvent(s, 1000, fakeR2);
+    const { models, generateText } = modelsThrowing(
+      () => new BudgetExceededError("gateway", "2026-10-26", 1),
+    );
+
+    await run(id, fakeR2, models);
+    expect(generateText).toHaveBeenCalledTimes(1);
+
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM claims WHERE event_id = ?1 AND claim_text LIKE '[%'",
+    )
+      .bind(id)
+      .first<{ n: number }>();
+    expect(rows!.n).toBe(0);
+    expect(await enqueueDueEvidence(schedEnv(), 2000)).toContain(id);
+  });
+
+  it("enqueueDueEvidence rotates by last enqueue time", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("e3");
+    const ids: number[] = [];
+    for (let i = 0; i <= 20; i++) {
+      ids.push(await seedDueEvent(s, 1000 + i));
+    }
+
+    const first = await enqueueDueEvidence(schedEnv(), 2000, 20);
+    expect(first).toEqual(ids.slice(0, 20));
+
+    const { results } = await env.DB.prepare(
+      `SELECT id, evidence_scheduled_at, updated_at, revision FROM events
+       WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id ASC`,
+    )
+      .bind(JSON.stringify(first))
+      .all<{
+        id: number;
+        evidence_scheduled_at: number;
+        updated_at: number;
+        revision: number;
+      }>();
+    expect(results).toEqual(
+      first.map((id, i) => ({
+        id,
+        evidence_scheduled_at: 2000,
+        updated_at: 1000 + i,
+        revision: 1,
+      })),
+    );
+
+    const second = await enqueueDueEvidence(schedEnv(), 3000, 20);
+    expect(second[0]).toBe(ids[20]);
   });
 });
