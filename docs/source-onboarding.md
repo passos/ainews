@@ -1,6 +1,6 @@
 # 信源候选与 owner 接入规程
 
-**已验证（代码基线 cab0433）**：只有两条Technology种子源；primary_domains是抓取允许范围，既不是sources行也不是新源许可。**假设（提案）**：下表新源等待root的官方一手研究及owner批准。**未知**：实时URL、robots、项目UA下的HTTP结果、正文、条款和生产状态。本单元只对官方目录/入口做过一次观察（结果见下表后的段落），不做系统的一手研究，不新增/激活源、不改seed/阈值/白名单/开关；不得把候选写成“已存在真实feed”。
+**已验证（代码基线 cab0433）**：只有两条Technology种子源；primary_domains是抓取允许范围，既不是sources行也不是新源许可。**假设（提案）**：下表新源等待root的官方一手研究及owner批准。**未知**：实时URL、robots、项目UA下的HTTP结果、正文、条款和生产状态。本单元只对官方目录/入口做过一次观察（结果见下表后的段落，**假设，待补证据**），不做系统的一手研究，不新增/激活源、不改seed/阈值/白名单/开关；不得把候选写成“已存在真实feed”。
 
 | 板块 | 已有seed配置（非生产证明） | 提案入口与候选范围 | 差异/批准状态 |
 |---|---|---|---|
@@ -9,7 +9,7 @@
 | Industry | primaryDomains sec.gov；无seed源 | [NIST RSS目录](https://www.nist.gov/coo/nist-rss-feeds)的Manufacturing候选；[Manufacturing](https://www.nist.gov/manufacturing)领域入口，备选NIST News | 提案待研究/审批；nist.gov新增域需专门白名单review |
 | Finance | primaryDomains sec.gov、finra.org、federalreserve.gov；无seed源 | [Fed RSS目录](https://www.federalreserve.gov/feeds/feeds.htm)的All Press Releases候选；备选[SEC RSS目录](https://www.sec.gov/files/about/secrss.shtml) | 提案待研究/审批；目录不是已核实feed；Fed不代替#22 EDGAR，也不覆盖#23全部创业融资报道 |
 
-上述入口来自既有planning线索，不是本单元验证。2026-10-26 一次官方目录观察：Fed与SEC的RSS目录页可读，但点击实际feed未验证；一次web请求 ed.gov news 返回403、nces.ed.gov/whatsnew 超时，只证明那次请求失败，不是官方站永久不可抓或项目UA同样失败。以上仍是proposed dossier，未激活，不是可启用证明；项目UA下的feed、robots和正文梯结果均未知，不据此转浏览器渲染或加域名。SEC tracked company不自动算普通sources源。canonical_url全局唯一，同一报道不能同时填Industry/Finance，owner先定归属。Finance始终人工review，页面与RSS保留Not investment advice；不新增投资建议。
+上述入口来自既有planning线索，不是本单元验证。**假设，待补证据**（没有找到记录这次原始结果的issue评论）：2026-10-26 一次官方目录观察：Fed与SEC的RSS目录页可读，但点击实际feed未验证；一次web请求 ed.gov news 返回403、nces.ed.gov/whatsnew 超时，只证明那次请求失败，不是官方站永久不可抓或项目UA同样失败。以上仍是proposed dossier，未激活，不是可启用证明；项目UA下的feed、robots和正文梯结果均未知，不据此转浏览器渲染或加域名。SEC tracked company不自动算普通sources源。canonical_url全局唯一，同一报道不能同时填Industry/Finance，owner先定归属。Finance始终人工review，页面与RSS保留Not investment advice；不新增投资建议。
 
 ## Remote-read-only：root授权 reader 的一手研究
 

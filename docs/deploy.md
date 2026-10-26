@@ -26,7 +26,7 @@ npm --prefix /ABS/WORKTREE run test:ssr
 node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode routes --dry-run
 ```
 
-`CLOUDFLARE_ENV=test` 的构建和 `test:ssr` 会让 `/ABS/WORKTREE/.wrangler/deploy/config.json` 重定向到测试生成配置 `dist/server/wrangler.json`（name `ainews-app-test`、占位 D1 id、五阀全 false）。这只是本地状态，不是已误部署的证据；但它会被默认读取重定向的 Wrangler 命令（已核安装版源码：deploy、versions upload）沿用。因此生产预演/部署前必须重做生产构建并核生成配置，见下一节。已核同一版本的 `d1 execute`、`d1 migrations list` 不启用重定向，但远端操作仍一律显式 `--config`。
+`CLOUDFLARE_ENV=test` 的构建和 `test:ssr` 会让 `/ABS/WORKTREE/.wrangler/deploy/config.json` 重定向到测试生成配置 `dist/server/wrangler.json`（name `ainews-app-test`、占位 D1 id、五阀全 false）。这只是本地状态，不是已误部署的证据；但它会被默认读取重定向的 Wrangler 命令（已核安装版源码：deploy、versions upload；版本 `4.152.0`，2026-10-26 在 `/Users/simon/workspace/cmu/ainews-launch-25` 用 `npx --no-install wrangler --version` 取得，与该目录 `package-lock.json` 的 `node_modules/wrangler` 一致）沿用。因此生产预演/部署前必须重做生产构建并核生成配置，见下一节。已核同一版本的 `d1 execute`、`d1 migrations list` 不启用重定向，但远端操作仍一律显式 `--config`。
 
 ## 目标配置核验（预演与部署前）
 
@@ -158,7 +158,7 @@ manifest仅含 `eventIds`正safe整数数组、`watchSlugs`小写字母数字连
 从应用流水线选择真实generateText的write/reason completed且sent_at非空行，私有端核Gateway request/log metadata与实际计费；仅导出id、slot/model/channel、sent_at、budget_day、input/output_tokens、cost_micros、attempt。
 按同budget_day/channel加总已settled的sent调用，包括带cost的failed，对照spent；in_flight/unknown reservation另列；跨午夜按预留日。解释重复attempt、estimate fallback、迟到日志、未知调用、非应用请求/渠道差异，禁止写库强行归零。
 
-残差口径：`residual = budgetBooked − 账本记录的有符号值`，`budgetBooked` 指 `budgets` 记账的 spent。它只是记录值之差，不是实体分摊，不是发票证明；不得用当前 `cost_micros`/`estimated_micros` 重建被覆盖的旧attempt金额，`unknown=0` 也不证明旧金额为0。历史上 root 在 2026-10-24 观察到 gateway 记账多出 +37,835 微美元，原因未知（只发现与32个attempt>1行当前estimate之和数值相等，不是已核实的32笔扣费）；之后几日只证明记录值相符，不倒推 Oct24 已核账。报告不打印生产PII和原始secret。Jev历史确认不证明embed渠道；不能凭 `@cf/` 前缀记账。Gateway最终一致窗口未闭合或缺费用/权限/limit/credits，均记未知并约复核窗口。M1要求真实应用generateText completed、当天spent>0、实际费用匹配；binding探针和D1估价不足。
+残差口径：`residual = budgetBooked − 账本记录的有符号值`，`budgetBooked` 指 `budgets` 记账的 spent。它只是记录值之差，不是实体分摊，不是发票证明；不得用当前 `cost_micros`/`estimated_micros` 重建被覆盖的旧attempt金额，`unknown=0` 也不证明旧金额为0。历史上 root 在 2026-10-24 观察到 gateway 记账多出 +37,835 微美元，原因未知（只发现与32个attempt>1行当前estimate之和数值相等，不是已核实的32笔扣费；出处：[#24 正文「生产聚合证据增量」一节](https://github.com/githonllc/ainews/issues/24)，gateway 2026-10-24 `signed_residual: 37835`、`rows_attempt_gt1: 32`、`sum_current_estimated_for_retried_rows: 37835`）；之后几日只证明记录值相符，不倒推 Oct24 已核账。报告不打印生产PII和原始secret。Jev历史确认不证明embed渠道；不能凭 `@cf/` 前缀记账。Gateway最终一致窗口未闭合或缺费用/权限/limit/credits，均记未知并约复核窗口。M1要求真实应用generateText completed、当天spent>0、实际费用匹配；binding探针和D1估价不足。
 
 ## 24h、停止条件、回滚
 

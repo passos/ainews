@@ -872,3 +872,48 @@ test("real_socket_endless_body_times_out", async () => {
     await close(site.server);
   }
 }, 5000);
+
+test("event_ids_sections_and_relative_rss_links_are_strict", async () => {
+  const launch = { ...options, mode: "launch" as const, manifest };
+  await rejectsBody(
+    "/e/7",
+    html("/e/7").replace('data-section="technology"', 'data-section="bogus"'),
+    launch,
+    "HTML_EVENT",
+  );
+  for (const id of ["0", "07"]) {
+    await rejectsBody(
+      "/digest/technology/2024-02-29",
+      html("/digest/technology/2024-02-29").replace(
+        '<li><a href="/e/7">',
+        `<li><a href="/e/${id}">`,
+      ),
+      launch,
+      "EMPTY_DIGEST",
+    );
+    await rejectsBody(
+      "/w/chip-watch",
+      html("/w/chip-watch").replace(
+        '<article><a href="/e/7">',
+        `<article><a href="/e/${id}">`,
+      ),
+      launch,
+      "EMPTY_WATCH",
+    );
+    await rejectsBody(
+      "/rss/w/chip-watch.xml",
+      rss("/rss/w/chip-watch.xml").replace(`${base}/e/7`, `${base}/e/${id}`),
+      launch,
+      "RSS_LINK",
+    );
+  }
+  await rejectsBody(
+    "/rss/technology.xml",
+    rss("/rss/technology.xml").replace(
+      "https://outside.example/article",
+      "/article",
+    ),
+    options,
+    "RSS_LINK",
+  );
+});

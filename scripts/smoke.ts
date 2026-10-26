@@ -370,9 +370,12 @@ function rssCheck(body: string, path: string, o: SmokeOptions) {
         "RSS_LINK",
       );
     } else if (item.link) {
-      const u = new URL(item.link);
+      const u = URL.canParse(item.link) ? new URL(item.link) : null;
       requireThat(
-        ["http:", "https:"].includes(u.protocol) && !u.username && !u.password,
+        u &&
+          ["http:", "https:"].includes(u.protocol) &&
+          !u.username &&
+          !u.password,
         "RSS_LINK",
       );
     }
