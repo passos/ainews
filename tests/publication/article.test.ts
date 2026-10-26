@@ -12,6 +12,7 @@ import {
   seedReview,
   seedSections,
 } from "./helpers";
+import { PAYLOADS, cap, visibleWords } from "../helpers/excerpt";
 
 let tech: { industryId: number; sourceId: number };
 
@@ -155,6 +156,34 @@ describe("getArticlePage", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(warn.mock.calls[0])).toContain("r2 down");
   });
+
+  it("falls back to summary and link when the R2 body read throws", async () => {
+    await setDisplay(tech.sourceId, "full");
+    const id = await approvedFull();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { bucket } = countingBucket(() =>
+      Promise.resolve({
+        text: () => Promise.reject(new Error("body stream broke")),
+      } as unknown as R2ObjectBody),
+    );
+    const page = await getArticlePage(db(), bucket, id);
+    expect(page).not.toBeNull();
+    expect(page!.bodyHtml).toBeNull();
+    expect(page!.article.summary).toBe("Feed summary.");
+    expect(page!.article.url).toMatch(/^https:\/\/news\.example\//);
+    expect(JSON.stringify(warn.mock.calls)).toContain("body stream broke");
+  });
+
+  for (const [name, p] of Object.entries(PAYLOADS)) {
+    it(`excerpt source, ${name}: the body stays within the cap`, async () => {
+      await setDisplay(tech.sourceId, "excerpt");
+      const id = await approvedFull();
+      await putBody(id, "sha-current", p.src);
+      const page = await getArticlePage(db(), env.BODIES, id);
+      expect(page!.excerpted).toBe(true);
+      expect(visibleWords(page!.bodyHtml)).toBeLessThanOrEqual(cap(p.w));
+    });
+  }
 
   it("excerpt source: first blocks only, no images", async () => {
     await setDisplay(tech.sourceId, "excerpt");

@@ -1,10 +1,11 @@
 // Runs in the `workers` project, so it also shows markdown-it works in workerd.
 import { describe, expect, it } from "vitest";
 import {
-  excerptMarkdown,
+  renderArticleExcerpt,
   renderArticleMarkdown,
   renderMarkdown,
 } from "../src/lib/markdown";
+import { PAYLOADS, cap, visibleWords } from "./helpers/excerpt";
 
 describe("renderMarkdown", () => {
   it("escapes a script tag", () => {
@@ -93,6 +94,30 @@ describe("renderArticleMarkdown", () => {
     expect(html).toContain("world");
   });
 
+  for (const tag of ["script", "style"]) {
+    it(`drops an inline <${tag}> with its content`, () => {
+      const html = renderArticleMarkdown(
+        `Hello <${tag}>alert(1)</${tag}> world`,
+      );
+      expect(html).not.toContain("alert(1)");
+      expect(html).not.toContain(`<${tag}`);
+      expect(html).toContain("Hello");
+      expect(html).toContain("world");
+    });
+  }
+
+  for (const src of [
+    "[bad link](javascript:alert(1))",
+    "[bad link](data:text/html,x)",
+    "[bad link](/relative)",
+    "[bad link][r]\n\n[r]: javascript:alert(1)",
+  ]) {
+    it(`keeps only the text of a rejected link: ${JSON.stringify(src)}`, () => {
+      const html = renderArticleMarkdown(src);
+      expect(html).toBe("<p>bad link</p>\n");
+    });
+  }
+
   it("drops a raw img tag with onerror", () => {
     const html = renderArticleMarkdown("<img src=x onerror=alert(1)>");
     expect(html).not.toContain("<img");
@@ -172,23 +197,23 @@ const paras = (count: number, words: number) =>
 const kept = (out: string | null) =>
   (out ?? "").match(/P\d+MARK/g)?.length ?? 0;
 
-describe("excerptMarkdown", () => {
+describe("renderArticleExcerpt", () => {
   it("keeps whole blocks up to 25% of the words", () => {
     // W = 500, cap = 125: two 50-word blocks.
-    const out = excerptMarkdown(paras(10, 50));
+    const out = renderArticleExcerpt(paras(10, 50));
     expect(kept(out)).toBe(2);
     expect(out).not.toContain("P3MARK");
   });
 
   it("uses 25% when it is below 300 words", () => {
     // W = 600, cap = 150.
-    expect(kept(excerptMarkdown(paras(30, 20)))).toBe(7);
+    expect(kept(renderArticleExcerpt(paras(30, 20)))).toBe(7);
   });
 
   it("never keeps more than 300 words", () => {
     // W = 2000: 25% is 500, the 300-word cap wins. (At W = 1200 both
     // limits are 300, so that size cannot tell them apart.)
-    expect(kept(excerptMarkdown(paras(100, 20)))).toBe(15);
+    expect(kept(renderArticleExcerpt(paras(100, 20)))).toBe(15);
   });
 
   it("returns null when the first block does not fit", () => {
@@ -196,28 +221,49 @@ describe("excerptMarkdown", () => {
     const src = [para(1, 120), para(2, 10), para(3, 10), para(4, 10)].join(
       "\n\n",
     );
-    expect(excerptMarkdown(src)).toBeNull();
+    expect(renderArticleExcerpt(src)).toBeNull();
   });
 
-  it("does not stop inside a fenced code block with blank lines", () => {
+  it("keeps a fenced code block with blank lines whole", () => {
     const fence = "```\nline one\n\nline two\n\nline three\n```";
     const src = [para(1, 10), fence, paras(30, 20)].join("\n\n");
-    const out = excerptMarkdown(src)!;
-    expect(out).not.toBeNull();
-    expect((out.match(/```/g) ?? []).length % 2).toBe(0);
+    const out = renderArticleExcerpt(src)!;
+    expect(out).toContain(
+      "<pre><code>line one\n\nline two\n\nline three\n</code></pre>",
+    );
   });
 
-  it("does not count image alt text", () => {
-    // Block 1 is an image with a 200-word alt. W counts only the 4 x 25
-    // paragraph words (100, cap 25), so block 1 (0 words) and block 2 fit.
-    const alt = Array.from({ length: 200 }, () => "alt").join(" ");
-    const src = [`![${alt}](https://i.example/p.png)`, paras(4, 25)].join(
-      "\n\n",
-    );
-    expect(kept(excerptMarkdown(src))).toBe(1);
+  it("renders no images, only their alt text", () => {
+    const src = [
+      "![shown alt](https://i.example/p.png) " + para(1, 30),
+      paras(9, 40),
+    ].join("\n\n");
+    const out = renderArticleExcerpt(src)!;
+    expect(out).not.toContain("<img");
+    expect(out).toContain("shown alt");
+  });
+
+  for (const [name, p] of Object.entries(PAYLOADS)) {
+    it(`${name}: the rendered excerpt stays within the cap`, () => {
+      expect(visibleWords(renderArticleExcerpt(p.src))).toBeLessThanOrEqual(
+        cap(p.w),
+      );
+    });
+  }
+
+  it("CR_ONLY: keeps the first two paragraphs", () => {
+    const out = renderArticleExcerpt(PAYLOADS.CR_ONLY.src);
+    expect(out).toContain("CR2MARK");
+    expect(out).not.toContain("CR3MARK");
+  });
+
+  it("REF_DEFS: resolves reference links from the whole body", () => {
+    const out = renderArticleExcerpt(PAYLOADS.REF_DEFS.src)!;
+    expect(out).toContain('href="https://ok.example/ref"');
+    expect(out).not.toContain("label0");
   });
 
   it("returns null for an empty body", () => {
-    expect(excerptMarkdown("")).toBeNull();
+    expect(renderArticleExcerpt("")).toBeNull();
   });
 });

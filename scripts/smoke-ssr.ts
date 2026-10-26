@@ -318,6 +318,14 @@ async function main() {
   }
 
   const homePage = await page("/");
+  // Site footer (#86): bodies are shown now, so it no longer says
+  // "summaries only".
+  if (!homePage.text.includes("Every story links to its original source.")) {
+    fail("GET / lacks the footer 'Every story links to its original source.'");
+  }
+  if (homePage.text.includes("Summaries only")) {
+    fail("GET / still says 'Summaries only'");
+  }
   if (!homePage.text.includes("lg:columns-2")) {
     fail("GET / lacks 'lg:columns-2' multi-column flow layout");
   }
