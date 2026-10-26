@@ -7,6 +7,7 @@ import {
   type ContentDisplay,
 } from "../../lib/content-display";
 import { getDb } from "../db/client";
+import { APPROVED_ARTICLE_SQL } from "../publication/articles";
 import {
   conditionalReviewRevisionBumpStatement,
   revisionBumpStatement,
@@ -587,6 +588,41 @@ export async function decideReview(
          DO UPDATE SET decision = excluded.decision, reviewer = excluded.reviewer, created_at = excluded.created_at`,
       )
       .bind(data.articleId, data.bodySha, data.decision, data.reviewer, now),
+    // Issue #83: financial_facts.superseded_by follows the current reviews.
+    // Runs on every decision, after the reviews write, so it sees the new
+    // decision. For each fact in the same (company, concept, unit, period end)
+    // group as this article's facts, the pointer is recomputed from scratch:
+    // the newest fact with a larger id in an approved amendment (form contains
+    // "/A") of ANOTHER filing (a filing never supersedes its own facts), or
+    // NULL. It is "the newest approved amendment fact", not "the next
+    // link in a chain", so the result does not depend on decision order. The
+    // only reader, src/pipeline/artifacts/build.ts, checks
+    // `superseded_by IS NULL`, so only NULL vs non-NULL matters there.
+    database
+      .prepare(
+        `UPDATE financial_facts
+         SET superseded_by = (
+           SELECT nf.id FROM financial_facts nf
+           JOIN filings fl ON fl.id = nf.filing_id
+           JOIN articles a ON a.id = fl.article_id
+           WHERE instr(fl.form, '/A') > 0
+             AND nf.company_id = financial_facts.company_id
+             AND nf.concept = financial_facts.concept
+             AND nf.unit = financial_facts.unit
+             AND nf.period_end = financial_facts.period_end
+             AND nf.id > financial_facts.id
+             AND nf.filing_id <> financial_facts.filing_id
+             AND ${APPROVED_ARTICLE_SQL}
+           ORDER BY nf.id DESC LIMIT 1
+         )
+         WHERE (company_id, concept, unit, period_end) IN (
+           SELECT nf.company_id, nf.concept, nf.unit, nf.period_end
+           FROM financial_facts nf
+           JOIN filings fl ON fl.id = nf.filing_id
+           WHERE fl.article_id = ?1
+         )`,
+      )
+      .bind(data.articleId),
   ]);
 }
 

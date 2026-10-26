@@ -366,8 +366,6 @@ export async function ingestCompanyFilings(
 
     // 3. Store XBRL facts if available
     if (filingId && normalizedFacts.length > 0) {
-      const isAmended = form.includes("/A");
-
       for (const fact of normalizedFacts) {
         // Prevent duplicate fact insertion on filing retry
         const existingFact = await env.DB.prepare(
@@ -381,7 +379,7 @@ export async function ingestCompanyFilings(
           continue;
         }
 
-        const factInsert = await env.DB.prepare(
+        await env.DB.prepare(
           `INSERT INTO financial_facts (
             company_id, filing_id, accession_number, taxonomy, concept,
             unit, val, period_start, period_end, fiscal_year, fiscal_period,
@@ -390,7 +388,7 @@ export async function ingestCompanyFilings(
             ?1, ?2, ?3, ?4, ?5,
             ?6, ?7, ?8, ?9, ?10, ?11,
             ?12, ?13, ?14, ?15
-          ) RETURNING id`,
+          )`,
         )
           .bind(
             company.id,
@@ -409,22 +407,7 @@ export async function ingestCompanyFilings(
             secDocUrl,
             now,
           )
-          .first<{ id: number }>();
-
-        // If this is an amended filing, update superseded_by on earlier facts for the same concept and period
-        if (isAmended && factInsert?.id) {
-          await env.DB.prepare(
-            `UPDATE financial_facts
-             SET superseded_by = ?1
-             WHERE company_id = ?2
-               AND concept = ?3
-               AND period_end = ?4
-               AND id != ?1
-               AND superseded_by IS NULL`,
-          )
-            .bind(factInsert.id, company.id, fact.concept, fact.periodEnd)
-            .run();
-        }
+          .run();
       }
     }
 

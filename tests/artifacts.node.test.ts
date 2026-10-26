@@ -14,9 +14,11 @@ import { SkillsCareerTrendsCard } from "../src/components/artifacts/SkillsCareer
 import { StoryBriefCard } from "../src/components/artifacts/StoryBriefCard";
 import { IndustryImpactCard } from "../src/components/artifacts/IndustryImpactCard";
 import { SupplyChainRippleCard } from "../src/components/artifacts/SupplyChainRippleCard";
+import { EarningsDecoderCard } from "../src/components/artifacts/EarningsDecoderCard";
 import type {
   AudienceExplain,
   ClassroomDiscussionBuilder,
+  EarningsDecoder,
   EducationEvidenceChecker,
   FinanceConceptExplainer,
   FinanceRealityCheck,
@@ -539,5 +541,62 @@ describe("SkillsCareerTrendsCard", () => {
         "Supplier capacity can ramp within 6 months without compounding lead times.",
       );
     });
+  });
+});
+
+describe("EarningsDecoderCard (Issue #83)", () => {
+  function decoderWithUrl(url: string): EarningsDecoder {
+    const citation = (factId: number, periodEnd: string) => ({
+      factId,
+      secUrl: url,
+      periodEnd,
+    });
+    return {
+      company: { ticker: "AAPL", name: "Apple Inc.", cik: "0000320193" },
+      filing: {
+        form: "10-Q",
+        fiscalYear: 2024,
+        fiscalPeriod: "Q3",
+        filingDate: "2024-08-02",
+        secUrl: url,
+        accessionNumber: "0000320193-24-000001",
+      },
+      metrics: [
+        {
+          metricName: "Total Revenue",
+          concept: "Revenues",
+          unit: "USD",
+          reportedValue: "85777000000",
+          reportedCitation: citation(101, "2024-06-29"),
+          priorPeriodValue: "90753000000",
+          priorPeriodCitation: citation(90, "2024-03-30"),
+          priorYearValue: "81797000000",
+          priorYearCitation: citation(50, "2023-07-01"),
+          guidanceComparison: "not_provided",
+        },
+      ],
+      executiveSummary: "Summary.",
+      keyDrivers: ["Driver."],
+      disclaimer: "Not investment advice.",
+    };
+  }
+
+  it("drops non-http(s) hrefs from the filing link and every citation", () => {
+    const html = renderToStaticMarkup(
+      createElement(EarningsDecoderCard, {
+        decoder: decoderWithUrl("javascript:alert(1)"),
+      }),
+    );
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("View Official SEC Filing");
+  });
+
+  it("keeps https SEC links", () => {
+    const url = "https://www.sec.gov/Archives/edgar/data/320193/x.htm";
+    const html = renderToStaticMarkup(
+      createElement(EarningsDecoderCard, { decoder: decoderWithUrl(url) }),
+    );
+    expect(html).toContain(`href="${url}"`);
+    expect(html).toContain("View Official SEC Filing");
   });
 });

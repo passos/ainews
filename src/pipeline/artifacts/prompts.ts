@@ -1237,8 +1237,8 @@ export function parseEarningsDecoderOutput(
     }
 
     const payload = {
-      company: parsed.company || companyInfo,
-      filing: parsed.filing || filingInfo,
+      company: material ? companyInfo : parsed.company || companyInfo,
+      filing: material ? filingInfo : parsed.filing || filingInfo,
       metrics,
       executiveSummary: parsed.executiveSummary,
       keyDrivers: parsed.keyDrivers,

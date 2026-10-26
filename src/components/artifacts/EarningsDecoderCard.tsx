@@ -1,7 +1,14 @@
 import type { EarningsDecoder } from "../../lib/artifacts/types";
+import { safeHttpUrl } from "../../lib/url";
 
 export interface EarningsDecoderCardProps {
   decoder: EarningsDecoder;
+}
+
+// Stored artifact JSON passes z.string().url(), which accepts javascript:.
+// Only http(s) links become hrefs.
+function safeHref(url: string | undefined): string | null {
+  return url ? safeHttpUrl(url) : null;
 }
 
 export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
@@ -14,6 +21,15 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
     forwardGuidance,
     disclaimer,
   } = decoder;
+  const filingHref = safeHref(filing.secUrl);
+  const rows = metrics.map((m) => ({
+    m,
+    href: {
+      reported: safeHref(m.reportedCitation?.secUrl),
+      priorPeriod: safeHref(m.priorPeriodCitation?.secUrl),
+      priorYear: safeHref(m.priorYearCitation?.secUrl),
+    },
+  }));
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-6">
@@ -38,15 +54,17 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
         </div>
 
         <div>
-          <a
-            href={filing.secUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 border transition-colors"
-          >
-            <span>View Official SEC Filing</span>
-            <span aria-hidden="true">&rarr;</span>
-          </a>
+          {filingHref && (
+            <a
+              href={filingHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 border transition-colors"
+            >
+              <span>View Official SEC Filing</span>
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          )}
         </div>
       </div>
 
@@ -68,7 +86,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {metrics.map((m, idx) => (
+              {rows.map(({ m, href }, idx) => (
                 <tr key={idx} className="hover:bg-muted/40">
                   <td className="px-3 py-2.5 font-medium">
                     {m.metricName}
@@ -81,9 +99,9 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                       <span>
                         {formatNumberDisplay(m.reportedValue, m.unit)}
                       </span>
-                      {m.reportedCitation?.secUrl && (
+                      {href.reported && (
                         <a
-                          href={m.reportedCitation.secUrl}
+                          href={href.reported}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="ml-1 text-[10px] text-primary hover:underline"
@@ -100,13 +118,13 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                         <span>
                           {formatNumberDisplay(m.priorPeriodValue, m.unit)}
                         </span>
-                        {m.priorPeriodCitation?.secUrl && (
+                        {href.priorPeriod && (
                           <a
-                            href={m.priorPeriodCitation.secUrl}
+                            href={href.priorPeriod}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="ml-1 text-[10px] text-primary hover:underline"
-                            title={`SEC Source: ${m.priorPeriodCitation.periodEnd || "Prior Period"}`}
+                            title={`SEC Source: ${m.priorPeriodCitation?.periodEnd || "Prior Period"}`}
                           >
                             ↗
                           </a>
@@ -135,13 +153,13 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                         <span>
                           {formatNumberDisplay(m.priorYearValue, m.unit)}
                         </span>
-                        {m.priorYearCitation?.secUrl && (
+                        {href.priorYear && (
                           <a
-                            href={m.priorYearCitation.secUrl}
+                            href={href.priorYear}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="ml-1 text-[10px] text-primary hover:underline"
-                            title={`SEC Source: ${m.priorYearCitation.periodEnd || "Prior Year"}`}
+                            title={`SEC Source: ${m.priorYearCitation?.periodEnd || "Prior Year"}`}
                           >
                             ↗
                           </a>
@@ -187,9 +205,9 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-[11px]">
-                    {m.reportedCitation.secUrl ? (
+                    {href.reported ? (
                       <a
-                        href={m.reportedCitation.secUrl}
+                        href={href.reported}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-primary hover:underline"
