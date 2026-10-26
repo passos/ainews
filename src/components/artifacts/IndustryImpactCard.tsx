@@ -46,11 +46,11 @@ export function IndustryImpactCard({
                     </span>
                     {item.basis === "evidence_based" ? (
                       <span className="inline-flex items-center rounded border border-green-600/40 bg-green-500/15 px-1.5 py-0.5 font-mono text-[0.65rem] font-bold text-green-700 dark:text-green-400">
-                        有依据 / Verified
+                        Supported
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded border border-amber-600/40 bg-amber-500/15 px-1.5 py-0.5 font-mono text-[0.65rem] font-bold text-amber-700 dark:text-amber-400">
-                        推测 / Speculative
+                        Speculative
                       </span>
                     )}
                   </div>
@@ -109,11 +109,11 @@ export function IndustryImpactCard({
                       </span>
                       {item.basis === "evidence_based" ? (
                         <span className="inline-flex items-center rounded bg-green-500/15 px-1 py-0.2 font-mono text-[0.62rem] font-bold text-green-700 dark:text-green-400">
-                          有依据
+                          Supported
                         </span>
                       ) : (
                         <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.2 font-mono text-[0.62rem] font-bold text-amber-700 dark:text-amber-400">
-                          推测
+                          Speculative
                         </span>
                       )}
                     </div>

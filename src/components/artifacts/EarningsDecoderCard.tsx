@@ -248,9 +248,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
 
       {/* Newsren §4 Finance Guardrail Notice */}
       <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-900 dark:text-amber-200">
-        <p className="font-semibold mb-0.5">
-          ⚠️ 免责声明 / Regulatory Disclosure
-        </p>
+        <p className="font-semibold mb-0.5">⚠️ Regulatory disclosure</p>
         <p>{disclaimer}</p>
       </div>
     </div>

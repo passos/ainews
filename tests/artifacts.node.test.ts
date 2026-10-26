@@ -478,11 +478,11 @@ describe("SkillsCareerTrendsCard", () => {
         "Leading foundries transition to high-NA EUV tooling.",
       );
       expect(html).toContain("Semiconductor Packaging");
-      expect(html).toContain("有依据 / Verified");
+      expect(html).toContain("Supported");
       expect(html).toContain("[Claim #789]");
       expect(html).toContain("Wait times grew to 24 weeks.");
       expect(html).toContain("Automotive Microcontrollers");
-      expect(html).toContain("推测 / Speculative");
+      expect(html).toContain("Speculative");
       expect(html).toContain("Packaging Design Engineer");
       expect(html).toContain("[Claim #790]");
       expect(html).toContain("Procurement VP");
@@ -526,7 +526,9 @@ describe("SkillsCareerTrendsCard", () => {
 
       expect(html).toContain("Supply-Chain Ripple Map");
       // Must contain the hypothesis warning banner
-      expect(html).toContain("供应链上下游波及效应均为推演模型与传导假说");
+      expect(html).toContain(
+        "Upstream and downstream ripple effects in the supply chain",
+      );
       expect(html).toContain("Foundry 3nm wafer fabrication expansion");
       expect(html).toContain("Photolithography Optics");
       expect(html).toContain("High-NA mirrors delivery schedules tighten");
