@@ -432,6 +432,119 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
     },
   );
 
+  async function discoverWith(
+    slug: string,
+    searchUrls: string[],
+    fetchFn: typeof fetch,
+  ) {
+    const db = drizzle(env.DB);
+    const ind = await db
+      .insert(industries)
+      .values({
+        slug,
+        name: `Section ${slug}`,
+        publishMode: "review",
+        config: JSON.stringify({ analysis: SAMPLE_ANALYSIS_CONFIG }),
+        createdAt: 1000,
+      })
+      .returning({ id: industries.id });
+    const run = await db
+      .insert(discoveryRuns)
+      .values({
+        industryId: ind[0].id,
+        status: "pending",
+        searchQueries: JSON.stringify(["tech feed"]),
+        createdAt: 1000,
+      })
+      .returning({ id: discoveryRuns.id });
+    const fakeWebSearch: WebSearch = {
+      search: async () => ({
+        items: searchUrls.map((url) => ({ url, title: "Result" })),
+        metadata: { query: "tech feed", requestId: "req-1", latencyMs: 10 },
+      }),
+    };
+    const fakeModels = {
+      judge: (async () => ({
+        relevance: {
+          score: 3.8,
+          confidence: 0.9,
+          probabilities: { "3": 0.2, "4": 0.8 },
+        },
+      })) as unknown as ModelClient["judge"],
+    };
+    await runDiscovery({ ...env, DISCOVERY_ENABLED: "true" }, run[0].id, 1000, {
+      webSearch: fakeWebSearch,
+      models: fakeModels as unknown as ModelClient,
+      fetch: fetchFn,
+    });
+    return ind[0].id;
+  }
+
+  it("does not fetch or touch fetch_hosts for a system: search result", async () => {
+    let fetchCalls = 0;
+    const fakeFetch: typeof fetch = async () => {
+      fetchCalls++;
+      return new Response("User-agent: *\nAllow: /", { status: 200 });
+    };
+    const hosts = async () =>
+      (await env.DB.prepare("SELECT count(*) n FROM fetch_hosts").first<{
+        n: number;
+      }>())!.n;
+    const before = await hosts();
+
+    await discoverWith("sys-no-probe", ["system:foo", "SYSTEM:foo"], fakeFetch);
+
+    expect(fetchCalls).toBe(0);
+    expect(await hosts()).toBe(before);
+  });
+
+  it("stores a trimmed feed_url for a padded search result", async () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+      <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+        <channel>
+          <title>Padded Feed</title>
+          <link>https://padded.example</link>
+          <item>
+            <title>Revolutionary Breakthrough in AI</title>
+            <link>https://padded.example/post-1</link>
+            <content:encoded><![CDATA[Detailed scientific analysis of the breakthrough with extensive data and evaluation results demonstrating clear superiority across all benchmark tests. It contains enough characters to satisfy the minimum length requirement easily.]]></content:encoded>
+          </item>
+        </channel>
+      </rss>`;
+    const fakeFetch: typeof fetch = async (url) =>
+      String(url).endsWith("/robots.txt")
+        ? new Response("User-agent: *\nAllow: /", { status: 200 })
+        : new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+
+    const industryId = await discoverWith(
+      "padded-feed",
+      ["  https://padded.example/feed.xml  "],
+      fakeFetch,
+    );
+
+    const db = drizzle(env.DB);
+    const candidates = await db
+      .select({
+        feedUrl: sourceCandidates.feedUrl,
+        status: sourceCandidates.status,
+      })
+      .from(sourceCandidates)
+      .where(eq(sourceCandidates.industryId, industryId));
+    expect(candidates).toEqual([
+      { feedUrl: "https://padded.example/feed.xml", status: "auto_enabled" },
+    ]);
+    const written = await db
+      .select({ feedUrl: sources.feedUrl, status: sources.status })
+      .from(sources)
+      .where(eq(sources.industryId, industryId));
+    expect(written).toEqual([
+      { feedUrl: "https://padded.example/feed.xml", status: "active" },
+    ]);
+  });
+
   it("enforces 50 active sources cap: marks candidate as pending with active_cap_reached", async () => {
     const db = drizzle(env.DB);
     const ind = await db

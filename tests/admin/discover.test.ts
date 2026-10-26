@@ -310,6 +310,87 @@ describe("Admin Discover & Source Operations", () => {
     ).toBeNull();
   });
 
+  it("create, update, and approve store a trimmed feed_url and refuse a padded system: URL", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('trim-guard-ind', 'Trim Guard', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const status = async (p: Promise<unknown>) =>
+      p.then(
+        () => 0,
+        (e: unknown) => (e instanceof Response ? e.status : -1),
+      );
+    const feedOf = async (id: number) =>
+      (await env.DB.prepare("SELECT feed_url FROM sources WHERE id = ?1")
+        .bind(id)
+        .first<{ feed_url: string }>())!.feed_url;
+    const countSources = async () =>
+      (await env.DB.prepare(
+        "SELECT count(*) n FROM sources WHERE industry_id = ?1",
+      )
+        .bind(ind!.id)
+        .first<{ n: number }>())!.n;
+
+    // createSource
+    expect(
+      await status(
+        createSource(env.DB, {
+          industryId: ind!.id,
+          name: "Padded system",
+          feedUrl: " system:x",
+          kind: "html",
+        }),
+      ),
+    ).toBe(400);
+    expect(await countSources()).toBe(0);
+    const id = await createSource(env.DB, {
+      industryId: ind!.id,
+      name: "Padded real",
+      feedUrl: "  https://ok.example/feed ",
+      kind: "rss",
+    });
+    expect(await feedOf(id!)).toBe("https://ok.example/feed");
+
+    // updateSource
+    expect(
+      await status(
+        updateSource(env.DB, { id: id!, name: "x", feedUrl: " system:x" }),
+      ),
+    ).toBe(400);
+    expect(await feedOf(id!)).toBe("https://ok.example/feed");
+    await updateSource(env.DB, {
+      id: id!,
+      name: "Padded real",
+      feedUrl: "  https://ok.example/rss ",
+    });
+    expect(await feedOf(id!)).toBe("https://ok.example/rss");
+
+    // approveCandidate: a padded candidate row (built directly)
+    const addCandidate = async (feedUrl: string) =>
+      (await env.DB.prepare(
+        `INSERT INTO source_candidates (industry_id, name, feed_url, site_domain, kind, fetch_rung, requires_browser, avg_score, status, created_at)
+         VALUES (?1, 'Candidate', ?2, NULL, 'rss', 0, 0, 90, 'pending', 1000) RETURNING id`,
+      )
+        .bind(ind!.id, feedUrl)
+        .first<{ id: number }>())!.id;
+    expect(
+      await status(approveCandidate(env.DB, await addCandidate(" system:x"))),
+    ).toBe(400);
+    expect(await countSources()).toBe(1);
+    await approveCandidate(
+      env.DB,
+      await addCandidate("  https://approve-trim.example/feed  "),
+      2000,
+    );
+    const approved = await env.DB.prepare(
+      "SELECT feed_url, status FROM sources WHERE industry_id = ?1 AND id != ?2",
+    )
+      .bind(ind!.id, id!)
+      .all();
+    expect(approved.results).toEqual([
+      { feed_url: "https://approve-trim.example/feed", status: "active" },
+    ]);
+  });
+
   it("an unknown source id is refused by update, delete, and resume", async () => {
     const missing = 987654;
     const refused = async (p: Promise<unknown>) => {
