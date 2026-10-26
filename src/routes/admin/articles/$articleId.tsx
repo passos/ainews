@@ -8,6 +8,7 @@ import {
   retractArticle,
   updateArticleOverride,
 } from "../../../server/admin/articles";
+import { isApprovedReview } from "../../../lib/approved-review";
 import { listIndustries } from "../../../server/admin/industries";
 
 export const Route = createFileRoute("/admin/articles/$articleId")({
@@ -170,9 +171,7 @@ function AdminArticleDetailPage() {
     }
   }
 
-  const isApproved = reviews.some(
-    (r) => r.bodySha === article.bodySha && r.decision === "approved",
-  );
+  const isApproved = reviews.some((r) => isApprovedReview(r, article.bodySha));
 
   return (
     <div className="flex max-w-4xl flex-col gap-8 pb-12">

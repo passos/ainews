@@ -155,3 +155,16 @@ it("ANY_BODY_APPROVED_SQL is interpolated once, in the primary tracker", () => {
   }
   expect(found).toEqual({ "src/pipeline/evidence/primary.ts": 1 });
 });
+
+it("admin routes do not compare a review decision to approved (#102)", () => {
+  // Admin pages use isApprovedReview from src/lib/approved-review.ts. No
+  // whitelist here: the helper lives in src/lib, outside src/routes.
+  const files = sources("src/routes/admin");
+  expect(files).toContain("src/routes/admin/articles/$articleId.tsx");
+  const copies = files.filter((f) =>
+    /decision\s*[!=]==?\s*["\x27`]approved["\x27`]/.test(
+      readFileSync(f, "utf8"),
+    ),
+  );
+  expect(copies).toEqual([]);
+});
