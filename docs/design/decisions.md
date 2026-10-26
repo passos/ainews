@@ -159,6 +159,10 @@ CF worker name ainews-app
 - **Ask 开放给读者**（N§7 Stage 2 "Readers get useful, evidence-backed answers"，N§1 Reader loop）：本条取代第二轮"Ask 只在后台"。
   - 入口：每个事件页都有 "Ask about this story"。回答只依据该事件已批准的正文，逐句引用；查不到时说明查不到的是什么。
   - 回答只给提问者本人，不发布到公开页。限流按网络地址设，只防滥用。
+  - **单独预算、服务端开关**（使用者原话，2026-10-26："读者ask走单独的budget，且受服务端的feature flag控制启用与否"）：
+    - 读者 Ask 的调用记到独立的预算渠道 `ask`，不占 `gateway` 的 $1.90；`ask` 用完后，当天的 Ask 显示"今天的提问额度已用完"，不影响流水线。
+    - 新开关 `ASK_PUBLIC_ENABLED`，和其他安全阀一样只认字符串 `"true"`，默认 `"false"`。为 `"false"` 时，公开页不显示入口，服务端也拒绝请求。
+    - `ask` 的日额度和开关的打开时间都由使用者在打开时决定，开关单独开 PR。后台的 Ask 仍走原有渠道，不受这个开关影响。
   - 开放的前提是先做离线评估（N§6 "after evaluation"）：题集上引用正确率与拒答正确率都达标。
   - v1 不含 Finance 板块（N§4 "no personalized investment advice"）。
   - 契约 `docs/architecture.md` 的 `questions` 行另开一个 PR 修改。
@@ -166,6 +170,32 @@ CF worker name ainews-app
   用自然语言写下要跟的问题和命中条件，系统给一个私有 RSS 地址。只在出现实质进展时命中，同一进展不重复命中。
   管理员建的 watch 保留，作为公开示范，并在公开站加一个列表入口。邮件推送等读者订阅以后再做。
 - **补齐 N§3 Technology 的编辑产品**：Launch Reality Check、Technology Evolution Timeline。Technology 是目前唯一有数据的板块。
+
+## 文章阅读页（使用者原话，2026-10-26："我希望在保留原始链接的同时，能够在服务端保存抓取到的内容，用于格式化后默认展示"）
+
+- 新增公开页 `/a/$articleId`。首页、板块页、事件页里的文章标题默认链到这个页面；每张卡片和阅读页上都保留"在 {信源} 阅读原文"的原始链接。
+- 页面从上到下：标题；信源、发布时间、抓取时间；原始链接；带"Newsren 摘要"标签的 AI 摘要；格式化后的正文；页底再放一次原始链接。
+  Finance 文章页显示免责声明（N§4）。
+- 正文只显示已批准的那一版（`reviews.body_sha`），经过 `approvedArticleWhere`。R2 里没有正文时，退回到摘要加原始链接。
+- 渲染：在服务端把 markdown 转成 HTML，并按白名单净化。链接只允许 http/https（`safeHttpUrl`），外链加 `rel="noopener nofollow"`。
+  图片只允许 https，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`。去掉 script、iframe、form、style。
+  排版：正文宽度约 68 字符；标题、引用、代码、表格的样式要齐全，表格可横向滚动；亮色和暗色都要做；375px 下不能出现横向滚动。
+- `<link rel="canonical">` 指向原文。
+- 证据联动：Inspect evidence 里的每条引文都链到 `/a/$id#:~:text=…`，读者能在站内看到高亮的原文段落；原始链接同时保留。
+- **版权（N§6 Editorial quality gate 的 "licensing"）**：每个信源新增一个显示方式，取值 `full`、`excerpt` 或 `summary`。
+  - `full`：显示全文。
+  - `excerpt`：显示开头若干段，不超过正文的 25%，也不超过约 300 词，之后接"在 {信源} 继续阅读"。
+  - `summary`：只显示摘要。
+
+  新加的列默认是 `excerpt`。每个信源的取值：
+  - 政府和公共领域来源（Federal Reserve、SEC、FINRA、NIST、ed.gov、NCES、CISA）用 `full`。
+  - arXiv 用 `full`：现在存的是摘要，arXiv 的元数据（含摘要）采用 CC0。
+  - 商业媒体（MIT Technology Review 等）用 `excerpt`。
+
+  管理员可以在后台把任何一个信源切到 `full`，前提是已经确认对方允许转载。
+
+- RSS：条目链接改成 `/a/$id`，描述里带上原始链接；guid 不变。
+- 这个页面不调用模型，不占每日预算，排在 W2 的第一项。
 
 ## Funding Round Tracker（#23，N§3 line 104、N§4）
 
@@ -194,12 +224,13 @@ CF worker name ainews-app
 - **每日预算仍是 $2**（使用者原话，2026-10-26："预算按 $2 执行"）：`gateway` $1.90，`workers_ai` $0.10，`jina` $0。
   上面的读者功能都在这个上限内做。设计方因此补一条：**按读者价值分配预算**，额度不够时先保证排在前面的：
   1. 文章预筛、评分与摘要（Stage 1）；
-  2. 读者 Ask 的当日保留额度（`gateway` 里保留 $0.30，未用完的部分 18:00 UTC 后释放给其他用途）；
-  3. 已批准事件的 Story Brief 与三档解释；
-  4. 论断与证据；
-  5. 学习材料、板块编辑产品、watch 判定；
-  6. 日报和周报的导语。
-  额度用完后，后面的任务排队到第二天，不丢数据。后台预算页要显示每一档当天的花费。
+  2. 已批准事件的 Story Brief 与三档解释；
+  3. 论断与证据；
+  4. 学习材料、板块编辑产品、watch 判定；
+  5. 日报和周报的导语。
+
+  读者 Ask 不在这个排序里，它走单独的 `ask` 预算（见上）。额度用完后，后面的任务排队到第二天，不丢数据。后台预算页要显示每一档当天的花费。
+
 - 所有新的 write 和 reason 调用，做一次批量真实探测，确认 `finishReason=STOP`，预计花费不超过 $0.10。
 - `DISCOVERY_ENABLED` 保持 `"false"`。重新打开之前要先满足：probe 遵守 crawl-delay、带项目 UA、跨主机查 robots；
   有当天预算；websearch 经过 `createModelClient` 记账。改这个开关仍然要单独开 PR，并经使用者同意。
@@ -212,5 +243,6 @@ CF worker name ainews-app
 
 ## 仍需使用者亲手做
 
+- 打开读者 Ask 时，定 `ask` 预算的日额度，并同意 `ASK_PUBLIC_ENABLED` 的开关 PR。
 - 在 `ioenv.com` 上接好 Email Service，并确认发件地址。
 - 提供能读 AI Gateway 日志的凭据，用于 M1 关口的对账，并确认 embed 的计费渠道。
