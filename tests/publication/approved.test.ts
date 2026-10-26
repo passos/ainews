@@ -258,6 +258,17 @@ describe("paging", () => {
 });
 
 describe("sources", () => {
+  it("never lists a system placeholder source, even if it is active", async () => {
+    const { env } = await import("cloudflare:workers");
+    await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at) VALUES (?1, 'Primary documents (system)', 'system:primary-documents', 'html', 'active', 0)",
+    )
+      .bind(tech.industryId)
+      .run();
+    const sources = await getSectionSources(db(), "technology");
+    expect(sources.map((s) => s.name)).toEqual(["Technology Wire"]);
+  });
+
   it("lists active sources of the section only, with a link only when there is a domain", async () => {
     const { env } = await import("cloudflare:workers");
     await env.DB.prepare(

@@ -7,6 +7,7 @@ import {
 } from "../../providers/transport";
 import { FINANCE_SLUG } from "../../server/admin/ops";
 import type { PipelineEnv } from "../messages";
+import { attributeSource } from "../../lib/source-attribution";
 import { indexArticleChunks, sha256Hex } from "./chunks";
 import {
   buildClaimsExtractionRequest,
@@ -69,6 +70,12 @@ interface ApprovedArticleRow {
   source_name: string;
   source_domain: string;
 }
+
+type ArticleQueryRow = Omit<ApprovedArticleRow, "source_domain"> & {
+  source_domain: string | null;
+  source_feed_url: string;
+  canonical_url: string;
+};
 
 export function defaultEvidenceDeps(
   env: PipelineEnv,
@@ -152,7 +159,9 @@ export async function generateEventEvidence(
              a.body_sha,
              a.body_truncated,
              COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
-             s.site_domain AS source_domain
+             s.site_domain AS source_domain,
+             s.feed_url AS source_feed_url,
+             a.canonical_url
            FROM event_articles ea
            JOIN articles a ON a.id = ea.article_id
            JOIN sources s ON s.id = a.source_id
@@ -177,8 +186,18 @@ export async function generateEventEvidence(
     return { status: "skipped", eventId, reason: "event_not_found" };
   }
 
-  const articleRows =
-    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? [];
+  const articleRows: ApprovedArticleRow[] = (
+    (articleBatchResult.results as ArticleQueryRow[] | undefined) ?? []
+  ).map(({ source_feed_url, canonical_url, ...r }) => {
+    // A system source's document is judged by its own host (★ Original source).
+    const { name, domain } = attributeSource({
+      name: r.source_name,
+      siteDomain: r.source_domain,
+      feedUrl: source_feed_url,
+      canonicalUrl: canonical_url,
+    });
+    return { ...r, source_name: name, source_domain: domain };
+  });
   if (articleRows.length === 0) {
     return { status: "skipped", eventId, reason: "no_approved_articles" };
   }

@@ -3,7 +3,13 @@ import { escapeXml } from "../../lib/xml";
 import { safeHttpUrl } from "../../lib/url";
 import { industries } from "../db/schema/industries";
 import { watches } from "../db/schema/watches";
-import { approvedArticleWhere, type Db } from "./articles";
+import {
+  approvedArticleWhere,
+  publicSource,
+  SOURCE_COLUMNS,
+  type Db,
+  type SourceColumnsRow,
+} from "./articles";
 import { SITE_NAME } from "../../lib/site";
 
 export interface WatchHitItem {
@@ -118,21 +124,22 @@ export async function getWatchView(
 
   for (const h of hitsQuery) {
     // Only approved articles
-    const articlesQuery = await db.all<{
-      id: number;
-      title: string;
-      summary: string | null;
-      canonical_url: string;
-      source_name: string;
-      published_at: number | null;
-      fetched_at: number;
-    }>(sql`
+    const articlesQuery = await db.all<
+      SourceColumnsRow & {
+        id: number;
+        title: string;
+        summary: string | null;
+        canonical_url: string;
+        published_at: number | null;
+        fetched_at: number;
+      }
+    >(sql`
       SELECT
         a.id AS id,
         COALESCE(NULLIF(a.title_override, ''), a.title) AS title,
         COALESCE(NULLIF(a.summary_override, ''), a.summary) AS summary,
         a.canonical_url AS canonical_url,
-        s.name AS source_name,
+        ${SOURCE_COLUMNS},
         a.published_at AS published_at,
         a.fetched_at AS fetched_at
       FROM event_articles ea
@@ -189,7 +196,7 @@ export async function getWatchView(
         title: art.title,
         summary: art.summary,
         url: safeHttpUrl(art.canonical_url),
-        sourceName: art.source_name,
+        sourceName: publicSource(art).name,
         publishedAt: art.published_at,
       })),
     });

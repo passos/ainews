@@ -1,6 +1,7 @@
 import { eq, sql, and, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { isEnabled } from "../../lib/flags";
+import { isSystemSource } from "../../lib/source-attribution";
 import {
   createModelClient,
   type ModelClient,
@@ -240,8 +241,9 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       try {
         const res = await webSearch.search({ query, limit: 10 });
         for (const item of res.items) {
-          if (item.url && !discoveredUrls.includes(item.url)) {
-            discoveredUrls.push(item.url);
+          const url = typeof item.url === "string" ? item.url.trim() : "";
+          if (url && !discoveredUrls.includes(url)) {
+            discoveredUrls.push(url);
           }
         }
       } catch (err) {
@@ -280,6 +282,9 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
     // 5. Probe candidates
     const probeTargets = candidateUrls.slice(0, MAX_CANDIDATES_TO_PROBE);
     for (const targetUrl of probeTargets) {
+      // System placeholder feeds are reserved: never probe one.
+      if (isSystemSource(targetUrl)) continue;
+
       // Check discovery task budget limit ($0.05 = 50,000 micros)
       const currentRunCost = await getRunCost();
       if (currentRunCost >= 50_000) {
@@ -300,6 +305,8 @@ Return a strictly valid JSON array of strings, for example: ["query 1", "query 2
       if (existingFeeds.has(probeRes.feedUrl)) {
         continue;
       }
+      // The probe can follow a page link to a system: feed; skip it too.
+      if (isSystemSource(probeRes.feedUrl)) continue;
 
       let sampleScores: number[] = [];
       let avgScore: number | null = null;

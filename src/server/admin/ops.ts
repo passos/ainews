@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
+import { isSystemSource } from "../../lib/source-attribution";
 import { getDb } from "../db/client";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -247,6 +248,16 @@ export async function getSource(database: D1Database, id: number) {
   return rows[0] ?? null;
 }
 
+/**
+ * System placeholder sources are reserved: no admin write creates or sets a
+ * `system:` feed URL (match: `isSystemSource`).
+ */
+function assertNotSystemFeed(feedUrl: string): void {
+  if (isSystemSource(feedUrl)) {
+    throw new Response("System feed URLs are reserved", { status: 400 });
+  }
+}
+
 export async function createSource(
   database: D1Database,
   data: {
@@ -261,13 +272,15 @@ export async function createSource(
     jinaEnabled?: number;
   },
 ) {
+  const feedUrl = data.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
   const d = getDb(database);
   const res = await d
     .insert(sources)
     .values({
       industryId: data.industryId,
       name: data.name,
-      feedUrl: data.feedUrl,
+      feedUrl,
       siteDomain: data.siteDomain ?? null,
       kind: data.kind,
       intervalMinutes: data.intervalMinutes ?? 60,
@@ -294,16 +307,18 @@ export async function updateSource(
     jinaEnabled?: number;
   },
 ) {
-  await database
+  const feedUrl = data.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
+  const res = await database
     .prepare(
       `UPDATE sources
        SET name = ?1, feed_url = ?2, site_domain = ?3, interval_minutes = COALESCE(?4, interval_minutes),
            utc_offset = COALESCE(?5, utc_offset), config = COALESCE(?6, config), jina_enabled = COALESCE(?7, jina_enabled)
-       WHERE id = ?8`,
+       WHERE id = ?8 AND feed_url NOT LIKE 'system:%'`,
     )
     .bind(
       data.name,
-      data.feedUrl,
+      feedUrl,
       data.siteDomain ?? null,
       data.intervalMinutes ?? null,
       data.utcOffset ?? null,
@@ -312,21 +327,36 @@ export async function updateSource(
       data.id,
     )
     .run();
+  if (res.meta.changes === 0) {
+    throw new Response("Source not found or not editable", { status: 400 });
+  }
 }
 
 export async function deleteSource(database: D1Database, id: number) {
-  await database.prepare("DELETE FROM sources WHERE id = ?1").bind(id).run();
-}
-
-export async function resumeSource(database: D1Database, id: number) {
-  await database
+  const res = await database
     .prepare(
-      `UPDATE sources
-       SET status = 'active', fail_count = 0, empty_fetches = 0, paused_reason = NULL
-       WHERE id = ?1`,
+      "DELETE FROM sources WHERE id = ?1 AND feed_url NOT LIKE 'system:%'",
     )
     .bind(id)
     .run();
+  if (res.meta.changes === 0) {
+    throw new Response("Source not found or not deletable", { status: 400 });
+  }
+}
+
+export async function resumeSource(database: D1Database, id: number) {
+  // System placeholder sources (e.g. primary documents) never get collected.
+  const res = await database
+    .prepare(
+      `UPDATE sources
+       SET status = 'active', fail_count = 0, empty_fetches = 0, paused_reason = NULL
+       WHERE id = ?1 AND feed_url NOT LIKE 'system:%'`,
+    )
+    .bind(id)
+    .run();
+  if (res.meta.changes === 0) {
+    throw new Response("Source not found or not resumable", { status: 400 });
+  }
 }
 
 export async function triggerCollect(
@@ -380,6 +410,9 @@ export async function approveCandidate(
     });
   }
 
+  const feedUrl = candidate.feedUrl.trim();
+  assertNotSystemFeed(feedUrl);
+
   if (candidate.kind !== "rss") {
     throw new Response(
       "Cannot approve non-RSS candidate without list configuration",
@@ -397,7 +430,7 @@ export async function approveCandidate(
       .bind(
         candidate.industryId,
         candidate.name || candidate.siteDomain || "",
-        candidate.feedUrl,
+        feedUrl,
         candidate.siteDomain,
         candidate.kind,
         candidate.fetchRung,

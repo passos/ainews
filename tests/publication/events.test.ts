@@ -1,6 +1,9 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getHome, getSection } from "../../src/server/publication/articles";
 import { getEvent, getEventSources } from "../../src/server/publication/events";
+import { computeRevisionDiff } from "../../src/pipeline/evidence/diff";
+import { attributeSource } from "../../src/lib/source-attribution";
 import {
   db,
   resetPublication,
@@ -106,6 +109,37 @@ describe("getEvent and getEventSources", () => {
     expect(sources).toEqual([{ name: "Technology Wire", count: 2 }]);
   });
 
+  it("a system placeholder source shows the document host, not its name", async () => {
+    const placeholder = await db().get<{ id: number }>(
+      sql`INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+          VALUES (${tech.industryId}, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 0)
+          RETURNING id`,
+    );
+    const eventId = await seedEvent(tech.industryId, "Primary Event", 0);
+    const nasa = await seedArticle({
+      industryId: tech.industryId,
+      sourceId: placeholder.id,
+      title: "NASA report",
+      url: "https://www.nasa.gov/report",
+    });
+    const wire = await seedArticle({ ...tech, title: "Wire report" });
+    for (const [i, id] of [nasa, wire].entries()) {
+      await seedEventArticle(eventId, id, 1000 + i);
+      await seedReview(id, "approved");
+    }
+
+    expect(await getEventSources(db(), eventId)).toEqual([
+      { name: "Technology Wire", count: 1 },
+      { name: "nasa.gov", count: 1 },
+    ]);
+    const section = await getSection(db(), { slug: "technology", page: 1 });
+    const card = section!.articles.find((a) => a.id === nasa);
+    expect(card?.sourceName).toBe("nasa.gov");
+    expect(section!.articles.find((a) => a.id === wire)?.sourceName).toBe(
+      "Technology Wire",
+    );
+  });
+
   it("getSection and getHome return eventId and eventReportCount; card shows event link when >= 2 reports", async () => {
     const eventId = await seedEvent(tech.industryId, "Big Story", 0);
 
@@ -139,5 +173,97 @@ describe("getEvent and getEventSources", () => {
       ?.articles.find((a) => a.id === art1);
     expect(homeA1?.eventId).toBe(eventId);
     expect(homeA1?.eventReportCount).toBe(2);
+  });
+
+  it("pipeline and publication name a placeholder-source document identically", async () => {
+    const placeholder = await db().get<{ id: number }>(
+      sql`INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+          VALUES (${tech.industryId}, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 0)
+          RETURNING id`,
+    );
+    const urls = [
+      "https://user:pw@WWW.NASA.gov:8443/a",
+      "https://data.sec.gov:443/b",
+      "ftp://ftp.example.org/c",
+    ];
+    const eventId = await seedEvent(tech.industryId, "Consistency Event", 1);
+    const ids: number[] = [];
+    for (const url of urls) {
+      const id = await seedArticle({
+        industryId: tech.industryId,
+        sourceId: placeholder.id,
+        title: `Doc ${url}`,
+        url,
+      });
+      await seedEventArticle(eventId, id, 1000, 1);
+      await seedReview(id, "approved");
+      ids.push(id);
+    }
+    const expected = urls.map(
+      (canonicalUrl) =>
+        attributeSource({
+          name: "Primary documents (system)",
+          siteDomain: null,
+          feedUrl: "system:primary-documents",
+          canonicalUrl,
+        }).name,
+    );
+
+    const pipeline = (await computeRevisionDiff(
+      (await import("cloudflare:workers")).env.DB,
+      eventId,
+      1,
+    ))!.newSources;
+    const publicNames = (await getEventSources(db(), eventId))
+      .map((s) => s.name)
+      .sort();
+    const page = await getSection(db(), { slug: "technology", page: 1 });
+    const cards = ids.map(
+      (id) => page!.articles.find((a) => a.id === id)!.sourceName,
+    );
+
+    expect(pipeline).toEqual(expected);
+    expect(cards).toEqual(expected);
+    expect(publicNames).toEqual([...expected].sort());
+  });
+
+  it("an upper-case SYSTEM: source is attributed to the document host on both paths", async () => {
+    const placeholder = await db().get<{ id: number }>(
+      sql`INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+          VALUES (${tech.industryId}, 'Upper system row', 'SYSTEM:x', 'html', 'paused', 0)
+          RETURNING id`,
+    );
+    const urls = ["https://www.nasa.gov/a", "https://data.sec.gov/b"];
+    const eventId = await seedEvent(tech.industryId, "Upper Case Event", 1);
+    const ids: number[] = [];
+    for (const url of urls) {
+      const id = await seedArticle({
+        industryId: tech.industryId,
+        sourceId: placeholder.id,
+        title: `Doc ${url}`,
+        url,
+      });
+      await seedEventArticle(eventId, id, 1000, 1);
+      await seedReview(id, "approved");
+      ids.push(id);
+    }
+    const expected = ["nasa.gov", "data.sec.gov"];
+
+    const pipeline = (await computeRevisionDiff(
+      (await import("cloudflare:workers")).env.DB,
+      eventId,
+      1,
+    ))!.newSources;
+    const publicNames = (await getEventSources(db(), eventId))
+      .map((s) => s.name)
+      .sort();
+    const page = await getSection(db(), { slug: "technology", page: 1 });
+    const cards = ids.map(
+      (id) => page!.articles.find((a) => a.id === id)!.sourceName,
+    );
+
+    expect(pipeline).toEqual(expected);
+    expect(cards).toEqual(expected);
+    expect(publicNames).toEqual([...expected].sort());
   });
 });

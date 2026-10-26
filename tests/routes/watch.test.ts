@@ -93,6 +93,43 @@ describe("tests/routes/watch.test.ts", () => {
     );
   });
 
+  it("a watch hit names a placeholder-source document by its host", async () => {
+    const watch = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('placeholder-watch', 'Mission news', 'Any mission update', '["mission"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const placeholder = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+       VALUES (?1, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const eventId = await seedEvent(tech.industryId, "Mission Update", 1);
+    const art = await seedArticle({
+      industryId: tech.industryId,
+      sourceId: placeholder!.id,
+      title: "Mission report",
+      url: "https://www.nasa.gov/mission-report",
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale)
+       VALUES (?1, ?2, 1, 3000, 'Mission update.', '{}')`,
+    )
+      .bind(watch!.id, eventId)
+      .run();
+
+    const view = await getWatchView(db(), "placeholder-watch");
+    expect(view!.hits[0]!.articles.map((a) => a.sourceName)).toEqual([
+      "nasa.gov",
+    ]);
+  });
+
   it("renderWatchFeed and watchFeedResponse emit valid RSS 2.0", async () => {
     // 1. Create watch
     const watchRes = await env.DB.prepare(

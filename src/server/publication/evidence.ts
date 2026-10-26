@@ -9,7 +9,7 @@ import type {
   RealityCheckStatus,
   SourceRole,
 } from "../../lib/evidence/types";
-import { approvedArticleWhere, type Db } from "./articles";
+import { approvedArticleWhere, publicSource, type Db } from "./articles";
 
 export async function getEventEvidence(
   db: Db,
@@ -27,8 +27,9 @@ export async function getEventEvidence(
     article_id: number | null;
     article_title: string | null;
     article_url: string | null;
-    source_name: string | null;
-    source_domain: string | null;
+    source_raw_name: string | null;
+    source_site_domain: string | null;
+    source_feed_url: string | null;
     body_sha: string | null;
     quote: string | null;
     start_offset: number | null;
@@ -50,8 +51,9 @@ export async function getEventEvidence(
       ev.article_id,
       ev.article_title,
       ev.article_url,
-      ev.source_name,
-      ev.source_domain,
+      ev.source_raw_name,
+      ev.source_site_domain,
+      ev.source_feed_url,
       ev.body_sha,
       ev.quote,
       ev.start_offset,
@@ -77,8 +79,9 @@ export async function getEventEvidence(
         ce.verified,
         COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS article_title,
         a.canonical_url AS article_url,
-        COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
-        s.site_domain AS source_domain
+        s.name AS source_raw_name,
+        s.site_domain AS source_site_domain,
+        s.feed_url AS source_feed_url
       FROM claim_evidence ce
       JOIN articles a ON a.id = ce.article_id AND ce.body_sha = a.body_sha AND ${approvedArticleWhere}
       JOIN sources s ON s.id = a.source_id
@@ -122,13 +125,19 @@ export async function getEventEvidence(
       r.article_id != null &&
       r.article_url != null
     ) {
+      const source = publicSource({
+        source_raw_name: r.source_raw_name ?? "",
+        source_site_domain: r.source_site_domain,
+        source_feed_url: r.source_feed_url ?? "",
+        source_canonical_url: r.article_url,
+      });
       claim.evidence.push({
         id: r.evidence_id,
         articleId: r.article_id,
         articleTitle: r.article_title ?? "",
         articleUrl: r.article_url,
-        sourceName: r.source_name ?? "",
-        sourceDomain: r.source_domain ?? "",
+        sourceName: source.name,
+        sourceDomain: source.domain,
         bodySha: r.body_sha ?? "",
         quote: r.quote ?? "",
         startOffset: r.start_offset ?? 0,

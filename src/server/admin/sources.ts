@@ -7,7 +7,7 @@ import * as ops from "./ops";
 
 const sourceFields = z.object({
   name: z.string().trim().min(1),
-  feedUrl: z.string().url(),
+  feedUrl: z.string().trim().url(),
   siteDomain: z.string().trim().min(1).nullable().default(null),
   intervalMinutes: z.number().int().positive().default(60),
   utcOffset: z

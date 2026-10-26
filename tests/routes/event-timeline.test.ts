@@ -285,6 +285,16 @@ it("independent review: creates a diff for each revision when two primary source
   )
     .bind(tech.industryId)
     .run();
+  for (const [name, feed, domain] of [
+    ["arXiv cs.AI", "https://rss.arxiv.org/rss/cs.AI", "arxiv.org"],
+    ["White House", "https://www.whitehouse.gov/feed/", "whitehouse.gov"],
+  ]) {
+    await env.DB.prepare(
+      "INSERT INTO sources (industry_id,name,feed_url,site_domain,kind,status,created_at) VALUES (?,?,?,?,'rss','active',1000)",
+    )
+      .bind(tech.industryId, name, feed, domain)
+      .run();
+  }
   const eventId = await seedEvent(tech.industryId, "Event", 1);
   const article = await seedArticle({ ...tech, title: "Original reporting" });
   await seedEventArticle(eventId, article, 1000, 1);

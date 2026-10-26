@@ -3,6 +3,7 @@ import { dayBoundsUtc, weekBoundsUtc } from "../../lib/time";
 import { CallInProgressError, createModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
 import type { DigestMessage, PipelineEnv } from "../messages";
+import { readerSourceName } from "../../lib/source-attribution";
 import { sendDigestEmail, type DigestItemData } from "./email";
 import {
   buildDigestRequest,
@@ -25,9 +26,22 @@ interface EventRow {
   event_created_at: number;
   title: string | null;
   summary: string | null;
-  source_name: string | null;
+  /** JSON: { name, feedUrl, canonicalUrl } of the newest approved article. */
+  source: string | null;
   total_score: number | null;
   article_count: number;
+}
+
+function digestSourceName(source: string | null): string {
+  if (!source) return "Unknown source";
+  const s = JSON.parse(source) as {
+    name: string;
+    feedUrl: string;
+    canonicalUrl: string;
+  };
+  return (
+    readerSourceName(s.name, s.feedUrl, s.canonicalUrl) || "Unknown source"
+  );
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -157,7 +171,10 @@ export async function buildDigest(
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS summary,
 
-        (SELECT COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source')
+        (SELECT json_object(
+           'name', COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source'),
+           'feedUrl', s.feed_url,
+           'canonicalUrl', a.canonical_url)
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
@@ -167,7 +184,7 @@ export async function buildDigest(
              WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
            )
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
-         LIMIT 1) AS source_name,
+         LIMIT 1) AS source,
 
         (SELECT COALESCE(an.total_score, 0)
          FROM event_articles ea
@@ -255,7 +272,10 @@ export async function buildDigest(
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
          LIMIT 1) AS summary,
 
-        (SELECT COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source')
+        (SELECT json_object(
+           'name', COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source'),
+           'feedUrl', s.feed_url,
+           'canonicalUrl', a.canonical_url)
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
@@ -265,7 +285,7 @@ export async function buildDigest(
              WHERE r.article_id = a.id AND r.body_sha = a.body_sha AND r.decision = 'approved'
            )
          ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
-         LIMIT 1) AS source_name,
+         LIMIT 1) AS source,
 
         (SELECT COALESCE(an.total_score, 0)
          FROM event_articles ea
@@ -322,7 +342,7 @@ export async function buildDigest(
       revision: r.event_revision,
       title: r.title!,
       summary: r.summary || "",
-      sourceName: r.source_name || "Unknown source",
+      sourceName: digestSourceName(r.source),
       score: r.total_score || 0,
       articleCount: r.article_count,
     }));

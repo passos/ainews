@@ -3,6 +3,7 @@
 // (api.ts) and tests both call them.
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { attributeSource } from "../../lib/source-attribution";
 import { safeHttpUrl } from "../../lib/url";
 import type { getDb } from "../db/client";
 
@@ -29,6 +30,41 @@ export const approvedArticleWhere: SQL = sql`EXISTS (
 // or SQLite sorts instead of reading the index.
 export const NEWEST_FIRST = sql`COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC`;
 
+// Raw source columns for `s` (sources) and `a` (articles). Pages map them
+// with `publicSource()`; the host rule lives only in lib/source-attribution.
+export const SOURCE_COLUMNS = sql`
+  s.name AS source_raw_name,
+  s.site_domain AS source_site_domain,
+  s.feed_url AS source_feed_url,
+  a.canonical_url AS source_canonical_url`;
+
+export interface SourceColumnsRow {
+  source_raw_name: string;
+  source_site_domain: string | null;
+  source_feed_url: string;
+  source_canonical_url: string;
+}
+
+/**
+ * Reader-facing source name and domain. A system placeholder source shows the
+ * document's host; a real source with no name falls back to its domain.
+ */
+export function publicSource(r: SourceColumnsRow): {
+  name: string;
+  domain: string;
+} {
+  const s = attributeSource({
+    name: r.source_raw_name,
+    siteDomain: r.source_site_domain,
+    feedUrl: r.source_feed_url,
+    canonicalUrl: r.source_canonical_url,
+  });
+  return {
+    name: s.name || r.source_site_domain || "Unknown source",
+    domain: s.domain,
+  };
+}
+
 // Card text: admin override, then the newest analysis, then the feed's own.
 export const CARD_COLUMNS = sql`
   a.id AS id,
@@ -37,7 +73,7 @@ export const CARD_COLUMNS = sql`
   a.url AS url,
   a.published_at AS published_at,
   a.fetched_at AS fetched_at,
-  COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
+  ${SOURCE_COLUMNS},
   an.evidence_tags AS evidence_tags,
   i.slug AS section_slug,
   i.name AS section_name,
@@ -96,14 +132,13 @@ export interface ArticleView {
   inputRevision: number;
 }
 
-export interface CardRow {
+export interface CardRow extends SourceColumnsRow {
   id: number;
   title: string;
   summary: string | null;
   url: string;
   published_at: number | null;
   fetched_at: number;
-  source_name: string;
   evidence_tags: string | null;
   section_slug: string;
   section_name: string;
@@ -138,7 +173,7 @@ export function toViews(rows: CardRow[]): ArticleView[] {
     title: r.title,
     summary: r.summary,
     url: safeHttpUrl(r.url),
-    sourceName: r.source_name,
+    sourceName: publicSource(r).name,
     publishedAt: r.published_at,
     fetchedAt: r.fetched_at,
     evidence: evidenceOf(r.evidence_tags),
@@ -311,7 +346,7 @@ export interface PublicSource {
   homepage: string | null;
 }
 
-/** Active sources of a section. */
+/** Active sources of a section; system placeholder sources never show. */
 export async function getSectionSources(
   db: Db,
   slug: string,
@@ -320,6 +355,7 @@ export async function getSectionSources(
     SELECT s.name AS name, s.site_domain AS site_domain
     FROM sources s JOIN industries i ON i.id = s.industry_id
     WHERE i.slug = ${slug} AND s.status = 'active'
+      AND s.feed_url NOT LIKE 'system:%'
     ORDER BY s.name, s.id`);
   return rows.map((r) => ({
     name: r.name,

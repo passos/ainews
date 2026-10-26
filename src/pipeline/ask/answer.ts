@@ -1,4 +1,5 @@
 import { isEnabled } from "../../lib/flags";
+import { attributeSource } from "../../lib/source-attribution";
 import { safeHttpUrl } from "../../lib/url";
 import { DEFAULT_SLOTS, SETTING_SLOTS } from "../../providers/defaults";
 import {
@@ -286,6 +287,8 @@ export async function answerQuestion(
       body_sha: string;
       source_name: string | null;
       site_domain: string | null;
+      feed_url: string;
+      canonical_url: string;
       industry_id: number;
       industry_name: string;
       primary_domains: string | null;
@@ -296,7 +299,7 @@ export async function answerQuestion(
       const placeholders = candidateArticleIds.map(() => "?").join(", ");
       let sql = `
         SELECT a.id, a.title, a.summary, a.body_sha,
-               s.name AS source_name, s.site_domain,
+               s.name AS source_name, s.site_domain, s.feed_url, a.canonical_url,
                i.id AS industry_id, i.name AS industry_name, i.primary_domains
         FROM articles a
         JOIN sources s ON s.id = a.source_id
@@ -347,15 +350,18 @@ export async function answerQuestion(
       // Only include if actual markdown body is present
       if (bodyText) {
         const primaryDomains = parsePrimaryDomains(art.primary_domains);
+        const source = attributeSource({
+          name: art.source_name ?? "",
+          siteDomain: art.site_domain,
+          feedUrl: art.feed_url,
+          canonicalUrl: art.canonical_url,
+        });
         articlesContext.push({
           id: art.id,
           title: art.title,
-          sourceName: art.source_name || art.site_domain || "Source",
-          sourceDomain: art.site_domain || "",
-          isPrimarySource: isPrimarySourceDomain(
-            art.site_domain || "",
-            primaryDomains,
-          ),
+          sourceName: source.name || art.site_domain || "Source",
+          sourceDomain: source.domain,
+          isPrimarySource: isPrimarySourceDomain(source.domain, primaryDomains),
           bodySha: art.body_sha,
           bodyText,
         });

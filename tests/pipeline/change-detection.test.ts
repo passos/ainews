@@ -244,4 +244,41 @@ describe("pipeline: change detection and revision diff (tests/pipeline/change-de
     expect(parsed.revision).toBe(2);
     expect(parsed.summary).toBeTruthy();
   });
+
+  it("names a placeholder-source article by its document host, never the placeholder", async () => {
+    await env.DB.prepare(
+      `INSERT INTO sources (id, industry_id, name, feed_url, kind, status, created_at)
+       VALUES (2, 1, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)
+       ON CONFLICT DO NOTHING`,
+    ).run();
+    for (const [rev, url, sha] of [
+      [1, "https://www.nasa.gov/initial", "shaPh1"],
+      [2, "https://www.nasa.gov/followup", "shaPh2"],
+    ] as const) {
+      const art = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, 2, ?1, ?1, 'Primary doc', ?2, 'grouped', 1000, 1000) RETURNING id`,
+      )
+        .bind(url, sha)
+        .first<{ id: number }>();
+      await env.DB.prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'admin', 1000)`,
+      )
+        .bind(art!.id, sha)
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO event_articles (event_id, article_id, created_at, input_revision) VALUES (?1, ?2, 1000, ?3)`,
+      )
+        .bind(eventId, art!.id, rev)
+        .run();
+    }
+
+    for (const rev of [1, 2]) {
+      const diff = await computeRevisionDiff(env.DB, eventId, rev);
+      const text = JSON.stringify(diff);
+      expect(text).not.toContain("Primary documents");
+      expect(diff!.newSources).toEqual(["nasa.gov"]);
+      expect(diff!.summary).toContain("nasa.gov");
+    }
+  });
 });

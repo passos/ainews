@@ -7,10 +7,12 @@ import {
   trackEventPrimarySources,
   type PrimaryTrackerDeps,
 } from "../../src/pipeline/evidence/primary";
+import { listPendingArticles } from "../../src/server/admin/ops";
 
 describe("pipeline: primary source tracking (tests/pipeline/primary-source.test.ts)", () => {
   let eventId: number;
   let sourceId: number;
+  let arxivSourceId: number;
 
   beforeEach(async () => {
     await env.DB.prepare(`DELETE FROM claim_evidence`).run();
@@ -26,7 +28,7 @@ describe("pipeline: primary source tracking (tests/pipeline/primary-source.test.
     await env.DB.prepare(
       `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
        VALUES (1, 'technology', 'Technology', 'auto', '["arxiv.org", "whitehouse.gov"]', '{}', 1, 1000)
-       ON CONFLICT DO NOTHING`,
+       ON CONFLICT (id) DO UPDATE SET publish_mode = 'auto', primary_domains = excluded.primary_domains`,
     ).run();
 
     const src = await env.DB.prepare(
@@ -35,6 +37,17 @@ describe("pipeline: primary source tracking (tests/pipeline/primary-source.test.
        RETURNING id`,
     ).first<{ id: number }>();
     sourceId = src!.id;
+
+    const arxivSrc = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+       VALUES (1, 'arXiv cs.AI', 'https://rss.arxiv.org/rss/cs.AI', 'arxiv.org', 'rss', 'active', 1000)
+       RETURNING id`,
+    ).first<{ id: number }>();
+    arxivSourceId = arxivSrc!.id;
+    await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+       VALUES (1, 'White House', 'https://www.whitehouse.gov/feed/', 'whitehouse.gov', 'rss', 'active', 1000)`,
+    ).run();
 
     const ev = await env.DB.prepare(
       `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
@@ -486,6 +499,394 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       );
       expect(res.trackedCount).toBe(0);
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    /** An approved, linked report on `industryId` whose body is `body`. */
+    async function seedApprovedReport(
+      evId: number,
+      industryId: number,
+      sha: string,
+      body: string,
+    ): Promise<number> {
+      const art = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, summary, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (?1, ?2, ?3, ?3, 'Report', 'Summary', ?4, 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(industryId, sourceId, `https://techcrunch.com/${sha}`, sha)
+        .first<{ id: number }>();
+      await env.DB.prepare(
+        `INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+         VALUES (?1, ?2, 'approved', 'admin', 1000)`,
+      )
+        .bind(art!.id, sha)
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO event_articles (event_id, article_id, created_at, input_revision)
+         VALUES (?1, ?2, 1000, 1)`,
+      )
+        .bind(evId, art!.id)
+        .run();
+      await env.BODIES.put(`bodies/${art!.id}/${sha}.md`, body);
+      return art!.id;
+    }
+
+    /** robots.txt allows everything; every other URL is a markdown page. */
+    function primaryPageFetch() {
+      return vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("robots.txt")) {
+          return new Response("User-agent: *\nAllow: /", { status: 200 });
+        }
+        return new Response(
+          "# Primary Document\n\n" +
+            "Detailed experimental evidence and measured results. ".repeat(10),
+          { status: 200, headers: { "Content-Type": "text/markdown" } },
+        );
+      });
+    }
+
+    async function countSources(): Promise<number> {
+      const row = await env.DB.prepare(`SELECT count(*) n FROM sources`).first<{
+        n: number;
+      }>();
+      return row!.n;
+    }
+
+    it("review section: a new primary page waits in the review queue with no system approval", async () => {
+      await env.DB.prepare(
+        `UPDATE industries SET publish_mode='review' WHERE id=1`,
+      ).run();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_review_new",
+        "Full preprint available at [arXiv:2412.19437](https://arxiv.org/abs/2412.19437).",
+      );
+      const mockFetch = primaryPageFetch();
+      const sourcesBefore = await countSources();
+
+      const result = await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: mockFetch as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["arxiv.org"],
+        2000,
+      );
+
+      const systemReviews = await env.DB.prepare(
+        `SELECT count(*) n FROM reviews WHERE reviewer LIKE 'system:%'`,
+      ).first<{ n: number }>();
+      expect(systemReviews!.n).toBe(0);
+
+      const primaryArt = await env.DB.prepare(
+        `SELECT id, stage, source_id FROM articles WHERE canonical_url = 'https://arxiv.org/abs/2412.19437'`,
+      ).first<{ id: number; stage: string; source_id: number }>();
+      expect(primaryArt).not.toBeNull();
+      expect(primaryArt!.stage).toBe("analyzed");
+      expect(primaryArt!.source_id).toBe(arxivSourceId);
+
+      const analysis = await env.DB.prepare(
+        `SELECT evidence_tags FROM analyses WHERE article_id = ?1 AND prompt_version = 'primary_tracker'`,
+      )
+        .bind(primaryArt!.id)
+        .first<{ evidence_tags: string }>();
+      expect(JSON.parse(analysis!.evidence_tags).origin_event_id).toBe(eventId);
+
+      const linked = await env.DB.prepare(
+        `SELECT 1 FROM event_articles WHERE article_id = ?1`,
+      )
+        .bind(primaryArt!.id)
+        .first();
+      expect(linked).toBeNull();
+      const ev = await env.DB.prepare(
+        `SELECT revision FROM events WHERE id = ?1`,
+      )
+        .bind(eventId)
+        .first<{ revision: number }>();
+      expect(ev!.revision).toBe(1);
+      expect(result.trackedCount).toBe(0);
+
+      expect(await countSources()).toBe(sourcesBefore);
+
+      const pending = (await listPendingArticles(env.DB)).map((a) => a.id);
+      expect(pending).toContain(primaryArt!.id);
+    });
+
+    it("review section: retrying an orphaned primary article writes no system approval", async () => {
+      await env.DB.prepare(
+        `UPDATE industries SET publish_mode='review' WHERE id=1`,
+      ).run();
+      const orphan = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, ?1, 'https://arxiv.org/abs/orphan', 'https://arxiv.org/abs/orphan', 'Orphan', 'sha_orphan', 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(arxivSourceId)
+        .first<{ id: number }>();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_orphan_link",
+        "Preprint at [arXiv](https://arxiv.org/abs/orphan).",
+      );
+      const mockFetch = vi.fn();
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: mockFetch as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["arxiv.org"],
+        2000,
+      );
+
+      const review = await env.DB.prepare(
+        `SELECT 1 FROM reviews WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first();
+      expect(review).toBeNull();
+      const linked = await env.DB.prepare(
+        `SELECT 1 FROM event_articles WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first();
+      expect(linked).toBeNull();
+      const ev = await env.DB.prepare(
+        `SELECT revision FROM events WHERE id = ?1`,
+      )
+        .bind(eventId)
+        .first<{ revision: number }>();
+      expect(ev!.revision).toBe(1);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not insert sources and attributes a fetched page to the matching section source", async () => {
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_attr",
+        "Full preprint available at [arXiv:2412.19437](https://arxiv.org/abs/2412.19437).",
+      );
+      const mockFetch = primaryPageFetch();
+      const sourcesBefore = await countSources();
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: mockFetch as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["arxiv.org"],
+        2000,
+      );
+
+      expect(await countSources()).toBe(sourcesBefore);
+      const primaryArt = await env.DB.prepare(
+        `SELECT source_id FROM articles WHERE canonical_url = 'https://arxiv.org/abs/2412.19437'`,
+      ).first<{ source_id: number }>();
+      expect(primaryArt!.source_id).toBe(arxivSourceId);
+      const hostSource = await env.DB.prepare(
+        `SELECT 1 FROM sources WHERE feed_url = 'https://arxiv.org'`,
+      ).first();
+      expect(hostSource).toBeNull();
+    });
+
+    it("attaches a whitelisted URL with no matching source to the section's primary-documents placeholder", async () => {
+      await env.DB.prepare(
+        `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
+         VALUES (2, 'finance', 'Finance', 'review', '[]', '{}', 1, 1000)
+         ON CONFLICT DO NOTHING`,
+      ).run();
+      const otherSection = await env.DB.prepare(
+        `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+         VALUES (2, 'NASA Wire', 'https://nasa.example/feed', 'nasa.gov', 'rss', 'active', 1000)
+         RETURNING id`,
+      ).first<{ id: number }>();
+      const reportId = await seedApprovedReport(
+        eventId,
+        1,
+        "sha_nasa",
+        "Full report at [NASA](https://www.nasa.gov/report).",
+      );
+      const mockFetch = primaryPageFetch();
+      const deps: PrimaryTrackerDeps = {
+        db: env.DB,
+        bodies: env.BODIES,
+        fetch: mockFetch as unknown as typeof fetch,
+        now: () => 2000,
+      };
+
+      const result = await trackEventPrimarySources(
+        deps,
+        env,
+        eventId,
+        ["arxiv.org", "nasa.gov"],
+        2000,
+      );
+
+      expect(mockFetch).toHaveBeenCalled();
+      expect(result.trackedCount).toBe(1);
+      const { results: placeholders } = await env.DB.prepare(
+        `SELECT id, industry_id, name, status, paused_reason, kind, site_domain
+         FROM sources WHERE feed_url = 'system:primary-documents'`,
+      ).all<{
+        id: number;
+        industry_id: number;
+        name: string;
+        status: string;
+        paused_reason: string | null;
+        kind: string;
+        site_domain: string | null;
+      }>();
+      expect(placeholders).toHaveLength(1);
+      const placeholder = placeholders[0];
+      expect(placeholder).toMatchObject({
+        industry_id: 1,
+        name: "Primary documents (system)",
+        status: "paused",
+        paused_reason: null,
+        kind: "html",
+        site_domain: null,
+      });
+      const nasaArt = await env.DB.prepare(
+        `SELECT source_id FROM articles WHERE url = 'https://www.nasa.gov/report'`,
+      ).first<{ source_id: number }>();
+      expect(nasaArt!.source_id).toBe(placeholder.id);
+      expect(nasaArt!.source_id).not.toBe(otherSection!.id);
+
+      // A second page on the same host reuses the placeholder and keeps an
+      // admin rename (ON CONFLICT DO NOTHING, never DO UPDATE).
+      await env.DB.prepare(
+        `UPDATE sources SET name = 'Renamed by admin' WHERE id = ?1`,
+      )
+        .bind(placeholder.id)
+        .run();
+      await env.BODIES.put(
+        `bodies/${reportId}/sha_nasa.md`,
+        "Full report at [NASA](https://www.nasa.gov/report) and [annex](https://www.nasa.gov/report2).",
+      );
+      await trackEventPrimarySources(
+        { ...deps, now: () => 999_000 },
+        env,
+        eventId,
+        ["arxiv.org", "nasa.gov"],
+        999_000,
+      );
+      const { results: after } = await env.DB.prepare(
+        `SELECT id, name FROM sources WHERE feed_url = 'system:primary-documents'`,
+      ).all<{ id: number; name: string }>();
+      expect(after).toEqual([{ id: placeholder.id, name: "Renamed by admin" }]);
+      const annex = await env.DB.prepare(
+        `SELECT source_id FROM articles WHERE url = 'https://www.nasa.gov/report2'`,
+      ).first<{ source_id: number }>();
+      expect(annex!.source_id).toBe(placeholder.id);
+    });
+
+    it("a candidate source on the same domain does not own a primary page", async () => {
+      const candidate = await env.DB.prepare(
+        `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+         VALUES (1, 'NASA candidate', 'https://www.nasa.gov/rss/news', 'nasa.gov', 'rss', 'candidate', 1000)
+         RETURNING id`,
+      ).first<{ id: number }>();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_candidate",
+        "Full report at [NASA](https://images.nasa.gov/candidate-doc).",
+      );
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: primaryPageFetch() as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["nasa.gov"],
+        2000,
+      );
+
+      const doc = await env.DB.prepare(
+        `SELECT s.feed_url FROM articles a JOIN sources s ON s.id = a.source_id
+         WHERE a.url = 'https://images.nasa.gov/candidate-doc'`,
+      ).first<{ feed_url: string }>();
+      expect(doc!.feed_url).toBe("system:primary-documents");
+      const status = await env.DB.prepare(
+        `SELECT status FROM sources WHERE id = ?1`,
+      )
+        .bind(candidate!.id)
+        .first<{ status: string }>();
+      expect(status!.status).toBe("candidate");
+    });
+
+    it("Finance gets no system approval even when its publish_mode is auto", async () => {
+      await env.DB.prepare(
+        `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
+         VALUES (2, 'finance', 'Finance', 'auto', '["sec.gov"]', '{}', 1, 1000)
+         ON CONFLICT (id) DO UPDATE SET slug = 'finance', publish_mode = 'auto', primary_domains = '["sec.gov"]'`,
+      ).run();
+      try {
+        await env.DB.prepare(
+          `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+           VALUES (2, 'SEC Press', 'https://www.sec.gov/news/pressreleases.rss', 'sec.gov', 'rss', 'active', 1000)`,
+        ).run();
+        const finEv = await env.DB.prepare(
+          `INSERT INTO events (industry_id, title, revision, created_at, updated_at)
+           VALUES (2, 'Quarterly Earnings Filing', 1, 1000, 1000)
+           RETURNING id`,
+        ).first<{ id: number }>();
+        await seedApprovedReport(
+          finEv!.id,
+          2,
+          "sha_fin_auto",
+          "See official SEC filing at https://sec.gov/filing/10k-auto.",
+        );
+        const mockFetch = primaryPageFetch();
+
+        await trackEventPrimarySources(
+          {
+            db: env.DB,
+            bodies: env.BODIES,
+            fetch: mockFetch as unknown as typeof fetch,
+            now: () => 2000,
+          },
+          env,
+          finEv!.id,
+          ["sec.gov"],
+          2000,
+        );
+
+        const secArt = await env.DB.prepare(
+          `SELECT id, stage FROM articles WHERE canonical_url = 'https://sec.gov/filing/10k-auto'`,
+        ).first<{ id: number; stage: string }>();
+        expect(secArt).not.toBeNull();
+        expect(secArt!.stage).toBe("analyzed");
+        const rev = await env.DB.prepare(
+          `SELECT 1 FROM reviews WHERE article_id = ?1`,
+        )
+          .bind(secArt!.id)
+          .first();
+        expect(rev).toBeNull();
+      } finally {
+        await env.DB.prepare(
+          `UPDATE industries SET publish_mode = 'review' WHERE id = 2`,
+        ).run();
+      }
     });
   });
 

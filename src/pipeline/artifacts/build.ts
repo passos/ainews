@@ -24,6 +24,7 @@ import {
   type FactWithMetadata,
 } from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
+import { attributeSource } from "../../lib/source-attribution";
 
 export interface ArtifactDeps {
   db?: D1Database;
@@ -60,10 +61,25 @@ interface ApprovedArticleRow {
   body_sha: string;
   published_at: number | null;
   source_name: string;
-  source_domain: string;
+  source_domain: string | null;
+  source_feed_url: string;
+  canonical_url: string;
   total_score: number | null;
   content_type: string | null;
   evidence_tags: string | null;
+}
+
+/** Source name and domain per `attributeSource` (system / no-domain sources). */
+function attributeRow(
+  r: ApprovedArticleRow,
+): ApprovedArticleRow & { source_domain: string } {
+  const { name, domain } = attributeSource({
+    name: r.source_name,
+    siteDomain: r.source_domain,
+    feedUrl: r.source_feed_url,
+    canonicalUrl: r.canonical_url,
+  });
+  return { ...r, source_name: name, source_domain: domain };
 }
 
 interface ClaimRow {
@@ -168,6 +184,8 @@ export async function generateEventArtifacts(
              a.published_at,
              COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source') AS source_name,
              s.site_domain AS source_domain,
+             s.feed_url AS source_feed_url,
+             a.canonical_url,
              an.total_score,
              an.content_type,
              an.evidence_tags
@@ -206,8 +224,9 @@ export async function generateEventArtifacts(
     return { status: "skipped", eventId, reason: "event_not_found" };
   }
 
-  const articleRows =
-    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? [];
+  const articleRows = (
+    (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? []
+  ).map(attributeRow);
   if (articleRows.length === 0) {
     return { status: "skipped", eventId, reason: "no_approved_articles" };
   }
