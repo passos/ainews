@@ -320,23 +320,19 @@ export async function deleteSource(database: D1Database, id: number) {
 
 export async function resumeSource(database: D1Database, id: number) {
   // System placeholder sources (e.g. primary documents) never get collected.
-  const placeholder = await database
-    .prepare("SELECT 1 FROM sources WHERE id = ?1 AND feed_url LIKE 'system:%'")
+  const res = await database
+    .prepare(
+      `UPDATE sources
+       SET status = 'active', fail_count = 0, empty_fetches = 0, paused_reason = NULL
+       WHERE id = ?1 AND feed_url NOT LIKE 'system:%'`,
+    )
     .bind(id)
-    .first();
-  if (placeholder) {
+    .run();
+  if (res.meta.changes === 0) {
     throw new Response("Cannot resume a system placeholder source", {
       status: 400,
     });
   }
-  await database
-    .prepare(
-      `UPDATE sources
-       SET status = 'active', fail_count = 0, empty_fetches = 0, paused_reason = NULL
-       WHERE id = ?1`,
-    )
-    .bind(id)
-    .run();
 }
 
 export async function triggerCollect(

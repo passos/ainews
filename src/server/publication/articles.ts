@@ -44,6 +44,16 @@ export const SOURCE_NAME = sql`CASE
   ELSE COALESCE(NULLIF(s.name, ''), s.site_domain, 'Unknown source')
 END`;
 
+/**
+ * Source domain for `s`/`a`: the document's host (no "www.") when the source
+ * has no site_domain or is a system placeholder; else site_domain.
+ */
+export const SOURCE_DOMAIN = sql`CASE
+  WHEN s.feed_url LIKE 'system:%' OR s.site_domain IS NULL
+    THEN (CASE WHEN ${URL_HOST} LIKE 'www.%' THEN substr(${URL_HOST}, 5) ELSE ${URL_HOST} END)
+  ELSE s.site_domain
+END`;
+
 // Card text: admin override, then the newest analysis, then the feed's own.
 export const CARD_COLUMNS = sql`
   a.id AS id,

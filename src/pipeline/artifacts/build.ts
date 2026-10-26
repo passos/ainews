@@ -24,7 +24,7 @@ import {
   type FactWithMetadata,
 } from "../edgar/comparator";
 import { syncRevisionDiff } from "../evidence/diff";
-import { documentHost, isSystemSource } from "../source-attribution";
+import { attributeSource } from "../source-attribution";
 
 export interface ArtifactDeps {
   db?: D1Database;
@@ -69,19 +69,17 @@ interface ApprovedArticleRow {
   evidence_tags: string | null;
 }
 
-/**
- * A placeholder source (no site_domain, or feed_url 'system:…' such as the
- * primary-documents source) names nothing real: use the document's own host
- * as source domain and name.
- */
-function attributeSource(
+/** Source name and domain per `attributeSource` (system / no-domain sources). */
+function attributeRow(
   r: ApprovedArticleRow,
 ): ApprovedArticleRow & { source_domain: string } {
-  if (r.source_domain === null || isSystemSource(r.source_feed_url)) {
-    const host = documentHost(r.canonical_url);
-    return { ...r, source_domain: host, source_name: host };
-  }
-  return { ...r, source_domain: r.source_domain };
+  const { name, domain } = attributeSource({
+    name: r.source_name,
+    siteDomain: r.source_domain,
+    feedUrl: r.source_feed_url,
+    canonicalUrl: r.canonical_url,
+  });
+  return { ...r, source_name: name, source_domain: domain };
 }
 
 interface ClaimRow {
@@ -228,7 +226,7 @@ export async function generateEventArtifacts(
 
   const articleRows = (
     (articleBatchResult.results as ApprovedArticleRow[] | undefined) ?? []
-  ).map(attributeSource);
+  ).map(attributeRow);
   if (articleRows.length === 0) {
     return { status: "skipped", eventId, reason: "no_approved_articles" };
   }

@@ -1,8 +1,18 @@
 import type { RevisionDiff } from "../../lib/artifacts/types";
+import { readerSourceName } from "../source-attribution";
 
 interface ArticleRow {
   title: string;
   source_name: string;
+  feed_url: string;
+  canonical_url: string;
+}
+
+/** Reader-facing source label; falls back to the title when unnamed. */
+function sourceLabel(a: ArticleRow): string {
+  return (
+    readerSourceName(a.source_name, a.feed_url, a.canonical_url) || a.title
+  );
 }
 
 interface ClaimRow {
@@ -21,7 +31,7 @@ export async function computeRevisionDiff(
   if (revision <= 1) {
     const { results: articles } = await db
       .prepare(
-        `SELECT a.title, s.name AS source_name
+        `SELECT a.title, s.name AS source_name, s.feed_url, a.canonical_url
          FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id
          JOIN sources s ON s.id = a.source_id
@@ -44,11 +54,7 @@ export async function computeRevisionDiff(
       .bind(eventId)
       .all<ClaimRow>();
 
-    const newSources = [
-      ...new Set(
-        articles.map((a) => (a.source_name ? a.source_name : a.title)),
-      ),
-    ];
+    const newSources = [...new Set(articles.map(sourceLabel))];
     const newClaims = [...new Set(claims.map((c) => c.claim_text))];
 
     return {
@@ -66,7 +72,7 @@ export async function computeRevisionDiff(
   // Revision > 1: compare revision vs revision - 1
   const { results: newArticles } = await db
     .prepare(
-      `SELECT a.title, s.name AS source_name
+      `SELECT a.title, s.name AS source_name, s.feed_url, a.canonical_url
        FROM event_articles ea
        JOIN articles a ON a.id = ea.article_id
        JOIN sources s ON s.id = a.source_id
@@ -77,11 +83,7 @@ export async function computeRevisionDiff(
     .bind(eventId, revision)
     .all<ArticleRow>();
 
-  const newSources = [
-    ...new Set(
-      newArticles.map((a) => (a.source_name ? a.source_name : a.title)),
-    ),
-  ];
+  const newSources = [...new Set(newArticles.map(sourceLabel))];
 
   const { results: currentClaims } = await db
     .prepare(

@@ -28,3 +28,22 @@ export function readerSourceName(
 ): string {
   return isSystemSource(feedUrl) ? documentHost(canonicalUrl) : name;
 }
+
+/**
+ * Source name and domain for a pipeline consumer. The domain falls back to
+ * the document host when the source has none or is a system source; the name
+ * changes only for a system source (a real source keeps its own name).
+ */
+export function attributeSource(s: {
+  name: string;
+  siteDomain: string | null;
+  feedUrl: string;
+  canonicalUrl: string;
+}): { name: string; domain: string } {
+  const system = isSystemSource(s.feedUrl);
+  const host = () => documentHost(s.canonicalUrl);
+  return {
+    name: system ? host() : s.name,
+    domain: system || s.siteDomain === null ? host() : s.siteDomain,
+  };
+}
