@@ -318,18 +318,15 @@ export async function generateEventArtifacts(
     industryName: event.industry_name,
   };
 
-  // 3. Fetch body text from R2 (if available) or fallback to summary
+  // 3. Fetch body text from R2, or fall back to the summary when the object
+  // is missing. An R2 read error propagates: no marker, so the cron retries.
   const articleMaterials: ArtifactArticleMaterial[] = await Promise.all(
     articleRows.map(async (r) => {
       let bodyText: string | null = null;
       if (r.body_sha && deps.bodies) {
-        try {
-          const obj = await deps.bodies.get(`bodies/${r.id}/${r.body_sha}.md`);
-          if (obj) {
-            bodyText = await obj.text();
-          }
-        } catch {
-          // fallback to summary
+        const obj = await deps.bodies.get(`bodies/${r.id}/${r.body_sha}.md`);
+        if (obj) {
+          bodyText = await obj.text();
         }
       }
       return {
