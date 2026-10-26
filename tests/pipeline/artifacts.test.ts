@@ -8,6 +8,7 @@ import { enqueueDueArtifacts } from "../../src/pipeline/artifacts/schedule";
 import { handleGenerateBatch } from "../../src/pipeline/generate/consumer";
 import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
 import type { ModelTransport } from "../../src/providers/transport";
+import migration0022 from "../../drizzle/migrations/0022_parched_grim_reaper.sql?raw";
 import {
   BudgetExceededError,
   CallFailedError,
@@ -4041,5 +4042,166 @@ describe("artifact scheduling (#92)", () => {
       .bind(id)
       .first<{ updated_at: number; revision: number }>();
     expect(row).toEqual({ updated_at: 1000, revision: 1 });
+  });
+
+  /** The backfill UPDATE of migration 0022, as written in the file. */
+  function backfillSql(): string {
+    const stmt = migration0022
+      .split("--> statement-breakpoint")
+      .map((part) => part.trim())
+      .find((part) => /^UPDATE\b/.test(part));
+    if (!stmt) throw new Error("migration 0022 has no UPDATE statement");
+    return stmt;
+  }
+
+  async function addArtifact(eventId: number, type: string) {
+    await env.DB.prepare(
+      `INSERT INTO event_artifacts (event_id, type, input_revision, prompt_version, model, content, created_at)
+       VALUES (?1, ?2, 1, 'pv92', 'm92', '{}', 1000)`,
+    )
+      .bind(eventId, type)
+      .run();
+  }
+
+  async function addFiling(articleId: number) {
+    const co = await env.DB.prepare(
+      "INSERT INTO companies (cik, ticker, name, tracked, created_at, updated_at) VALUES (?1, ?1, 'Co92', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(`cik92-${articleId}`)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      `INSERT INTO filings (company_id, accession_number, form, filing_date, sec_url, article_id, created_at)
+       VALUES (?1, ?2, '10-Q', '2026-10-01', 'https://www.sec.gov/f92', ?3, 1000)`,
+    )
+      .bind(co!.id, `acc92-${articleId}`, articleId)
+      .run();
+  }
+
+  it("the 0022 backfill marks a revision only when the old query no longer enqueued it", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection("m1");
+    const seed = async (name: string, score: number) => {
+      const eventId = await seedEvent(s, 1000);
+      const articleId = await seedArticle(
+        s,
+        eventId,
+        `${name}-${eventId}`,
+        score,
+        true,
+      );
+      return { eventId, articleId };
+    };
+
+    // (a) Complete sets.
+    const low = await seed("low", 40);
+    await addArtifact(low.eventId, "story_brief");
+    const deep = await seed("deep", 90);
+    for (const t of ["story_brief", "audience_explain", "learning_material"]) {
+      await addArtifact(deep.eventId, t);
+    }
+    const filed = await seed("filed", 40);
+    await addFiling(filed.articleId);
+    for (const t of ["story_brief", "earnings_decoder"]) {
+      await addArtifact(filed.eventId, t);
+    }
+    // (b) score >= 80 with story_brief only.
+    const deepMissing = await seed("deep-missing", 90);
+    await addArtifact(deepMissing.eventId, "story_brief");
+    // (c) a filing with story_brief only.
+    const filedMissing = await seed("filed-missing", 40);
+    await addFiling(filedMissing.articleId);
+    await addArtifact(filedMissing.eventId, "story_brief");
+    // (d) no story_brief.
+    const noBrief = await seed("no-brief", 40);
+
+    await env.DB.prepare(
+      "UPDATE events SET artifacts_evaluated_revision = 0 WHERE revision > 0",
+    ).run();
+    await env.DB.prepare(backfillSql()).run();
+
+    expect({
+      low: await evaluatedRevision(low.eventId),
+      deep: await evaluatedRevision(deep.eventId),
+      filed: await evaluatedRevision(filed.eventId),
+      deepMissing: await evaluatedRevision(deepMissing.eventId),
+      filedMissing: await evaluatedRevision(filedMissing.eventId),
+      noBrief: await evaluatedRevision(noBrief.eventId),
+    }).toEqual({
+      low: 1,
+      deep: 1,
+      filed: 1,
+      deepMissing: 0,
+      filedMissing: 0,
+      noBrief: 0,
+    });
+  });
+
+  it.each([
+    [
+      "get",
+      {
+        get: async () => {
+          throw new Error("r2 down");
+        },
+      },
+    ],
+    [
+      "text",
+      {
+        get: async () => ({
+          text: async () => {
+            throw new Error("r2 down");
+          },
+        }),
+      },
+    ],
+  ])(
+    "an R2 error in %s() propagates and keeps the revision due",
+    async (name, bodies) => {
+      await env.DB.prepare("UPDATE events SET revision = 0").run();
+      await ensureBudget();
+      const s = await seedSection(`r2-${name}`);
+      const id = await seedDueEvent(s, 1000);
+
+      await expect(
+        generateEventArtifacts(testEnv, id, 1000, {
+          bodies: bodies as unknown as R2Bucket,
+          transport: makeAllValidFakeTransport(),
+        }),
+      ).rejects.toThrow("r2 down");
+
+      expect(await evaluatedRevision(id)).toBe(0);
+      expect(await enqueueDueArtifacts(schedEnv(), 2000)).toContain(id);
+    },
+  );
+
+  it("a missing R2 body falls back to the summary", async () => {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    await ensureBudget();
+    const s = await seedSection("r2-null");
+    const id = await seedDueEvent(s, 1000);
+    await env.DB.prepare(
+      "UPDATE articles SET summary = 'Fallback92 summary text' WHERE id IN (SELECT article_id FROM event_articles WHERE event_id = ?1)",
+    )
+      .bind(id)
+      .run();
+    const inputs: string[] = [];
+    const inner = makeAllValidFakeTransport();
+    const transport: ModelTransport = {
+      run: async (model, input) => {
+        inputs.push(JSON.stringify(input));
+        return inner.run(model, input);
+      },
+    };
+
+    await generateEventArtifacts(testEnv, id, 1000, {
+      bodies: { get: async () => null } as unknown as R2Bucket,
+      transport,
+    });
+
+    expect(inputs.some((i) => i.includes("Fallback92 summary text"))).toBe(
+      true,
+    );
+    expect(await evaluatedRevision(id)).toBe(1);
   });
 });
