@@ -5,7 +5,9 @@ import {
   listSourceCandidates,
   approveCandidate,
   rejectCandidate,
+  deleteSource,
   resumeSource,
+  updateSource,
   triggerDiscovery,
 } from "../../src/server/admin/ops";
 import { adminOr403 } from "../../src/server/admin/access";
@@ -215,6 +217,120 @@ describe("Admin Discover & Source Operations", () => {
 
     await resumeSource(env.DB, normal!.id);
     expect(await statusOf(normal!.id)).toBe("active");
+  });
+
+  it("a system placeholder cannot be edited, deleted, or resumed through an edit", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('guard-ind', 'Guard Industry', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const placeholder = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+       VALUES (?1, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const is400 = (err: unknown) =>
+      err instanceof Response && err.status === 400;
+
+    // The bypass: edit to an https feed, resume, edit back.
+    await expect(
+      updateSource(env.DB, {
+        id: placeholder!.id,
+        name: "Disguised",
+        feedUrl: "https://disguised.example/feed",
+      }),
+    ).rejects.toSatisfy(is400);
+    await expect(resumeSource(env.DB, placeholder!.id)).rejects.toSatisfy(
+      is400,
+    );
+    await expect(deleteSource(env.DB, placeholder!.id)).rejects.toSatisfy(
+      is400,
+    );
+
+    const row = await env.DB.prepare(
+      "SELECT name, feed_url, status FROM sources WHERE id = ?1",
+    )
+      .bind(placeholder!.id)
+      .first();
+    expect(row).toEqual({
+      name: "Primary documents (system)",
+      feed_url: "system:primary-documents",
+      status: "paused",
+    });
+  });
+
+  it("no edit can turn a real source into a system source", async () => {
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('guard-ind-2', 'Guard Industry 2', 'review', 1000) RETURNING id",
+    ).first<{ id: number }>();
+    const normal = await env.DB.prepare(
+      `INSERT INTO sources (industry_id, name, feed_url, site_domain, kind, status, created_at)
+       VALUES (?1, 'Normal', 'https://normal2.example/feed', 'normal2.example', 'rss', 'active', 1000)
+       RETURNING id`,
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const is400 = (err: unknown) =>
+      err instanceof Response && err.status === 400;
+
+    for (const feedUrl of ["system:primary-documents", "SYSTEM:other"]) {
+      await expect(
+        updateSource(env.DB, { id: normal!.id, name: "Normal", feedUrl }),
+      ).rejects.toSatisfy(is400);
+    }
+    const row = await env.DB.prepare(
+      "SELECT feed_url FROM sources WHERE id = ?1",
+    )
+      .bind(normal!.id)
+      .first<{ feed_url: string }>();
+    expect(row!.feed_url).toBe("https://normal2.example/feed");
+
+    // A real edit and a real delete still work.
+    await updateSource(env.DB, {
+      id: normal!.id,
+      name: "Renamed",
+      feedUrl: "https://normal2.example/rss",
+    });
+    const edited = await env.DB.prepare(
+      "SELECT name, feed_url FROM sources WHERE id = ?1",
+    )
+      .bind(normal!.id)
+      .first();
+    expect(edited).toEqual({
+      name: "Renamed",
+      feed_url: "https://normal2.example/rss",
+    });
+    await deleteSource(env.DB, normal!.id);
+    expect(
+      await env.DB.prepare("SELECT 1 FROM sources WHERE id = ?1")
+        .bind(normal!.id)
+        .first(),
+    ).toBeNull();
+  });
+
+  it("an unknown source id is refused by update, delete, and resume", async () => {
+    const missing = 987654;
+    const refused = async (p: Promise<unknown>) => {
+      const err = await p.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Response);
+      expect((err as Response).status).toBe(400);
+      return (err as Response).text();
+    };
+    await refused(
+      updateSource(env.DB, {
+        id: missing,
+        name: "x",
+        feedUrl: "https://x.example/feed",
+      }),
+    );
+    await refused(deleteSource(env.DB, missing));
+    expect(await refused(resumeSource(env.DB, missing))).toBe(
+      "Source not found or not resumable",
+    );
   });
 
   it("triggerDiscovery enqueues message, and fails when DISCOVERY_ENABLED is false", async () => {

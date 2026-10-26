@@ -1029,4 +1029,79 @@ describe("Ask Newsren Pipeline", () => {
     expect(row?.status).toBe("failed");
     expect(row?.error_message).toBe("Question budget exceeded");
   });
+
+  it("cites a primary document on the placeholder source as a primary source", async () => {
+    await ensureBudget();
+    await env.DB.prepare(
+      `INSERT INTO industries (id, slug, name, publish_mode, primary_domains, config, config_version, created_at)
+       VALUES (102, 'space', 'Space', 'review', '["nasa.gov"]', '{}', 1, 1000)`,
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO sources (id, industry_id, name, feed_url, kind, status, created_at)
+       VALUES (212, 102, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 1000)`,
+    ).run();
+    const bodyText =
+      "Mission update.\n\nThe probe entered a stable lunar orbit at an altitude of 100 kilometres on Tuesday.\n\nMore data follows.";
+    const bodySha = "sha_nasa_orbit";
+    const artId = 412;
+    await env.DB.prepare(
+      `INSERT INTO articles (id, industry_id, source_id, title, url, canonical_url, body_sha, body_kind, stage, stage_updated_at, published_at, fetched_at)
+       VALUES (?1, 102, 212, 'Probe Orbit', 'https://www.nasa.gov/probe-orbit', 'https://www.nasa.gov/probe-orbit', ?2, 'full', 'analyzed', 1000, 1000, 1000)`,
+    )
+      .bind(artId, bodySha)
+      .run();
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO reviews (article_id, body_sha, decision, reviewer, created_at)
+       VALUES (?1, ?2, 'approved', 'admin@example.com', 1000)`,
+    )
+      .bind(artId, bodySha)
+      .run();
+    const r2 = new FakeR2();
+    r2.put(`bodies/${artId}/${bodySha}.md`, bodyText);
+    const vectors = new FakeVectors();
+    vectors.records.push({
+      id: `c_${artId}_0`,
+      values: [0.1, 0.2, 0.3],
+      metadata: { article_id: artId, body_sha: bodySha },
+    });
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at)
+       VALUES ('At what altitude did the probe enter lunar orbit?', 'global', NULL, 'pending', 'ask:v1', 'default', 1000)`,
+    ).run();
+    const questionId = Number(qRes.meta.last_row_id);
+    const transport = makeFakeTransport(() => ({
+      sufficient: true,
+      neededUrls: [],
+      answer: "The probe entered lunar orbit at 100 kilometres.",
+      unverified: [],
+      citations: [
+        {
+          articleId: artId,
+          quote:
+            "The probe entered a stable lunar orbit at an altitude of 100 kilometres on Tuesday.",
+          claim: "Orbit altitude is 100 km",
+        },
+      ],
+    }));
+
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      {
+        bodies: r2 as unknown as R2Bucket,
+        vectors: vectors as unknown as Pick<VectorizeIndex, "query">,
+        transport,
+      },
+    );
+    expect(result.status).toBe("completed");
+    const row = await env.DB.prepare(
+      `SELECT citations FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ citations: string }>();
+    const citations = JSON.parse(row?.citations ?? "[]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].isPrimarySource).toBe(true);
+  });
 });

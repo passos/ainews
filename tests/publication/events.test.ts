@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getHome, getSection } from "../../src/server/publication/articles";
 import { getEvent, getEventSources } from "../../src/server/publication/events";
+import { computeRevisionDiff } from "../../src/pipeline/evidence/diff";
+import { attributeSource } from "../../src/lib/source-attribution";
 import {
   db,
   resetPublication,
@@ -171,5 +173,57 @@ describe("getEvent and getEventSources", () => {
       ?.articles.find((a) => a.id === art1);
     expect(homeA1?.eventId).toBe(eventId);
     expect(homeA1?.eventReportCount).toBe(2);
+  });
+
+  it("pipeline and publication name a placeholder-source document identically", async () => {
+    const placeholder = await db().get<{ id: number }>(
+      sql`INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at)
+          VALUES (${tech.industryId}, 'Primary documents (system)', 'system:primary-documents', 'html', 'paused', 0)
+          RETURNING id`,
+    );
+    const urls = [
+      "https://user:pw@WWW.NASA.gov:8443/a",
+      "https://data.sec.gov:443/b",
+      "ftp://ftp.example.org/c",
+    ];
+    const eventId = await seedEvent(tech.industryId, "Consistency Event", 1);
+    const ids: number[] = [];
+    for (const url of urls) {
+      const id = await seedArticle({
+        industryId: tech.industryId,
+        sourceId: placeholder.id,
+        title: `Doc ${url}`,
+        url,
+      });
+      await seedEventArticle(eventId, id, 1000, 1);
+      await seedReview(id, "approved");
+      ids.push(id);
+    }
+    const expected = urls.map(
+      (canonicalUrl) =>
+        attributeSource({
+          name: "Primary documents (system)",
+          siteDomain: null,
+          feedUrl: "system:primary-documents",
+          canonicalUrl,
+        }).name,
+    );
+
+    const pipeline = (await computeRevisionDiff(
+      (await import("cloudflare:workers")).env.DB,
+      eventId,
+      1,
+    ))!.newSources;
+    const publicNames = (await getEventSources(db(), eventId))
+      .map((s) => s.name)
+      .sort();
+    const page = await getSection(db(), { slug: "technology", page: 1 });
+    const cards = ids.map(
+      (id) => page!.articles.find((a) => a.id === id)!.sourceName,
+    );
+
+    expect(pipeline).toEqual(expected);
+    expect(cards).toEqual(expected);
+    expect(publicNames).toEqual([...expected].sort());
   });
 });
