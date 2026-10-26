@@ -148,6 +148,34 @@ async function seedTwoAmendments(ctx: Ctx) {
   };
 }
 
+/** Original O1, then amendments A, B, C (ids ascending: A1 < B1 < C1). */
+async function seedThreeAmendments(ctx: Ctx) {
+  const original = await seedFiling(ctx, "0000320193-24-000001", "10-Q", [
+    revenueUsd,
+  ]);
+  const a = await seedFiling(ctx, "0000320193-24-000002", "10-Q/A", [
+    revenueUsd,
+  ]);
+  const b = await seedFiling(ctx, "0000320193-24-000003", "10-Q/A", [
+    revenueUsd,
+  ]);
+  const c = await seedFiling(ctx, "0000320193-24-000004", "10-Q/A", [
+    revenueUsd,
+  ]);
+  expect(b.factIds[0]).toBeGreaterThan(a.factIds[0]);
+  expect(c.factIds[0]).toBeGreaterThan(b.factIds[0]);
+  return {
+    o1: original.factIds[0],
+    a1: a.factIds[0],
+    b1: b.factIds[0],
+    c1: c.factIds[0],
+    oArticleId: original.articleId,
+    aArticleId: a.articleId,
+    bArticleId: b.articleId,
+    cArticleId: c.articleId,
+  };
+}
+
 describe("financial_facts.superseded_by follows amendment review (Issue #83)", () => {
   it("approving a 10-Q/A supersedes earlier facts with the same concept, unit and period", async () => {
     await resetPipeline();
@@ -259,7 +287,8 @@ describe("financial_facts.superseded_by follows amendment review (Issue #83)", (
 
     await decide(aArticleId, "approved");
     await decide(bArticleId, "approved");
-    expect(await supersededBy(o1)).toBe(a1);
+    // Both approved: every earlier fact points at the newest approved one.
+    expect(await supersededBy(o1)).toBe(b1);
     expect(await supersededBy(a1)).toBe(b1);
 
     await decide(bArticleId, "rejected");
@@ -275,12 +304,110 @@ describe("financial_facts.superseded_by follows amendment review (Issue #83)", (
     await decide(aArticleId, "approved");
     await decide(bArticleId, "approved");
     await decide(aArticleId, "approved");
-    expect(await supersededBy(o1)).toBe(a1);
+    // Both approved: every earlier fact points at the newest approved one.
+    expect(await supersededBy(o1)).toBe(b1);
     expect(await supersededBy(a1)).toBe(b1);
 
     await decide(bArticleId, "rejected");
     expect(await supersededBy(a1)).toBeNull();
     expect(await supersededBy(o1)).toBe(a1);
+  });
+
+  it("approve B, approve A, reject B points O1 at A1", async () => {
+    await resetPipeline();
+    const ctx = await seedBase();
+    const { o1, a1, aArticleId, bArticleId } = await seedTwoAmendments(ctx);
+
+    await decide(bArticleId, "approved");
+    await decide(aArticleId, "approved");
+    await decide(bArticleId, "rejected");
+
+    expect(await supersededBy(o1)).toBe(a1);
+    expect(await supersededBy(a1)).toBeNull();
+  });
+
+  it("approve O, B, A then reject B keeps O1 on A1 (codex sequence)", async () => {
+    await resetPipeline();
+    const ctx = await seedBase();
+    const original = await seedFiling(ctx, "0000320193-24-000001", "10-Q", [
+      revenueUsd,
+    ]);
+    const a = await seedFiling(ctx, "0000320193-24-000002", "10-Q/A", [
+      revenueUsd,
+    ]);
+    const b = await seedFiling(ctx, "0000320193-24-000003", "10-Q/A", [
+      revenueUsd,
+    ]);
+    const o1 = original.factIds[0];
+    const a1 = a.factIds[0];
+
+    await decide(original.articleId, "approved");
+    await decide(b.articleId, "approved");
+    await decide(a.articleId, "approved");
+    await decide(b.articleId, "rejected");
+
+    expect(await supersededBy(o1)).toBe(a1);
+    expect(await supersededBy(a1)).toBeNull();
+  });
+
+  it("approve C, A, B then reject C points earlier facts at B1", async () => {
+    await resetPipeline();
+    const ctx = await seedBase();
+    const { o1, a1, b1, c1, aArticleId, bArticleId, cArticleId } =
+      await seedThreeAmendments(ctx);
+
+    await decide(cArticleId, "approved");
+    await decide(aArticleId, "approved");
+    await decide(bArticleId, "approved");
+    await decide(cArticleId, "rejected");
+
+    expect(await supersededBy(o1)).toBe(b1);
+    expect(await supersededBy(a1)).toBe(b1);
+    expect(await supersededBy(b1)).toBeNull();
+    expect(await supersededBy(c1)).toBeNull();
+  });
+
+  it("the same final review state gives the same superseded_by in any decision order", async () => {
+    const run = async (
+      order: (ids: {
+        aArticleId: number;
+        bArticleId: number;
+        cArticleId: number;
+      }) => Promise<void>,
+    ) => {
+      await resetPipeline();
+      const ctx = await seedBase();
+      const seeded = await seedThreeAmendments(ctx);
+      await order(seeded);
+      // Ids differ between runs, so compare pointers by role.
+      const role = new Map<number, string>([
+        [seeded.o1, "O1"],
+        [seeded.a1, "A1"],
+        [seeded.b1, "B1"],
+        [seeded.c1, "C1"],
+      ]);
+      const out: Record<string, string | null> = {};
+      for (const [id, name] of role) {
+        const target = await supersededBy(id);
+        out[name] = target === null ? null : (role.get(target) ?? `?${target}`);
+      }
+      return out;
+    };
+
+    // Final state in both runs: A approved, B approved, C rejected.
+    const first = await run(async ({ aArticleId, bArticleId, cArticleId }) => {
+      await decide(cArticleId, "approved");
+      await decide(aArticleId, "approved");
+      await decide(bArticleId, "approved");
+      await decide(cArticleId, "rejected");
+    });
+    const second = await run(async ({ aArticleId, bArticleId, cArticleId }) => {
+      await decide(cArticleId, "rejected");
+      await decide(bArticleId, "approved");
+      await decide(aArticleId, "approved");
+    });
+
+    expect(first).toEqual(second);
   });
 
   it("re-ingest of an approved amendment with a changed body keeps the original hidden and the amendment non-public until re-approved", async () => {
