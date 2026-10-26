@@ -436,6 +436,7 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
     slug: string,
     searchUrls: string[],
     fetchFn: typeof fetch,
+    rawItems?: unknown[],
   ) {
     const db = drizzle(env.DB);
     const ind = await db
@@ -459,7 +460,8 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
       .returning({ id: discoveryRuns.id });
     const fakeWebSearch: WebSearch = {
       search: async () => ({
-        items: searchUrls.map((url) => ({ url, title: "Result" })),
+        items: (rawItems ??
+          searchUrls.map((url) => ({ url, title: "Result" }))) as never,
         metadata: { query: "tech feed", requestId: "req-1", latencyMs: 10 },
       }),
     };
@@ -496,6 +498,44 @@ describe("Pipeline: Source Discovery & Auto-Enable", () => {
 
     expect(fetchCalls).toBe(0);
     expect(await hosts()).toBe(before);
+  });
+
+  it("a search result without a string url does not lose the other results", async () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+      <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+        <channel>
+          <title>Bad Item Feed</title>
+          <link>https://baditem.example</link>
+          <item>
+            <title>Revolutionary Breakthrough in AI</title>
+            <link>https://baditem.example/post-1</link>
+            <content:encoded><![CDATA[Detailed scientific analysis of the breakthrough with extensive data and evaluation results demonstrating clear superiority across all benchmark tests. It contains enough characters to satisfy the minimum length requirement easily.]]></content:encoded>
+          </item>
+        </channel>
+      </rss>`;
+    const fakeFetch: typeof fetch = async (url) =>
+      String(url).endsWith("/robots.txt")
+        ? new Response("User-agent: *\nAllow: /", { status: 200 })
+        : new Response(rss, {
+            status: 200,
+            headers: { "Content-Type": "application/rss+xml" },
+          });
+
+    const industryId = await discoverWith("bad-item", [], fakeFetch, [
+      { title: "no url" },
+      { url: 42, title: "number url" },
+      { url: null, title: "null url" },
+      { url: "https://baditem.example/feed.xml", title: "good" },
+    ]);
+
+    const db = drizzle(env.DB);
+    const written = await db
+      .select({ feedUrl: sources.feedUrl, status: sources.status })
+      .from(sources)
+      .where(eq(sources.industryId, industryId));
+    expect(written).toEqual([
+      { feedUrl: "https://baditem.example/feed.xml", status: "active" },
+    ]);
   });
 
   it("stores a trimmed feed_url for a padded search result", async () => {
