@@ -3,10 +3,11 @@
 //
 //   MODEL_CALLS_ENABLED -> stage = body_ready -> industry analysis config
 //     -> R2 bodies/{id}/{body_sha}.md -> judge (ledger key
-//        analyze:{id}:{sha16}:{v}) -> scoreAnalysis
-//     -> selected: write (ledger key write:{id}:{sha16}:{v})
+//        analyze:{id}:{sha16}:{v}[:r{gen}]) -> scoreAnalysis
+//     -> selected: write (ledger key write:{id}:{sha16}:{v}[:r{gen}])
 //     -> one batch(), each statement gated on the one before (changes()):
-//        articles stage (stage and body_sha conditions) -> analyses
+//        articles stage (stage, body_sha and analysis_generation
+//        conditions) -> analyses
 //        -> auto-approved reviews row (auto industries, valid write only)
 //
 // A repeated delivery stops at the stage check, or gets both model results
@@ -61,6 +62,7 @@ interface Row {
   published_at: number | null;
   stage: string;
   body_sha: string | null;
+  analysis_generation: number;
   source_name: string;
   slug: string;
   industry_name: string;
@@ -84,6 +86,15 @@ export function effectivePublishMode(industry: {
     : industry.publish_mode;
 }
 
+/**
+ * prompt_version of the analyses row and the version part of the ledger
+ * keys. Generation 0 keeps the format from before #81, so articles that
+ * were never reanalysed keep their ledger rows.
+ */
+export function analysisVersion(version: string, generation: number): string {
+  return generation === 0 ? version : `${version}:r${generation}`;
+}
+
 export async function analyzeArticle(
   env: PipelineEnv,
   articleId: number,
@@ -94,6 +105,7 @@ export async function analyzeArticle(
   if (!isEnabled(env, "MODEL_CALLS_ENABLED")) return { status: "disabled" };
   const row = await env.DB.prepare(
     `SELECT a.id, a.title, a.summary, a.published_at, a.stage, a.body_sha,
+       a.analysis_generation,
        COALESCE(NULLIF(s.name, ''), s.site_domain, '') AS source_name,
        i.slug, i.name AS industry_name, i.publish_mode, i.config
      FROM articles AS a
@@ -118,8 +130,9 @@ export async function analyzeArticle(
   const bodyMd = await object.text();
 
   const version = await promptVersion(config);
+  const analysed = analysisVersion(version, row.analysis_generation);
   // The body version is part of the keys: a new body is judged again.
-  const keyPart = `${articleId}:${sha.slice(0, 16)}:${version}`;
+  const keyPart = `${articleId}:${sha.slice(0, 16)}:${analysed}`;
   const models = createModelClient({
     db: env.DB,
     transport: deps.transport,
@@ -179,8 +192,9 @@ export async function analyzeArticle(
     // requeue_count.
     env.DB.prepare(
       `UPDATE articles SET stage = ?2, stage_updated_at = ?3, requeue_count = 0
-       WHERE id = ?1 AND stage = 'body_ready' AND body_sha = ?4`,
-    ).bind(articleId, stage, now, sha),
+       WHERE id = ?1 AND stage = 'body_ready' AND body_sha = ?4
+         AND analysis_generation = ?5`,
+    ).bind(articleId, stage, now, sha, row.analysis_generation),
     env.DB.prepare(
       `INSERT INTO analyses (article_id, prompt_version, scores, content_type,
          evidence_tags, total_score, created_at, prefilter_relevant,
@@ -191,7 +205,7 @@ export async function analyzeArticle(
        ON CONFLICT (article_id, prompt_version) DO NOTHING`,
     ).bind(
       articleId,
-      version,
+      analysed,
       JSON.stringify(scored.dims),
       scored.contentType,
       JSON.stringify(labels),

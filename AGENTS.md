@@ -231,16 +231,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://news.ioenv.com/
 
 ## 8. 已知缺口（已记录，未处理）
 
-| 缺口                                                                                                                                                  | 记录在      |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| 同一 `prompt_version` 下重新分析时，`analyses (article_id, prompt_version)` 唯一键挡住新结果                                                          | #9 评论     |
-| `corrections` 缺 `(target_type, target_id, created_at DESC, id DESC)` 索引；#9 开始写更正时加                                                         | #9 评论     |
-| 清除人工覆盖要写 NULL，不写空字符串                                                                                                                   | #9 评论     |
-| embed 的计费渠道未确认                                                                                                                                | #9 评论     |
-| `canonical_url` 全局唯一：一篇文章只属于最先采到它的板块                                                                                              | 契约第 9 节 |
-| 架构测试：R1 的起点不含 `src/components/**`、禁止集不含 `server/db`；R2 只查路由的直接导入                                                            | #34         |
-| Jina（第 3 档）要同时满足：`THIRD_PARTY_READER_ENABLED`、信源 `jina_enabled=1`、`MODEL_CALLS_ENABLED`、`JINA_API_KEY`、`jina` 预算大于 0（现在是 $0） | 契约第 8 节 |
-| `restTransport` 对 gateway 模型返回 No route；生产只用 binding                                                                                        | #39         |
+| 缺口                                                                                                                                                                                 | 记录在      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| 手工 SQL 把已分析的文章重置回 `body_ready` 时，同一条 UPDATE 里要写 `analysis_generation = analysis_generation + 1`，否则新结果被 `analyses (article_id, prompt_version)` 唯一键挡住 | #81         |
+| `corrections` 缺 `(target_type, target_id, created_at DESC, id DESC)` 索引；#9 开始写更正时加                                                                                        | #9 评论     |
+| 清除人工覆盖要写 NULL，不写空字符串                                                                                                                                                  | #9 评论     |
+| embed 的计费渠道未确认                                                                                                                                                               | #9 评论     |
+| `canonical_url` 全局唯一：一篇文章只属于最先采到它的板块                                                                                                                             | 契约第 9 节 |
+| 架构测试：R1 的起点不含 `src/components/**`、禁止集不含 `server/db`；R2 只查路由的直接导入                                                                                           | #34         |
+| Jina（第 3 档）要同时满足：`THIRD_PARTY_READER_ENABLED`、信源 `jina_enabled=1`、`MODEL_CALLS_ENABLED`、`JINA_API_KEY`、`jina` 预算大于 0（现在是 $0）                                | 契约第 8 节 |
+| `restTransport` 对 gateway 模型返回 No route；生产只用 binding                                                                                                                       | #39         |
 
 ---
 

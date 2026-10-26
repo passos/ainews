@@ -4,6 +4,7 @@ import { Validator } from "@cfworker/json-schema";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  analysisVersion,
   analyzeArticle,
   effectivePublishMode,
 } from "../../src/pipeline/analyze/analyze";
@@ -25,6 +26,7 @@ import { runQueue } from "../../src/pipeline/queue";
 import { buildJevInput } from "../../src/providers/jev";
 import type { JevQuestion } from "../../src/providers/jev";
 import { acquire } from "../../src/providers/ledger";
+import { reanalyzeArticle } from "../../src/server/admin/ops";
 import {
   choice,
   fakeAnalysisConfig,
@@ -179,9 +181,17 @@ const reviewRows = (id: number) =>
     .all<{ body_sha: string; decision: string; reviewer: string }>()
     .then((r) => r.results);
 
-/** Ledger key of one model call for the article's body version `sha`. */
-async function keyOf(slot: "analyze" | "write", id: number, sha = SHA) {
-  return `${slot}:${id}:${sha.slice(0, 16)}:${await promptVersion(config)}`;
+/**
+ * Ledger key of one model call for the article's body version `sha` and
+ * reanalysis generation `generation` (#81).
+ */
+async function keyOf(
+  slot: "analyze" | "write",
+  id: number,
+  sha = SHA,
+  generation = 0,
+) {
+  return `${slot}:${id}:${sha.slice(0, 16)}:${analysisVersion(await promptVersion(config), generation)}`;
 }
 
 /** A write ledger row in a state `acquire` does not hand out again. */
@@ -820,6 +830,82 @@ describe("races, body versions and retries", () => {
       expect((await budgetRow("gateway"))?.reserved_micros).toBe(0);
     },
   );
+});
+
+describe("reanalysis generation (#81)", () => {
+  it("analysisVersion: generation 0 is the version itself, later generations append :r{n}", () => {
+    expect(analysisVersion("abc", 0)).toBe("abc");
+    expect(analysisVersion("abc", 2)).toBe("abc:r2");
+  });
+
+  it("after reanalysis the next run uses new ledger keys; the old rows stay completed; a second analyses row", async () => {
+    const id = await seedReady(await seedIndustryRow("alpha", "review"));
+    const t = models(fakeAnswers(config));
+    await run(id, t);
+    await reanalyzeArticle(
+      env.DB,
+      { send: async () => {} },
+      { articleId: id, expectedStage: "analyzed" },
+    );
+    await run(id, t);
+
+    expect(jevCalls(t)).toBe(2);
+    expect(writeCalls(t)).toBe(2);
+    expect((await ledgerRow(await keyOf("analyze", id)))?.status).toBe(
+      "completed",
+    );
+    expect((await ledgerRow(await keyOf("write", id)))?.status).toBe(
+      "completed",
+    );
+    expect((await ledgerRow(await keyOf("analyze", id, SHA, 1)))?.status).toBe(
+      "completed",
+    );
+    expect((await ledgerRow(await keyOf("write", id, SHA, 1)))?.status).toBe(
+      "completed",
+    );
+    expect(
+      await count(
+        "SELECT count(*) AS n FROM analyses WHERE article_id = ?1",
+        id,
+      ),
+    ).toBe(2);
+    const latest = await env.DB.prepare(
+      `SELECT prompt_version FROM analyses WHERE article_id = ?1
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    )
+      .bind(id)
+      .first<{ prompt_version: string }>();
+    expect(latest?.prompt_version).toBe(`${await promptVersion(config)}:r1`);
+    expect((await articleRow(id))?.stage).toBe("analyzed");
+  });
+
+  it("the generation changed during the call: nothing is committed; the old call still settles", async () => {
+    const id = await seedReady(await seedIndustryRow("alpha", "auto"));
+    const t = models(fakeAnswers(config), GOOD_WRITE, async () => {
+      await env.DB.prepare(
+        "UPDATE articles SET analysis_generation = 1 WHERE id = ?1",
+      )
+        .bind(id)
+        .run();
+    });
+    expect(await run(id, t)).toMatchObject({
+      status: "ok",
+      advanced: false,
+      approved: false,
+    });
+    expect(await articleRow(id)).toMatchObject({
+      stage: "body_ready",
+      stage_updated_at: NOW - 31 * MIN,
+    });
+    expect(await count("SELECT count(*) AS n FROM analyses")).toBe(0);
+    expect(await reviewRows(id)).toEqual([]);
+    expect((await ledgerRow(await keyOf("analyze", id)))?.status).toBe(
+      "completed",
+    );
+    expect(
+      await count("SELECT coalesce(sum(reserved_micros), 0) AS n FROM budgets"),
+    ).toBe(0);
+  });
 });
 
 describe("Jev input", () => {

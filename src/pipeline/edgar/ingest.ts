@@ -262,7 +262,8 @@ export async function ingestCompanyFilings(
         body_fetched_at = CASE WHEN excluded.body_sha != articles.body_sha THEN excluded.body_fetched_at ELSE articles.body_fetched_at END,
         stage = CASE WHEN excluded.body_sha != articles.body_sha THEN 'body_ready' ELSE articles.stage END,
         stage_updated_at = CASE WHEN excluded.body_sha != articles.body_sha THEN excluded.stage_updated_at ELSE articles.stage_updated_at END,
-        requeue_count = CASE WHEN excluded.body_sha != articles.body_sha THEN 0 ELSE articles.requeue_count END
+        requeue_count = CASE WHEN excluded.body_sha != articles.body_sha THEN 0 ELSE articles.requeue_count END,
+        analysis_generation = CASE WHEN excluded.body_sha != articles.body_sha THEN articles.analysis_generation + 1 ELSE articles.analysis_generation END
       RETURNING id`,
     )
       .bind(

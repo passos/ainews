@@ -128,9 +128,11 @@ function AdminArticleDetailPage() {
     setStatusMessage(null);
     setErrorMessage(null);
     try {
-      await reanalyzeArticle({ data: { articleId: article.id } });
+      await reanalyzeArticle({
+        data: { articleId: article.id, expectedStage: article.stage },
+      });
       setStatusMessage(
-        "Analyses cleared and article reset to body_ready for reanalysis.",
+        "Article reset to body_ready for reanalysis. Earlier analyses and ledger rows are kept.",
       );
       await router.invalidate();
     } catch (err) {

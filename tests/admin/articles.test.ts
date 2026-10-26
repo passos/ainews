@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   changeArticleIndustry,
   createCorrection,
+  getArticle,
+  parseReanalyzeInput,
   reanalyzeArticle,
   updateArticleOverride,
 } from "../../src/server/admin/ops";
+import { hookBatch } from "../providers/fakes";
 
 describe("article admin operations", () => {
   it("clears overrides as NULL when empty or whitespace", async () => {
@@ -102,63 +105,6 @@ describe("article admin operations", () => {
     expect(artRow!.industry_id).toBe(ind1!.id);
   });
 
-  it("reanalyzing an article clears old analyses and resets stage to body_ready", async () => {
-    const ind = await env.DB.prepare(
-      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('ind-re-1', 'Ind Re', 'review', 0) RETURNING id",
-    ).first<{ id: number }>();
-    const src = await env.DB.prepare(
-      "INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at) VALUES (?1, 'S3', 'https://s3.example/feed', 'rss', 'active', 0) RETURNING id",
-    )
-      .bind(ind!.id)
-      .first<{ id: number }>();
-    const art = await env.DB.prepare(
-      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, requeue_count, fetched_at)
-       VALUES (?1, ?2, 'https://s3.example/art-3', 'https://s3.example/art-3', 'Original Title', 'analyzed', 0, 3, 0)
-       RETURNING id`,
-    )
-      .bind(src!.id, ind!.id)
-      .first<{ id: number }>();
-    const artId = art!.id;
-
-    await env.DB.prepare(
-      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
-       VALUES (?1, 'v1', '{}', 'news', '{}', 80, 1, 0)`,
-    )
-      .bind(artId)
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, failures, created_at, updated_at)
-       VALUES ('write:' || ?1 || ':abc:v1', 'write', 'm', 'gateway', 'failed', 3, 0, 0)`,
-    )
-      .bind(artId)
-      .run();
-
-    await reanalyzeArticle(env.DB, env.Q_INGEST, artId);
-
-    const artRow = await env.DB.prepare(
-      "SELECT stage, requeue_count FROM articles WHERE id = ?1",
-    )
-      .bind(artId)
-      .first<{ stage: string; requeue_count: number }>();
-    expect(artRow!.stage).toBe("body_ready");
-    expect(artRow!.requeue_count).toBe(0);
-
-    const analysesCount = await env.DB.prepare(
-      "SELECT count(*) as count FROM analyses WHERE article_id = ?1",
-    )
-      .bind(artId)
-      .first<{ count: number }>();
-    expect(analysesCount!.count).toBe(0);
-
-    const callsCount = await env.DB.prepare(
-      "SELECT count(*) as count FROM llm_calls WHERE logical_key LIKE 'write:' || ?1 || ':%'",
-    )
-      .bind(artId)
-      .first<{ count: number }>();
-    expect(callsCount!.count).toBe(0);
-  });
-
   it("moving an auto-approved article to Finance revokes the auto approval", async () => {
     const techInd = await env.DB.prepare(
       "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES ('tech-rev', 'Tech', 'auto', 0) RETURNING id",
@@ -218,6 +164,405 @@ describe("article admin operations", () => {
       target_type: "article",
       target_id: 999,
       body: "Correction text",
+    });
+  });
+});
+
+describe("reanalyzeArticle (#81)", () => {
+  let seq = 0;
+
+  /** One article in its own industry; optionally in a revision=1 event. */
+  async function seed81(opts: {
+    stage: string;
+    bodySha: string | null;
+    inEvent?: boolean;
+  }): Promise<{ id: number; eventId: number | null }> {
+    seq += 1;
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES (?1, ?1, 'review', 0) RETURNING id",
+    )
+      .bind(`ind-81-${seq}`)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, name, feed_url, kind, status, created_at) VALUES (?1, 'S81', ?2, 'rss', 'active', 0) RETURNING id",
+    )
+      .bind(ind!.id, `https://s81.example/${seq}/feed`)
+      .first<{ id: number }>();
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, stage, stage_updated_at, requeue_count, body_sha, fetched_at)
+       VALUES (?1, ?2, ?3, ?3, 'Original Title', ?4, 0, 3, ?5, 0)
+       RETURNING id`,
+    )
+      .bind(
+        src!.id,
+        ind!.id,
+        `https://s81.example/${seq}/art`,
+        opts.stage,
+        opts.bodySha,
+      )
+      .first<{ id: number }>();
+    if (!opts.inEvent) return { id: art!.id, eventId: null };
+    const ev = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'E81', 1, 0, 0) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 0)",
+    )
+      .bind(ev!.id, art!.id)
+      .run();
+    return { id: art!.id, eventId: ev!.id };
+  }
+
+  function queue() {
+    const sent: unknown[] = [];
+    const q = {
+      send: async (m: unknown) => {
+        sent.push(m);
+      },
+    };
+    return { sent, q };
+  }
+
+  const articleState = (id: number) =>
+    env.DB.prepare(
+      "SELECT stage, stage_updated_at, requeue_count, analysis_generation FROM articles WHERE id = ?1",
+    )
+      .bind(id)
+      .first<{
+        stage: string;
+        stage_updated_at: number;
+        requeue_count: number;
+        analysis_generation: number;
+      }>();
+
+  const revisionOf = async (eventId: number) =>
+    (await env.DB.prepare("SELECT revision FROM events WHERE id = ?1")
+      .bind(eventId)
+      .first<{ revision: number }>())!.revision;
+
+  /** The HTTP status of what `p` throws; null if it resolves. */
+  async function statusOf(p: Promise<unknown>): Promise<number | null> {
+    try {
+      await p;
+      return null;
+    } catch (e) {
+      return e instanceof Response
+        ? e.status
+        : ((e as { status?: number })?.status ?? -1);
+    }
+  }
+
+  it("keeps every llm_calls and analyses row, bumps the generation and the event revision once", async () => {
+    const { id, eventId } = await seed81({
+      stage: "analyzed",
+      bodySha: "sha-a",
+      inEvent: true,
+    });
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+       VALUES (?1, 'v1', '{}', 'news', '{}', 80, 1, 0),
+              (?1, 'primary_tracker', '{}', 'news', '{}', 0, 0, 0)`,
+    )
+      .bind(id)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, estimated_micros, budget_day, created_at, updated_at)
+       VALUES (?1, 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, NULL, NULL, 0, 0),
+              (?2, 'write', 'm', 'gateway', 'failed', 3, 3, NULL, NULL, NULL, 0, 0),
+              (?3, 'write', 'm', 'gateway', 'in_flight', 1, 0, 1, 500, '2026-10-26', 0, 0)`,
+    )
+      // Template literals, not SQL `||`: D1 binds a JS number as a real, so
+      // `'a:' || ?1` would yield "a:1.0" and never match a production key.
+      .bind(`analyze:${id}:abc:v1`, `write:${id}:abc:v1`, `write:${id}:old:v1`)
+      .run();
+    // The other bind form: SQL concatenation of a number-bound id (what the
+    // old DELETE matched). Local D1 renders it as "analyze:1.0:x".
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES ('analyze:' || ?1 || ':x', 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              ('write:' || ?1 || ':x', 'write', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0)`,
+    )
+      .bind(id)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO budgets (day, channel, cap_micros, reserved_micros) VALUES ('2026-10-26', 'gateway', 1900000, 500)",
+    ).run();
+    const ledger = () =>
+      env.DB.prepare(
+        `SELECT logical_key, status, attempt, failures FROM llm_calls
+         WHERE logical_key LIKE ?1 OR logical_key LIKE ?2 ORDER BY logical_key`,
+      )
+        .bind(`%:${id}:%`, `%:${id}.0:%`)
+        .all()
+        .then((r) => r.results);
+    const before = await ledger();
+    expect(before).toHaveLength(5);
+
+    const { sent, q } = queue();
+    await reanalyzeArticle(env.DB, q, {
+      articleId: id,
+      expectedStage: "analyzed",
+    });
+
+    expect(await ledger()).toEqual(before);
+    const budget = await env.DB.prepare(
+      "SELECT reserved_micros FROM budgets WHERE day = '2026-10-26' AND channel = 'gateway'",
+    ).first<{ reserved_micros: number }>();
+    expect(budget!.reserved_micros).toBe(500);
+    const analyses = await env.DB.prepare(
+      "SELECT prompt_version FROM analyses WHERE article_id = ?1 ORDER BY prompt_version",
+    )
+      .bind(id)
+      .all<{ prompt_version: string }>();
+    expect(analyses.results.map((r) => r.prompt_version)).toEqual([
+      "primary_tracker",
+      "v1",
+    ]);
+    const art = await articleState(id);
+    expect(art).toMatchObject({
+      stage: "body_ready",
+      requeue_count: 0,
+      analysis_generation: 1,
+    });
+    expect(art!.stage_updated_at).toBeGreaterThan(0);
+    expect(await revisionOf(eventId!)).toBe(2);
+    expect(sent).toEqual([{ kind: "analyze", articleId: id }]);
+  });
+
+  it("expected stage does not match: 409, nothing written, no message", async () => {
+    const { id, eventId } = await seed81({
+      stage: "grouped",
+      bodySha: "sha-g",
+      inEvent: true,
+    });
+    const { sent, q } = queue();
+    expect(
+      await statusOf(
+        reanalyzeArticle(env.DB, q, {
+          articleId: id,
+          expectedStage: "analyzed",
+        }),
+      ),
+    ).toBe(409);
+    expect(await articleState(id)).toEqual({
+      stage: "grouped",
+      stage_updated_at: 0,
+      requeue_count: 3,
+      analysis_generation: 0,
+    });
+    expect(await revisionOf(eventId!)).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("a concurrent reanalysis between the read and the write: the generation fence writes nothing", async () => {
+    const { id, eventId } = await seed81({
+      stage: "body_ready",
+      bodySha: "sha-r",
+      inEvent: true,
+    });
+    // Another reanalysis lands after reanalyzeArticle read the generation
+    // and before its batch() runs.
+    const racing = hookBatch(async (_n, run) => {
+      await env.DB.prepare(
+        "UPDATE articles SET analysis_generation = analysis_generation + 1 WHERE id = ?1",
+      )
+        .bind(id)
+        .run();
+      return run();
+    });
+    const { sent, q } = queue();
+    expect(
+      await statusOf(
+        reanalyzeArticle(racing, q, {
+          articleId: id,
+          expectedStage: "body_ready",
+        }),
+      ),
+    ).toBe(409);
+    expect((await articleState(id))!.analysis_generation).toBe(1);
+    expect(await revisionOf(eventId!)).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("an article without a body or a missing article is refused", async () => {
+    const { sent, q } = queue();
+
+    const a = await seed81({ stage: "analyzed", bodySha: null });
+    expect(
+      await statusOf(
+        reanalyzeArticle(env.DB, q, {
+          articleId: a.id,
+          expectedStage: "analyzed",
+        }),
+      ),
+    ).toBe(409);
+    expect(await articleState(a.id)).toMatchObject({
+      stage: "analyzed",
+      analysis_generation: 0,
+    });
+
+    const b = await seed81({ stage: "collected", bodySha: null });
+    expect(
+      await statusOf(
+        reanalyzeArticle(env.DB, q, {
+          articleId: b.id,
+          expectedStage: "collected",
+        }),
+      ),
+    ).toBe(409);
+    expect(await articleState(b.id)).toMatchObject({
+      stage: "collected",
+      analysis_generation: 0,
+    });
+
+    expect(
+      await statusOf(
+        reanalyzeArticle(env.DB, q, {
+          articleId: 999_999,
+          expectedStage: "analyzed",
+        }),
+      ),
+    ).toBe(404);
+    expect(sent).toEqual([]);
+  });
+
+  // Defect witnesses (#81): red on the code before the fix for the defect
+  // itself, not for a missing interface. No analysis_generation reads here.
+  it("defect witness: reanalysis keeps the earlier llm_calls and analyses rows", async () => {
+    const { id: artId } = await seed81({
+      stage: "analyzed",
+      bodySha: "sha-w1",
+    });
+    await env.DB.prepare(
+      `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+       VALUES (?1, 'v1', '{}', 'news', '{}', 80, 1, 0),
+              (?1, 'primary_tracker', '{}', 'news', '{}', 0, 0, 0)`,
+    )
+      .bind(artId)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES (?1, 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              (?2, 'write', 'm', 'gateway', 'in_flight', 1, 0, 1, 0, 0)`,
+    )
+      .bind(`analyze:${artId}:w1:v1`, `write:${artId}:w1:v1`)
+      .run();
+    // The other bind form: SQL concatenation of a number-bound id (what the
+    // old DELETE matched). Local D1 renders it as "analyze:1.0:x".
+    await env.DB.prepare(
+      `INSERT INTO llm_calls (logical_key, slot, model, channel, status, attempt, failures, sent_at, created_at, updated_at)
+       VALUES ('analyze:' || ?1 || ':x', 'analyze', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0),
+              ('write:' || ?1 || ':x', 'write', 'm', 'gateway', 'completed', 1, 0, 1, 0, 0)`,
+    )
+      .bind(artId)
+      .run();
+    const rows = async () => ({
+      calls: (
+        await env.DB.prepare(
+          `SELECT logical_key, status FROM llm_calls
+           WHERE logical_key LIKE ?1 OR logical_key LIKE ?2 ORDER BY logical_key`,
+        )
+          .bind(`%:${artId}:%`, `%:${artId}.0:%`)
+          .all()
+      ).results,
+      analyses: (
+        await env.DB.prepare(
+          "SELECT prompt_version FROM analyses WHERE article_id = ?1 ORDER BY prompt_version",
+        )
+          .bind(artId)
+          .all()
+      ).results,
+    });
+    const before = await rows();
+    expect(before.calls).toHaveLength(4);
+    expect(before.analyses).toHaveLength(2);
+
+    await reanalyzeArticle(env.DB, env.Q_INGEST, {
+      articleId: artId,
+      expectedStage: "analyzed",
+    });
+
+    expect(await rows()).toEqual(before);
+  });
+
+  it("defect witness: the stage write is conditional on the stage the admin saw", async () => {
+    // The admin saw the article as analyzed; it has since moved to grouped.
+    const { id: artId, eventId } = await seed81({
+      stage: "grouped",
+      bodySha: "sha-w2",
+      inEvent: true,
+    });
+    const changes: number[] = [];
+    const watched = hookBatch(async (_n, run) => {
+      const results = await run();
+      for (const r of results) changes.push(r.meta.changes);
+      return results;
+    });
+    const { sent, q } = queue();
+
+    // Old or new signature, refused or not: only the writes are checked.
+    await statusOf(
+      reanalyzeArticle(watched, q, {
+        articleId: artId,
+        expectedStage: "analyzed",
+      }),
+    );
+
+    expect(changes.length).toBeGreaterThan(0);
+    expect(changes).toEqual(changes.map(() => 0));
+    expect(
+      await env.DB.prepare(
+        "SELECT stage, stage_updated_at, requeue_count FROM articles WHERE id = ?1",
+      )
+        .bind(artId)
+        .first(),
+    ).toEqual({ stage: "grouped", stage_updated_at: 0, requeue_count: 3 });
+    expect(await revisionOf(eventId!)).toBe(1);
+    expect(sent).toEqual([]);
+  });
+
+  it("the admin detail lists analyses newest first, the higher id first on a tie", async () => {
+    const { id } = await seed81({ stage: "analyzed", bodySha: "sha-o" });
+    for (const pv of ["v1", "v2", "v3"]) {
+      await env.DB.prepare(
+        `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, selected, created_at)
+         VALUES (?1, ?2, '{}', 'news', '{}', 50, 0, 1000)`,
+      )
+        .bind(id, pv)
+        .run();
+    }
+    const detail = await getArticle(env.DB, id);
+    expect(detail!.analyses.map((a) => a.promptVersion)).toEqual([
+      "v3",
+      "v2",
+      "v1",
+    ]);
+  });
+
+  describe("parseReanalyzeInput", () => {
+    const status = (v: unknown) => {
+      try {
+        parseReanalyzeInput(v);
+        return null;
+      } catch (e) {
+        return e instanceof Response ? e.status : -1;
+      }
+    };
+    it("accepts a positive integer id with a known stage", () => {
+      expect(
+        parseReanalyzeInput({ articleId: 3, expectedStage: "analyzed" }),
+      ).toEqual({ articleId: 3, expectedStage: "analyzed" });
+    });
+    it("rejects a payload from an older client bundle (no expectedStage) with 400", () => {
+      expect(status({ articleId: 3 })).toBe(400);
+    });
+    it("rejects an unknown stage, a non-integer id, a non-positive id and a non-object with 400", () => {
+      expect(status({ articleId: 3, expectedStage: "nope" })).toBe(400);
+      expect(status({ articleId: 1.5, expectedStage: "analyzed" })).toBe(400);
+      expect(status({ articleId: 0, expectedStage: "analyzed" })).toBe(400);
+      expect(status(3)).toBe(400);
     });
   });
 });

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { z } from "zod";
 import { utcDay } from "../../providers/budget";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { isSystemSource } from "../../lib/source-attribution";
@@ -674,7 +675,7 @@ export async function getArticle(database: D1Database, id: number) {
     .select()
     .from(analyses)
     .where(sql`${analyses.articleId} = ${id}`)
-    .orderBy(sql`${analyses.createdAt} DESC`);
+    .orderBy(sql`${analyses.createdAt} DESC, ${analyses.id} DESC`);
 
   const corrs = await d
     .select()
@@ -763,30 +764,71 @@ export async function changeArticleIndustry(
   await database.batch(statements);
 }
 
+const REANALYZE_INPUT = z.object({
+  articleId: z.number().int().positive(),
+  expectedStage: z.enum([
+    "collected",
+    "body_ready",
+    "analyzed",
+    "grouped",
+    "dropped",
+  ]),
+});
+
+/**
+ * Validates the reanalyze request. A client bundle loaded before the deploy
+ * sends no `expectedStage`; that must be a 400, not an undefined bind (500).
+ */
+export function parseReanalyzeInput(data: unknown) {
+  const parsed = REANALYZE_INPUT.safeParse(data);
+  if (!parsed.success) {
+    throw new Response("Invalid reanalyze request", { status: 400 });
+  }
+  return parsed.data;
+}
+
 export async function reanalyzeArticle(
   database: D1Database,
   qIngest: { send: (msg: unknown) => Promise<unknown> },
-  articleId: number,
+  data: { articleId: number; expectedStage: string },
 ) {
+  const row = await database
+    .prepare("SELECT analysis_generation FROM articles WHERE id = ?1")
+    .bind(data.articleId)
+    .first<{ analysis_generation: number }>();
+  if (!row) throw new Response("Article not found", { status: 404 });
   const now = Date.now();
-  await database.batch([
-    database
-      .prepare("DELETE FROM analyses WHERE article_id = ?1")
-      .bind(articleId),
-    database
-      .prepare(
-        "UPDATE articles SET stage = 'body_ready', requeue_count = 0, stage_updated_at = ?1 WHERE id = ?2",
-      )
-      .bind(now, articleId),
+  // Exactly two statements: the events UPDATE reads changes() of the
+  // articles UPDATE right before it. Insert nothing between them.
+  const [moved] = await database.batch([
+    // Architecture §5: stage with stage_updated_at and requeue_count.
+    // The generation gives the next analysis new ledger keys and a new
+    // analyses row; no llm_calls or analyses row is deleted (#81).
     database
       .prepare(
-        "DELETE FROM llm_calls WHERE logical_key LIKE 'analyze:' || ?1 || ':%' OR logical_key LIKE 'write:' || ?1 || ':%'",
+        `UPDATE articles
+         SET stage = 'body_ready', stage_updated_at = ?1, requeue_count = 0,
+             analysis_generation = analysis_generation + 1
+         WHERE id = ?2 AND stage = ?3 AND analysis_generation = ?4
+           AND body_sha IS NOT NULL`,
       )
-      .bind(articleId),
-    revisionBumpStatement(database, articleId, now),
+      .bind(now, data.articleId, data.expectedStage, row.analysis_generation),
+    // revisionBumpStatement, but only if the UPDATE above changed the row.
+    database
+      .prepare(
+        `UPDATE events SET revision = revision + 1, updated_at = ?1
+         WHERE id = (SELECT event_id FROM event_articles WHERE article_id = ?2)
+           AND changes() = 1`,
+      )
+      .bind(now, data.articleId),
   ]);
-
-  await qIngest.send({ kind: "analyze", articleId });
+  if (moved.meta.changes !== 1) {
+    throw new Response(
+      "The article changed or has no body; reload and try again",
+      { status: 409 },
+    );
+  }
+  await qIngest.send({ kind: "analyze", articleId: data.articleId });
 }
 
 export async function retractArticle(
