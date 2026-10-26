@@ -1,6 +1,7 @@
 // Runs in the `workers` project, so it also shows markdown-it works in workerd.
 import { describe, expect, it } from "vitest";
 import {
+  excerptWithinCap,
   renderArticleExcerpt,
   renderArticleMarkdown,
   renderMarkdown,
@@ -265,5 +266,29 @@ describe("renderArticleExcerpt", () => {
 
   it("returns null for an empty body", () => {
     expect(renderArticleExcerpt("")).toBeNull();
+  });
+});
+
+describe("excerptWithinCap", () => {
+  it("allows 300 words and no more when the body is long", () => {
+    expect(excerptWithinCap(300, 4000)).toBe(true);
+    expect(excerptWithinCap(301, 4000)).toBe(false);
+  });
+
+  it("rounds 25% of the body down", () => {
+    // 7 / 4 = 1.75: the cap is 1.
+    expect(excerptWithinCap(1, 7)).toBe(true);
+    expect(excerptWithinCap(2, 7)).toBe(false);
+  });
+
+  it("allows nothing for an empty body", () => {
+    expect(excerptWithinCap(0, 0)).toBe(true);
+    expect(excerptWithinCap(1, 0)).toBe(false);
+  });
+
+  it("caps at 300, not 25%, for a 2000-word body", () => {
+    expect(excerptWithinCap(300, 2000)).toBe(true);
+    expect(excerptWithinCap(301, 2000)).toBe(false);
+    expect(excerptWithinCap(500, 2000)).toBe(false);
   });
 });
