@@ -16,6 +16,7 @@
     "test": "vitest run --project workers && npm run test:tz",
     "test:tz": "TZ=UTC vitest run --project node && TZ=Asia/Shanghai vitest run --project node",
     "test:ssr": "CLOUDFLARE_ENV=test vite build && node scripts/smoke-ssr.ts",
+    "smoke": "node scripts/smoke.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "seed:local": "node --import ./scripts/ts-resolve.mjs scripts/seed.ts --local",
