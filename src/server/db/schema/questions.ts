@@ -33,6 +33,15 @@ export const questions = sqliteTable(
     errorMessage: text("error_message"),
     createdAt: integer("created_at").notNull(),
     completedAt: integer("completed_at"),
+    /**
+     * `admin` or `public` (#133). No table CHECK: adding one would rebuild
+     * the table; the writers check the closed set (same as watches.owner_kind).
+     */
+    origin: text("origin", { enum: ["admin", "public"] })
+      .notNull()
+      .default("admin"),
+    /** sha256hex of a reader's answer token; NULL for admin questions. */
+    publicTokenHash: text("public_token_hash"),
   },
   (t) => [
     index("questions_status_idx").on(t.status),

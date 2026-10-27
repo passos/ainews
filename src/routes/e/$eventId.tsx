@@ -1,6 +1,13 @@
 import { Suspense } from "react";
-import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
+import {
+  Await,
+  Link,
+  createFileRoute,
+  getRouteApi,
+  notFound,
+} from "@tanstack/react-router";
 import { ArticleCard } from "../../components/ArticleCard";
+import { AskStoryCard, type AskStoryFns } from "../../components/AskStoryCard";
 import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainCard";
 import { ClassroomDiscussionCard } from "../../components/artifacts/ClassroomDiscussionCard";
 import { EducationEvidenceCard } from "../../components/artifacts/EducationEvidenceCard";
@@ -29,8 +36,17 @@ import type {
   EventSourceView,
   EventView,
 } from "../../server/publication/events";
+import { askAboutStory, getStoryAnswer } from "../../server/reader-ask/api";
 import type { Audience } from "../../lib/reader-prefs";
+import { FINANCE_SLUG } from "../../lib/sections";
 import { SITE_NAME } from "../../lib/site";
+
+const rootRoute = getRouteApi("__root__");
+
+const ASK_FNS: AskStoryFns = {
+  onAsk: (input) => askAboutStory({ data: input }),
+  onPoll: (input) => getStoryAnswer({ data: input }),
+};
 
 export async function loadEvent(
   params: { eventId: string },
@@ -81,12 +97,16 @@ export const Route = createFileRoute("/e/$eventId")({
 function EventPage() {
   const { data, artifactSources, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
+  // The switch comes from the root loader (loadSiteShell), so the card is in
+  // the server HTML or absent: no flash.
+  const { askPublicEnabled } = rootRoute.useLoaderData();
   return (
     <EventPageView
       data={data}
       artifactSources={artifactSources}
       sources={sources}
       audience={audience}
+      ask={askPublicEnabled ? ASK_FNS : null}
     />
   );
 }
@@ -96,11 +116,14 @@ export function EventPageView({
   artifactSources,
   sources,
   audience,
+  ask = null,
 }: {
   data: EventView;
   artifactSources: ArtifactSourceView[];
   sources: Promise<EventSourceView[]>;
   audience: Audience | undefined;
+  /** Set only while ASK_PUBLIC_ENABLED is "true". */
+  ask?: AskStoryFns | null;
 }) {
   const {
     section,
@@ -148,6 +171,11 @@ export function EventPageView({
           verifiedClaims={verifiedClaims}
           sources={artifactSources}
         />
+      )}
+
+      {/* v1 has no Ask for Finance (#133). */}
+      {ask && section.slug !== FINANCE_SLUG && (
+        <AskStoryCard eventId={data.id} {...ask} />
       )}
 
       {evidence && evidence.claims.length > 0 && (

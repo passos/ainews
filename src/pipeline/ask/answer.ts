@@ -179,11 +179,12 @@ export async function answerQuestion(
     scope_type: "event" | "global";
     event_id: number | null;
     status: string;
+    origin: string | null;
   }
 
   const qRow = await deps.db
     .prepare(
-      `SELECT id, question, scope_type, event_id, status FROM questions WHERE id = ?1`,
+      `SELECT id, question, scope_type, event_id, status, origin FROM questions WHERE id = ?1`,
     )
     .bind(questionId)
     .first<QuestionRow>();
@@ -384,9 +385,12 @@ export async function answerQuestion(
     const res1 = await deps.models.generateText("reason", callKey1, req1);
     let parsedOutput = parseAskOutput(res1.text);
 
-    // 9. Supplementary fetch in whitelist if evidence is insufficient
+    // 9. Supplementary fetch in whitelist if evidence is insufficient.
+    // Never for a public question (#133): it answers only from the approved
+    // reports of its event. NULL or any other origin counts as admin.
     const supplementalFetched: SupplementalFetchLog[] = [];
     if (
+      qRow.origin !== "public" &&
       parsedOutput &&
       !parsedOutput.sufficient &&
       (parsedOutput.neededUrls.length > 0 ||

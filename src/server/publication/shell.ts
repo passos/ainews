@@ -22,5 +22,7 @@ export async function loadSiteShell() {
     hasWatches: await hasActiveWatches(getDb(env.DB)),
     // /follow and its links exist only while the switch is on (#132).
     readerWatchEnabled: isEnabled(env, "READER_WATCH_ENABLED"),
+    // The event page shows "Ask about this story" only while it is on (#133).
+    askPublicEnabled: isEnabled(env, "ASK_PUBLIC_ENABLED"),
   };
 }

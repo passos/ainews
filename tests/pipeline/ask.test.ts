@@ -464,6 +464,91 @@ describe("Ask Newsren Pipeline", () => {
     expect(supplemental[0].url).toContain("arxiv.org");
   });
 
+  // #133: a public question uses only the approved reports of its event.
+  // No URL from the question text or from neededUrls is fetched.
+  async function runSupplementalScenario(origin: "public" | "admin") {
+    await seedTestCorpus();
+    const qRes = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, event_id, status, prompt_version, model, created_at, origin)
+       VALUES ('What does https://arxiv.org/abs/2501.88888 say about sparse attention?', 'event', 301, 'pending', 'ask:v1', 'default', 1000, ?1)`,
+    )
+      .bind(origin)
+      .run();
+    const questionId = Number(qRes.meta.last_row_id);
+
+    let reasonCalls = 0;
+    const transport = makeFakeTransport(() => {
+      reasonCalls++;
+      return {
+        sufficient: false,
+        neededUrls: ["https://arxiv.org/abs/2501.77777"],
+        answer: "Need primary paper text.",
+        unverified: ["Sparse attention claim"],
+        citations: [],
+      };
+    });
+
+    const fetched: string[] = [];
+    const mockFetch = (async (url: string | URL | Request) => {
+      const urlStr = url.toString();
+      fetched.push(urlStr);
+      if (urlStr.includes("robots.txt")) {
+        return new Response("User-agent: *\nAllow: /\n", { status: 200 });
+      }
+      return new Response(
+        "# Sparse Attention\n\nSparse attention reduces the cost of long context windows in transformer models by a large factor across every benchmark that we measured in this paper, with careful ablations and repeated runs. We also report the memory footprint, the wall clock latency and the accuracy on retrieval tasks for each sparsity pattern that we tried.",
+        {
+          status: 200,
+          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+        },
+      );
+    }) as unknown as typeof fetch;
+
+    const bodies = new FakeR2();
+    const result = await answerQuestion(
+      { ...env, MODEL_CALLS_ENABLED: "true" },
+      questionId,
+      1000,
+      {
+        transport,
+        fetch: mockFetch,
+        bodies: bodies as unknown as R2Bucket,
+      },
+    );
+    const row = await env.DB.prepare(
+      `SELECT supplemental_fetched FROM questions WHERE id = ?1`,
+    )
+      .bind(questionId)
+      .first<{ supplemental_fetched: string }>();
+    const supplementalPuts = [...bodies.storage.keys()].filter((k) =>
+      k.startsWith("bodies/supplemental/"),
+    );
+    return {
+      result,
+      reasonCalls,
+      fetched,
+      supplementalPuts,
+      supplemental: JSON.parse(row?.supplemental_fetched ?? "null") as unknown,
+    };
+  }
+
+  it("never fetches supplemental pages for a public question", async () => {
+    const out = await runSupplementalScenario("public");
+    expect(out.result.status).toBe("completed");
+    expect(out.fetched).toEqual([]);
+    expect(out.supplementalPuts).toEqual([]);
+    expect(out.reasonCalls).toBe(1);
+    expect(out.supplemental).toEqual([]);
+  });
+
+  it("still fetches supplemental pages for an admin question", async () => {
+    const out = await runSupplementalScenario("admin");
+    expect(out.result.status).toBe("completed");
+    expect(out.fetched.some((u) => u.includes("/abs/2501."))).toBe(true);
+    expect(out.supplementalPuts.length).toBeGreaterThan(0);
+    expect(out.reasonCalls).toBe(2);
+  });
+
   it("blocks supplementary fetch for non-whitelisted domains", async () => {
     await seedTestCorpus();
 

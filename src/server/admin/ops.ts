@@ -1603,6 +1603,8 @@ export interface QuestionItem {
   errorMessage: string | null;
   createdAt: number;
   completedAt: number | null;
+  /** `public` for a reader's "Ask about this story" question (#133). */
+  origin: "admin" | "public";
 }
 
 export async function listQuestions(
@@ -1643,6 +1645,7 @@ export async function listQuestions(
       r.completed_at !== null && r.completed_at !== undefined
         ? Number(r.completed_at)
         : null,
+    origin: r.origin === "public" ? "public" : "admin",
   }));
 }
 
@@ -1686,6 +1689,7 @@ export async function getQuestion(
       r.completed_at !== null && r.completed_at !== undefined
         ? Number(r.completed_at)
         : null,
+    origin: r.origin === "public" ? "public" : "admin",
   };
 }
 

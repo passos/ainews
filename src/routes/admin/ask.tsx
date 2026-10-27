@@ -234,6 +234,7 @@ function AdminAskPage() {
                         {q.scopeType === "event"
                           ? `Event #${q.eventId}`
                           : "Global"}
+                        {q.origin === "public" && " · Reader"}
                       </span>
                       <span>${(q.costMicros / 1_000_000).toFixed(4)}</span>
                     </div>
@@ -289,6 +290,7 @@ function AdminAskPage() {
                   </span>
                   {selectedQuestion.eventId &&
                     ` (Event #${selectedQuestion.eventId})`}
+                  {` · Origin: ${selectedQuestion.origin}`}
                   {selectedQuestion.model &&
                     ` · Model: ${selectedQuestion.model}`}
                 </div>

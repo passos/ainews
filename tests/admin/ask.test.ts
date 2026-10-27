@@ -69,6 +69,27 @@ describe("Admin Ask Operations", () => {
     expect(list[0].id).toBe(q2Id); // Ordered by created_at DESC
   });
 
+  it("lists public questions with their origin (#133)", async () => {
+    const pub = await env.DB.prepare(
+      `INSERT INTO questions (question, scope_type, status, prompt_version,
+         model, created_at, origin, public_token_hash)
+       VALUES ('A reader question here?', 'global', 'pending', 'ask:v1',
+         'default', 9000000, 'public', ?1) RETURNING id`,
+    )
+      .bind("d".repeat(64))
+      .first<{ id: number }>();
+    const adminId = await createQuestion(
+      env.DB,
+      { question: "An admin question here?" },
+      9000001,
+    );
+    const list = await listQuestions(env.DB, 10);
+    expect(list.find((q) => q.id === pub!.id)?.origin).toBe("public");
+    expect(list.find((q) => q.id === adminId)?.origin).toBe("admin");
+    expect((await getQuestion(env.DB, pub!.id))?.origin).toBe("public");
+    expect(JSON.stringify(list)).not.toContain("d".repeat(64));
+  });
+
   it("returns null for non-existent question", async () => {
     const q = await getQuestion(env.DB, 999999);
     expect(q).toBeNull();
