@@ -76,7 +76,8 @@ describe("StoryBriefCard", () => {
     const html = renderToStaticMarkup(
       createElement(StoryBriefCard, { brief, sources: SOURCES }),
     );
-    expect(html).toContain("AI Story Brief");
+    expect(html).toMatch(/<h2 [^>]*>Story brief<\/h2>/);
+    expect(html).not.toContain("AI Story Brief");
     expect(html).toContain("What Happened");
     expect(html).toContain("What happened text");
     expect(html).toContain("What Is New");
@@ -105,7 +106,8 @@ describe("AudienceExplainCard", () => {
       }),
     );
 
-    expect(html).toContain("News-to-Learning");
+    expect(html).toMatch(/<h2 [^>]*>Explain<\/h2>/);
+    expect(html).not.toContain("News-to-Learning");
     expect(html).toContain("Student overview text");
     expect(html).toContain("Point A");
     expect(html).toContain("Point B");

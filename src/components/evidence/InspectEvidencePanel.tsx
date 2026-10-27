@@ -10,6 +10,7 @@ import {
   textFragmentHref,
 } from "../../lib/text-fragment";
 import { safeHttpUrl } from "../../lib/url";
+import { SectionHead } from "../SectionHead";
 
 export function InspectEvidencePanel({
   evidence,
@@ -30,26 +31,13 @@ export function InspectEvidencePanel({
   };
 
   return (
-    <section
-      aria-label="Inspect evidence"
-      className="border-t border-border pt-6"
-    >
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-foreground">
-            🔍 Inspect Evidence
-          </span>
-          <span className="text-[0.68rem] text-muted-foreground">
-            {evidence.claims.length}{" "}
-            {evidence.claims.length === 1
-              ? "claim inspected"
-              : "claims inspected"}
-          </span>
-        </div>
-        <p className="text-[0.65rem] text-muted-foreground">
-          Every statement traced directly to verbatim source excerpts
-        </p>
-      </header>
+    <section aria-label="Evidence" className="border-t border-border pt-6">
+      <SectionHead
+        title="Evidence"
+        note={`${evidence.claims.length} ${
+          evidence.claims.length === 1 ? "claim" : "claims"
+        }, each traced to a quoted source passage`}
+      />
 
       <div className="flex flex-col gap-3">
         {evidence.claims.map((claim) => (
@@ -179,7 +167,7 @@ function ClaimRow({
                       </span>
                       {cit.isPrimarySource && (
                         <span className="border border-border-strong px-1.5 py-0.2 text-[0.62rem] font-bold text-muted-foreground">
-                          ★ Original source
+                          Original source
                         </span>
                       )}
                       <span

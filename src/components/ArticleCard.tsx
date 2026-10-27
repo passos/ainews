@@ -33,15 +33,6 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           <Time ms={a.publishedAt} label="Published" />
         )}
         <Time ms={a.fetchedAt} label="Fetched" />
-        {href && (
-          <a
-            href={href}
-            rel="noopener noreferrer"
-            className="text-foreground underline"
-          >
-            {`Read the original at ${a.sourceName} ↗`}
-          </a>
-        )}
       </p>
       {a.evidence.length > 0 && (
         <ul
@@ -61,7 +52,7 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
         </ul>
       )}
       {a.summary && (
-        <p className="mt-1.5 line-clamp-6 max-w-[36em] font-serif text-[1.0625rem] leading-[1.65]">
+        <p className="mt-1.5 line-clamp-6 font-serif text-[1.0625rem] leading-[1.65]">
           {a.summary}
         </p>
       )}
@@ -73,14 +64,31 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           {a.correction}
         </p>
       )}
-      {a.eventId !== null && (
-        <p className="mt-2 text-sm">
-          <a href={`/e/${a.eventId}`} className="text-foreground underline">
-            {a.eventReportCount >= 2
-              ? `View story · ${a.eventReportCount} reports →`
-              : "Story brief & explainers →"}
-          </a>
-        </p>
+      {(a.eventId !== null || href) && (
+        <div
+          data-entry-row
+          className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm"
+        >
+          {a.eventId !== null && (
+            <a
+              href={`/e/${a.eventId}`}
+              className="font-heading text-[1.0625rem] font-semibold text-foreground underline"
+            >
+              {a.eventReportCount >= 2
+                ? `View story · ${a.eventReportCount} reports →`
+                : "Story brief & explainers →"}
+            </a>
+          )}
+          {href && (
+            <a
+              href={href}
+              rel="noopener noreferrer"
+              className="text-muted-foreground underline"
+            >
+              {`Read the original at ${a.sourceName} ↗`}
+            </a>
+          )}
+        </div>
       )}
     </article>
   );

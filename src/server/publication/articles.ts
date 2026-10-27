@@ -393,6 +393,23 @@ export interface ArticlePage {
   excerpted: boolean;
   /** The source's body is the feed summary, the authors' abstract (summaryIsBody). */
   bodyIsAbstract: boolean;
+  /**
+   * The story the article belongs to, for the sidebar. null = no story.
+   * Set by getArticlePageWithEvent (event-sections.ts), not by getArticlePage.
+   */
+  event: ArticleEventInfo | null;
+}
+
+export interface ArticleEventInfo {
+  /** The story brief's What happened line; null when the brief is not shown. */
+  whatHappened: string | null;
+  /** Same rules as the /e/$id nav. */
+  sections: {
+    brief: boolean;
+    evidenceClaims: number;
+    explain: boolean;
+    ask: boolean;
+  };
 }
 
 interface ArticlePageRow extends CardRow {
@@ -444,6 +461,7 @@ export async function getArticlePage(
     bodyHtml: null,
     excerpted: display === "excerpt",
     bodyIsAbstract: row.body_is_abstract === 1,
+    event: null,
   };
   // Summary sources show no body. A body_kind other than 'full' means R2 holds
   // the feed summary, which the summary block already shows.

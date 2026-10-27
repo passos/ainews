@@ -147,6 +147,10 @@
     @apply bg-background font-sans text-foreground antialiased;
     overflow-wrap: anywhere;
   }
+  h1,
+  h2 {
+    text-wrap: pretty;
+  }
   a {
     text-decoration-thickness: 1px;
     text-underline-offset: 3px;

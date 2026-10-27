@@ -1,4 +1,5 @@
 import type { ClassroomDiscussionBuilder } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function ClassroomDiscussionCard({
   guide,
@@ -10,15 +11,7 @@ export function ClassroomDiscussionCard({
       aria-label="Classroom Discussion Builder"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-foreground">
-            🎓 Classroom Discussion Builder
-          </span>
-          <span className="text-[0.68rem] text-muted-foreground">
-            Pedagogical Facilitation
-          </span>
-        </div>
+      <SectionHead title="Classroom discussion" note="Pedagogical facilitation">
         {guide.gradeLevels.length > 0 && (
           <div className="flex items-center gap-1">
             {guide.gradeLevels.map((lvl, idx) => (
@@ -31,7 +24,7 @@ export function ClassroomDiscussionCard({
             ))}
           </div>
         )}
-      </header>
+      </SectionHead>
 
       <div className="flex flex-col gap-4">
         <div>

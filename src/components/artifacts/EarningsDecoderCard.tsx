@@ -1,5 +1,6 @@
 import type { EarningsDecoder } from "../../lib/artifacts/types";
 import { safeHttpUrl } from "../../lib/url";
+import { SectionHead } from "../SectionHead";
 
 export interface EarningsDecoderCardProps {
   decoder: EarningsDecoder;
@@ -33,6 +34,10 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
 
   return (
     <div className="space-y-6 border-t border-border pt-6">
+      <SectionHead
+        title="Earnings decoder"
+        note="Reported figures, drivers and guidance, each linked to its SEC filing"
+      />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4">
         <div>
@@ -44,9 +49,9 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
               CIK: {company.cik}
             </span>
           </div>
-          <h3 className="text-xl font-bold mt-1">
-            {company.name} ({company.ticker}) Earnings Decoder
-          </h3>
+          <p className="text-xl font-bold mt-1">
+            {company.name} ({company.ticker})
+          </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             Fiscal Period: {filing.fiscalPeriod} {filing.fiscalYear} | Filed:{" "}
             {filing.filingDate}
@@ -250,7 +255,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
 
       {/* Newsren §4 Finance Guardrail Notice */}
       <div className="border border-dashed border-border-strong p-3 text-xs text-foreground">
-        <p className="font-semibold mb-0.5">⚠️ Regulatory disclosure</p>
+        <p className="font-semibold mb-0.5">Regulatory disclosure</p>
         <p>{disclaimer}</p>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import type { StoryBrief } from "../../lib/artifacts/types";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
+import { SectionHead } from "../SectionHead";
 
 export function StoryBriefCard({
   brief,
@@ -13,15 +14,11 @@ export function StoryBriefCard({
 }) {
   if (sources.length === 0) return null;
   return (
-    <section aria-label="Story Brief" className="border-t border-border pt-6">
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          ★ AI Story Brief
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          4-Point Synthesis
-        </span>
-      </header>
+    <section aria-label="Story brief" className="border-t border-border pt-6">
+      <SectionHead
+        title="Story brief"
+        note="What happened, what is new, the evidence, what to watch"
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">

@@ -6,6 +6,7 @@ import {
 } from "../../lib/artifacts/types";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
+import { SectionHead } from "../SectionHead";
 
 export function AudienceExplainCard({
   explanations,
@@ -53,16 +54,10 @@ export function AudienceExplainCard({
       aria-label="Audience Explanations"
       className="border-t border-border pt-6"
     >
-      <header className="mb-4 flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <span className="text-xs font-bold text-muted-foreground">
-            News-to-Learning
-          </span>
-          <p className="text-[0.68rem] text-muted-foreground">
-            Adapted conceptual explanations by reader tier
-          </p>
-        </div>
-
+      <SectionHead
+        title="Explain"
+        note="The same story for students, educators and professionals"
+      >
         <nav aria-label="Explain for" className="flex items-center gap-1">
           <span className="mr-1 text-xs font-bold text-muted-foreground">
             Explain for
@@ -85,7 +80,7 @@ export function AudienceExplainCard({
             );
           })}
         </nav>
-      </header>
+      </SectionHead>
 
       <div className="flex flex-col gap-4">
         <div>

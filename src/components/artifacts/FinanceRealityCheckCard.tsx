@@ -1,4 +1,5 @@
 import type { FinanceRealityCheck } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function FinanceRealityCheckCard({
   check,
@@ -10,19 +11,14 @@ export function FinanceRealityCheckCard({
       aria-label="AI-in-Finance Reality Check"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-foreground">
-            ⚖ AI-in-Finance Reality Check
-          </span>
-          <span className="text-[0.68rem] text-muted-foreground">
-            Backtest vs. Live Execution Audit
-          </span>
-        </div>
+      <SectionHead
+        title="Finance reality check"
+        note="Backtest against live execution"
+      >
         <span className="border border-border-strong px-2 py-0.5 text-[0.68rem] font-bold text-muted-foreground capitalize">
           {check.claimType.replace(/_/g, " ")}
         </span>
-      </header>
+      </SectionHead>
 
       <div className="flex flex-col gap-4">
         <div>

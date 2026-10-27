@@ -6,6 +6,7 @@ import {
 } from "../../lib/artifacts/types";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
+import { SectionHead } from "../SectionHead";
 
 export function LearningMaterialCard({
   materials,
@@ -61,17 +62,10 @@ export function LearningMaterialCard({
       aria-label="Learning Materials"
       className="border-t border-border pt-6"
     >
-      <header className="mb-4 flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <span className="text-xs font-bold text-muted-foreground">
-            ★ News-to-Learning Interactive Materials
-          </span>
-          <p className="text-[0.68rem] text-muted-foreground">
-            Curriculum, quizzes, discussion questions, and activities adapted by
-            audience
-          </p>
-        </div>
-
+      <SectionHead
+        title="Learn"
+        note="Concepts, quizzes, discussion questions and activities by audience"
+      >
         <nav
           aria-label="Learning audience tiers"
           className="flex items-center gap-1"
@@ -97,7 +91,7 @@ export function LearningMaterialCard({
             );
           })}
         </nav>
-      </header>
+      </SectionHead>
 
       <div className="flex flex-col gap-5">
         <div>
@@ -174,12 +168,12 @@ export function LearningMaterialCard({
                             <span>{opt}</span>
                             {hasAnswered && isCorrect && (
                               <span className="text-[0.7rem] font-bold text-foreground">
-                                ✓ Correct
+                                Correct
                               </span>
                             )}
                             {hasAnswered && isChosen && !isCorrect && (
                               <span className="text-[0.7rem] font-bold text-destructive">
-                                ✗ Incorrect
+                                Incorrect
                               </span>
                             )}
                           </button>

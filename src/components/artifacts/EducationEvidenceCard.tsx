@@ -1,4 +1,5 @@
 import type { EducationEvidenceChecker } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function EducationEvidenceCard({
   evidence,
@@ -10,14 +11,10 @@ export function EducationEvidenceCard({
       aria-label="Education Evidence Checker"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          🔬 Education Evidence Checker
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Promotional Claims vs. Empirical Outcomes
-        </span>
-      </header>
+      <SectionHead
+        title="Education evidence"
+        note="Promotional claims against empirical outcomes"
+      />
 
       <div className="flex flex-col gap-4">
         <div>

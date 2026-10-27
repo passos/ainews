@@ -3,9 +3,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
+import { isEnabled } from "../../lib/flags";
 import { getDb } from "../db/client";
 import {
-  getArticlePage as readArticlePage,
   getHome as readHome,
   getRecentCorrections as readRecentCorrections,
   getSection as readSection,
@@ -15,6 +15,7 @@ import {
   getDigest as readDigest,
   getRecentDigests as readRecentDigests,
 } from "./digests";
+import { getArticlePageWithEvent as readArticlePage } from "./event-sections";
 import {
   getEvent as readEvent,
   getEventArtifactSources as readEventArtifactSources,
@@ -46,7 +47,9 @@ export const getSectionSources = createServerFn({ method: "GET" })
 export const getArticle = createServerFn({ method: "GET" })
   .validator(z.object({ articleId: z.number().int().positive() }))
   .handler(({ data }) =>
-    readArticlePage(getDb(env.DB), env.BODIES, data.articleId),
+    readArticlePage(getDb(env.DB), env.BODIES, data.articleId, {
+      askEnabled: isEnabled(env, "ASK_PUBLIC_ENABLED"),
+    }),
   );
 
 const eventInput = z.object({ eventId: z.number().int().positive() });

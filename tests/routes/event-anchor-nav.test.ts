@@ -3,6 +3,7 @@
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import { EventPageView } from "../../src/routes/e/$eventId";
+import { eventSectionFlags } from "../../src/server/publication/event-sections";
 import type { SectionInfo } from "../../src/server/publication/articles";
 import type { EventView } from "../../src/server/publication/events";
 import { renderInRouter } from "../helpers/render-in-router";
@@ -48,8 +49,9 @@ function eventView(over: Record<string, unknown> = {}): EventView {
   } as unknown as EventView;
 }
 
-const fullView = () =>
+const fullView = (over: Record<string, unknown> = {}) =>
   eventView({
+    ...over,
     artifacts: {
       brief: {
         whatHappened: "BRIEF-HAPPENED",
@@ -115,7 +117,7 @@ describe("On this page anchor nav", () => {
     const html = await render(fullView());
     const nav = html.indexOf('aria-label="On this page"');
     expect(nav).toBeGreaterThan(html.indexOf("<h1"));
-    expect(nav).toBeLessThan(html.indexOf('aria-label="Story Brief"'));
+    expect(nav).toBeLessThan(html.indexOf('aria-label="Story brief"'));
   });
 
   it("lists every section the event renders, with matching ids", async () => {
@@ -123,7 +125,7 @@ describe("On this page anchor nav", () => {
     const links = navLinks(html);
     const labels = links.map((l) => l.label);
     for (const want of [
-      "Brief",
+      "Story brief",
       "Explain",
       "Learn",
       "Evidence",
@@ -155,7 +157,7 @@ describe("On this page anchor nav", () => {
   it("omits a section whose card renders nothing (no artifact sources)", async () => {
     const html = await render(fullView(), { sources: [] });
     const labels = navLinks(html).map((l) => l.label);
-    expect(labels).not.toContain("Brief");
+    expect(labels).not.toContain("Story brief");
     expect(labels).not.toContain("Explain");
     expect(labels).not.toContain("Learn");
     expect(html).not.toContain('id="brief"');
@@ -200,6 +202,152 @@ describe("On this page anchor nav", () => {
       expect(cls).not.toMatch(/\bbg-card\b/);
       expect(cls).not.toMatch(/(^| )border( |$)/);
       expect(cls).not.toMatch(/(^| )border-2( |$)/);
+    }
+  });
+
+  it("shows no visible 'On this page' text; only the aria-label names the nav", async () => {
+    const nav = navOf(await render(fullView()));
+    expect(nav).toContain('aria-label="On this page"');
+    const inner = nav.replace(/^<nav\b[^>]*>/, "").replace(/<[^>]*>/g, " ");
+    expect(inner).not.toMatch(/On this page/i);
+  });
+
+  it("has one hairline under the nav: the first section drops its top rule", async () => {
+    const html = await render(fullView(), { ask: ASK });
+    const wrappers = [
+      ...html.matchAll(/<div id="([^"]+)" class="([^"]*)"><section/g),
+    ];
+    expect(wrappers.length).toBeGreaterThanOrEqual(5);
+    expect(wrappers[0][2]).toContain("[&amp;&gt;*]:border-t-0!");
+    for (const w of wrappers.slice(1)) {
+      expect(w[2], w[1]).not.toContain("border-t-0");
+    }
+  });
+
+  it("gives every section one h2 in one style, with a grey note after it", async () => {
+    const html = await render(fullView({ corrections: ["Fixed a number."] }), {
+      ask: ASK,
+    });
+    const h2s = [...html.matchAll(/<h2 class="([^"]*)">([^<]*)<\/h2>/g)];
+    // One per nav link: every listed section has exactly one.
+    expect(h2s.length).toBe(navLinks(html).length);
+    expect(new Set(h2s.map((m) => m[1])).size).toBe(1);
+    const cls = h2s[0][1];
+    for (const want of ["font-heading", "text-[1.75rem]", "font-semibold"]) {
+      expect(cls).toContain(want);
+    }
+    expect(cls).not.toMatch(/uppercase|font-mono|tracking-wid/);
+    expect(h2s.map((m) => m[2])).toEqual(
+      expect.arrayContaining([
+        "Story brief",
+        "Ask about this story",
+        "Evidence",
+        "Explain",
+        "Learn",
+        "Policy impact",
+        "Corrections",
+        "Timeline",
+      ]),
+    );
+    // The note follows on the same header line.
+    expect(
+      (html.match(/<\/h2><p class="[^"]*\btext-muted-foreground\b/g) ?? [])
+        .length,
+    ).toBe(h2s.length);
+  });
+
+  it("uses the new section names and drops the old ones", async () => {
+    const html = await render(fullView(), { ask: ASK });
+    for (const old of [
+      "AI Story Brief",
+      "Inspect Evidence",
+      "News-to-Learning",
+      "ASK ABOUT THIS STORY",
+    ]) {
+      expect(html).not.toContain(old);
+    }
+    expect(navLinks(html).map((l) => l.label)).toEqual(
+      expect.arrayContaining(["Story brief", "Evidence", "Explain", "Ask"]),
+    );
+  });
+
+  it("has no star, magnifier or other pictograph and no all-caps class", async () => {
+    const html = await render(
+      fullView({
+        timelineRevisions: [
+          {
+            revision: 1,
+            diff: { summary: "New thing", changedClaims: [] },
+            articles: [
+              {
+                id: 1,
+                title: "T",
+                summary: null,
+                url: "https://a.example/x",
+                sourceName: "S",
+                publishedAt: null,
+                fetchedAt: 1_000,
+                evidence: ["preprint"],
+                correction: null,
+                sectionSlug: "technology",
+                sectionName: "Technology",
+                sectionDisclaimer: null,
+                eventId: 7,
+                eventReportCount: 1,
+                inputRevision: 1,
+              },
+            ],
+          },
+        ],
+      }),
+      { ask: ASK },
+    );
+    expect(html).not.toMatch(
+      /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u,
+    );
+    expect(html).not.toMatch(/\buppercase\b/);
+    expect(html).toContain("First seen");
+    expect(html).toContain("Original source");
+  });
+
+  it("lists corrections in the nav, before Timeline, when they exist", async () => {
+    const html = await render(fullView({ corrections: ["Fixed a number."] }));
+    const links = navLinks(html);
+    expect(links.at(-2)).toEqual({ id: "corrections", label: "Corrections" });
+    expect(links.at(-1)).toEqual({ id: "timeline", label: "Timeline" });
+    expect(html.match(/id="corrections"/g)?.length).toBe(1);
+    expect(html).toMatch(/id="corrections"[^>]*class="[^"]*scroll-mt-14/);
+    expect(html).toContain("Fixed a number.");
+    const none = await render(fullView());
+    expect(navLinks(none).map((l) => l.id)).not.toContain("corrections");
+    expect(none).not.toContain('id="corrections"');
+  });
+
+  it("the sidebar flags of /a/$id agree with this nav", async () => {
+    const cases: [EventView, typeof SOURCES, typeof ASK | null][] = [
+      [fullView(), SOURCES, ASK],
+      [fullView(), SOURCES, null],
+      [fullView(), [], ASK],
+      [eventView(), SOURCES, ASK],
+      [
+        eventView({
+          ...fullView(),
+          section: { ...section, slug: "finance", name: "Finance" },
+        }),
+        SOURCES,
+        ASK,
+      ],
+    ];
+    for (const [view, sources, ask] of cases) {
+      const ids = navLinks(await render(view, { sources, ask })).map(
+        (l) => l.id,
+      );
+      const f = eventSectionFlags(view, sources.length > 0, ask !== null);
+      expect(ids.includes("brief")).toBe(f.brief);
+      expect(ids.includes("explain")).toBe(f.explain);
+      expect(ids.includes("ask")).toBe(f.ask);
+      expect(ids.includes("evidence")).toBe(f.evidenceClaims > 0);
+      expect(f.evidenceClaims).toBe(view.evidence?.claims.length ?? 0);
     }
   });
 });
