@@ -1,11 +1,9 @@
 // APPROVED_ARTICLE_SQL is the one definition of "approved" (#84). Pipeline code
 // interpolates the string into D1 prepare() text; public code uses the drizzle
-// fragment approvedArticleWhere built from it. ANY_BODY_APPROVED_SQL is the one
-// looser condition (primary tracker recovery path) and must stay distinct.
+// fragment approvedArticleWhere built from it.
 import { env } from "cloudflare:workers";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { ANY_BODY_APPROVED_SQL } from "../../src/pipeline/evidence/primary";
 import {
   APPROVED_ARTICLE_SQL,
   approvedArticleWhere,
@@ -71,24 +69,5 @@ describe("APPROVED_ARTICLE_SQL", () => {
       .bind(ids[0])
       .run();
     expect(await idsWhere(APPROVED_ARTICLE_SQL)).toEqual([]);
-  });
-});
-
-describe("ANY_BODY_APPROVED_SQL", () => {
-  it("matches an approval at any body version, unlike APPROVED_ARTICLE_SQL", async () => {
-    expect(await idsWhere(ANY_BODY_APPROVED_SQL)).toEqual([ids[0], ids[3]]);
-  });
-
-  it("still matches when the article has no body version", async () => {
-    await env.DB.prepare("UPDATE articles SET body_sha = NULL WHERE id = ?1")
-      .bind(ids[0])
-      .run();
-    expect(await idsWhere(ANY_BODY_APPROVED_SQL)).toEqual([ids[0], ids[3]]);
-  });
-
-  it("does not match rejected or unreviewed articles", async () => {
-    const got = await idsWhere(ANY_BODY_APPROVED_SQL);
-    expect(got).not.toContain(ids[1]);
-    expect(got).not.toContain(ids[2]);
   });
 });

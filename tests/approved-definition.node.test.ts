@@ -38,12 +38,6 @@ const WHITELIST: { file: string; constant: string; reason: string }[] = [
     reason:
       "reader page: returns the approving review's reviewer, which an EXISTS cannot. Same condition as APPROVED_ARTICLE_SQL.",
   },
-  {
-    file: "src/pipeline/evidence/primary.ts",
-    constant: "ANY_BODY_APPROVED_SQL",
-    reason:
-      "primary tracker recovery path: approved at ANY body version, not the current one. Different meaning on purpose; see #84.",
-  },
 ];
 
 /** Template text of `const NAME = \`...\`` or `const NAME: T = sql\`...\``. */
@@ -126,7 +120,7 @@ const EXPECTED_USES: Record<string, number> = {
   "src/pipeline/due-events.ts": 1,
   "src/pipeline/evidence/build.ts": 1,
   "src/pipeline/evidence/diff.ts": 2,
-  "src/pipeline/evidence/primary.ts": 4,
+  "src/pipeline/evidence/primary.ts": 5,
   "src/pipeline/group/group-article.ts": 3,
   "src/pipeline/watch/evaluate.ts": 1,
 };
@@ -141,19 +135,6 @@ it("each pipeline file uses the shared approved condition as often as expected",
     if (n > 0) found[file] = n;
   }
   expect(found).toEqual(EXPECTED_USES);
-});
-
-it("ANY_BODY_APPROVED_SQL is interpolated once, in the primary tracker", () => {
-  // It accepts an approval of any body version; a reader-facing query must
-  // not pick it up by accident.
-  const found: Record<string, number> = {};
-  for (const file of sources("src")) {
-    const n =
-      readFileSync(file, "utf8").match(/\$\{ANY_BODY_APPROVED_SQL\}/g)
-        ?.length ?? 0;
-    if (n > 0) found[file] = n;
-  }
-  expect(found).toEqual({ "src/pipeline/evidence/primary.ts": 1 });
 });
 
 it("admin routes do not compare a review decision to approved (#102)", () => {
