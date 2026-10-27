@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteRouteImport } from './routes/admin/route'
+import { Route as FollowRouteImport } from './routes/follow'
 import { Route as AArticleIdRouteImport } from './routes/a/$articleId'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminArtifactsRouteImport } from './routes/admin/artifacts'
@@ -45,6 +46,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRouteRoute = AdminRouteRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FollowRoute = FollowRouteImport.update({
+  id: '/follow',
+  path: '/follow',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AArticleIdRoute = AArticleIdRouteImport.update({
@@ -181,6 +187,7 @@ const RssWChar123watchChar125DotxmlRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/follow': typeof FollowRoute
   '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
@@ -209,6 +216,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/follow': typeof FollowRoute
   '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteRouteWithChildren
+  '/follow': typeof FollowRoute
   '/a/$articleId': typeof AArticleIdRoute
   '/admin/artifacts': typeof AdminArtifactsRoute
   '/admin/ask': typeof AdminAskRoute
@@ -270,6 +279,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/follow'
     | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
@@ -298,6 +308,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/follow'
     | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
@@ -327,6 +338,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/follow'
     | '/a/$articleId'
     | '/admin/artifacts'
     | '/admin/ask'
@@ -357,6 +369,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRouteRoute: typeof AdminRouteRouteWithChildren
+  FollowRoute: typeof FollowRoute
   AArticleIdRoute: typeof AArticleIdRoute
   EEventIdRoute: typeof EEventIdRoute
   RssChar123sectionChar125DotxmlRoute: typeof RssChar123sectionChar125DotxmlRoute
@@ -383,6 +396,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/follow': {
+      id: '/follow'
+      path: '/follow'
+      fullPath: '/follow'
+      preLoaderRoute: typeof FollowRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/a/$articleId': {
@@ -606,6 +626,7 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRouteRoute: AdminRouteRouteWithChildren,
+  FollowRoute: FollowRoute,
   AArticleIdRoute: AArticleIdRoute,
   EEventIdRoute: EEventIdRoute,
   RssChar123sectionChar125DotxmlRoute: RssChar123sectionChar125DotxmlRoute,
