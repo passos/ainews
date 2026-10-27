@@ -17,7 +17,7 @@ before the demo.
 | 1:50–2:15 | `/e/120`, `/e/155`, `/e/173` | Four sections: same pipeline, section-specific editorial products. Education: Evidence Checker ("39 meta-analyses, 39 positive findings"). Finance: Regulation Watch on the SEC FY2027 exam priorities, with the "Not investment advice" notice. Industry: Supply-Chain Ripple Map on the UPS rate increase. | N§3 |
 | 2:15–2:30 | `/admin/ask` | Ask a question about an event. The answer cites only approved source text and says what it could not verify. | N§1 reader loop, Stage 2 |
 | 2:30–2:50 | `/w`, then `/w/ai-startups` | Follow a Topic: a saved question with criteria. One published hit on `/e/177` "Anthropic officially files for its public debut" (TechCrunch, 2 cited articles). The watch fires only on articles approved after it was created, and its criteria reject commentary. | N§2.6, Stage 3 |
-| 2:50–3:00 | `/s/finance` | Finance notice: informational, not investment advice. Then `/admin/ledger`: every model call has a cost, under a $2/day cap. | N§4 guardrails, N§9 Cost |
+| 2:50–3:00 | `/s/finance` | Finance notice: informational, not investment advice. Then `/admin/ledger`: every model call has a cost and is reserved against a daily budget cap before it is sent. | N§4 guardrails, N§9 Cost |
 
 Backup pages if one fails: `/digest/technology/2026-10-26` (daily briefing),
 `/s/education`, `/s/industry`.
