@@ -18,7 +18,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
       - run: npm ci
       # worker-configuration.d.ts must match wrangler.jsonc.
       - run: npx wrangler types --check
@@ -50,7 +49,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
       - run: npm ci
       # Before the build: after `vite build`, wrangler reads the redirected
       # config in dist/.
