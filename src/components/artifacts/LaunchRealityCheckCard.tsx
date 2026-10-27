@@ -22,9 +22,9 @@ export function LaunchRealityCheckCard({
   if (sources.length === 0) return null;
   // The summary line is counted here, not written by the model.
   const n = check.claims.length;
-  const k = check.claims.filter(
-    (c) => c.verdict !== "no_independent_evidence",
-  ).length;
+  // A mechanical fact: claims with at least one retained evidence item,
+  // whatever the model's verdict says.
+  const k = check.claims.filter((c) => c.independentEvidence.length > 0).length;
   return (
     <section
       aria-label="Launch Reality Check"
