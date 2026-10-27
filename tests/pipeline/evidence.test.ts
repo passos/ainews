@@ -642,7 +642,11 @@ describe("Evidence Chunks & Quote Verification", () => {
       ).verified,
     ).toBe(true);
 
-    // Performance regression: highly repetitive candidate text does not cause quadratic slowdown
+    // Performance regression (ReDoS guard): highly repetitive candidate text must
+    // not cause quadratic or exponential slowdown. Typical run is ~25ms; the bound
+    // is 2000ms so a loaded CI runner (observed 144ms, and several times slower
+    // under contention) cannot trip it, while a super-linear regression on this
+    // ~270KB input (seconds to never) still does. Do not tighten to a small number.
     const repeatedCandidateBody =
       "not " + "revenue increased this year ".repeat(10000);
     const startPerf = Date.now();
@@ -652,7 +656,7 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
     const elapsedPerf = Date.now() - startPerf;
     expect(perfRes.verified).toBe(false);
-    expect(elapsedPerf).toBeLessThan(100);
+    expect(elapsedPerf).toBeLessThan(2000);
   });
 
   it("verifyQuoteInBody rejects quotes followed by post-negation or dispute predicates", () => {
