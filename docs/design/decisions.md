@@ -411,3 +411,11 @@ W2 契约（#112）在本轮定稿。使用者原话："使用 autopilot 继续�
 
 - arXiv cs.AI 的 `content_display` 已经改为 `full`（使用者原话："全部同意"，2026-10-26T19:27:13Z 执行，记录在 #86）。
 - 在后台批准日报 9 和 13 的文案（#114 部署后核对完成再做）。
+
+## 读者 Ask（#133，演示期）
+
+- 读者 Ask 的回答是给提问者本人的研究结果，不是发布内容：不进公开页、RSS、站点地图。
+  - 回答标注 "Model answer · not editor-reviewed"，下附一行 "Check it against the quoted sources below."。
+  - 只显示与本事件已批准正文逐字核对过的引用，其余列在 "Could not verify"。
+  - 拒答时不显示模型草稿；不做补充抓取；Finance 不开放。
+  - 这是"生成内容先审核后发布"的唯一例外，开关 `ASK_PUBLIC_ENABLED` 默认 `"false"`。

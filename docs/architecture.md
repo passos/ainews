@@ -42,7 +42,7 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 
 - 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics；空字符串 = 不输出 beacon 脚本）。
 - 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。`IP_HASH_SALT`（#132）：公开写入口给网络地址做哈希用的盐，至少 32 个随机字节，所有公开写入口共用，只用 `wrangler secret` 设置，不进 `vars`；缺失或为空时，需要它的写入口拒绝写入。
-- 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`、`READER_WATCH_ENABLED`（#132，读者自建关注，见第 6 节「读者 watch」）。
+- 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`、`READER_WATCH_ENABLED`（#132，读者自建关注，见第 6 节「读者 watch」）、`ASK_PUBLIC_ENABLED`（#133，事件页的读者 Ask）。`ASK_PUBLIC_ENABLED`：只认 `"true"`；顶层和 `env.test` 都是 `"false"`。为 `"false"` 时事件页没有入口，`askAboutStory` 返回 403 `ask_disabled`。v1 不含 Finance（403 `section_not_allowed`，入口不显示）。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
 
 ## 2. 前端契约（使用者原文）
@@ -100,6 +100,7 @@ src/
     publication/            唯一的公开读取层：所有公开页面和 RSS 只从这里读
     admin/                  后台 server function + Access 中间件
     reader-watch/           公开写入口：读者建 watch、撤销；私有 RSS 的读取层（#132）。写只限「公开写入口」表里的入口
+    reader-ask/             公开写入口：事件页的读者提问和读回答（#133）。写只限「公开写入口」表里的入口
     db/                     Drizzle schema、查询
   pipeline/                 collect · body · analyze · group · generate · digest · watch · ask · discover · edgar · funding
   providers/                模型客户端、llm_calls 账本、预算、Jina、toMarkdown
@@ -111,9 +112,9 @@ tests/
 架构测试（`tests/architecture.test.ts`）强制四条：
 
 1. `routes/**` 和 `server/publication/**` 不 import `pipeline/**` 或 `providers/**` 的模型模块。这保证"读者打开页面不触发模型调用"。
-2. `routes/**` 读数据只经过 `server/publication/**`、`server/admin/**`，或 `server/reader-watch/**`（私有 RSS 的读取层，#132）。`server/reader-watch/**` 的写只限下面「公开写入口」表里的入口。
-3. `server/reader-watch/**` 不 import `pipeline/**`、`providers/**`、`server/admin/**`；公开入口的 R1 遍历在 `server/reader-watch/` 停下（同 `server/publication/`）；`routes/**` 可以 import `server/reader-watch/**`。
-4. `server/reader-watch/**` 里每个 `createServerFn(` 都写成 `createServerFn({ method: "POST" })`。
+2. `routes/**` 读数据只经过 `server/publication/**`、`server/admin/**`，`server/reader-watch/**`（私有 RSS 的读取层，#132），或 `server/reader-ask/**`（#133）。`server/reader-watch/**` 和 `server/reader-ask/**` 的写只限下面「公开写入口」表里的入口。
+3. `server/reader-watch/**` 和 `server/reader-ask/**` 不 import `pipeline/**`、`providers/**`、`server/admin/**`（类型 import 也不行；队列消息类型在测试里与 `AskMessage` 对齐）；公开入口的 R1 遍历在这两个目录停下（同 `server/publication/`）；`routes/**` 可以 import 这两个目录。
+4. `server/reader-watch/**` 和 `server/reader-ask/**` 里每个 `createServerFn(` 都写成 `createServerFn({ method: "POST" })`。
 
 **公开写入口**（#132 新增）：公开站能写数据库的只有下表的入口，其他公开代码只读。新增入口要先改本表（#24 的匿名反馈、#133 的读者 Ask 按同样规则加行）。
 
@@ -122,8 +123,14 @@ tests/
 | 读者建 watch | `src/server/reader-watch/api.ts` `createReaderWatch` | `watches` 一行，`owner_kind = 'reader'` |
 | 读者撤销 watch | `src/server/reader-watch/api.ts` `revokeReaderWatch` | 该行的 `status`、`disabled_at`、`updated_at` |
 | 私有 RSS 读取 | `src/routes/rss/p/{$token}[.]xml.ts` → `serveReaderFeed` | 该行的 `last_read_at`，每 6 小时最多一次 |
+| 读者提问 | `src/server/reader-ask/api.ts` `askAboutStory` | `questions` 一行，`origin = 'public'`，`scope_type = 'event'`，`public_token_hash` = sha256hex(令牌)；再向 `Q_GENERATE` 发 `{ kind: "ask", questionId }` |
+| 读者读回答 | `src/server/reader-ask/api.ts` `getStoryAnswer` | 不写（POST 只为令牌不进 URL）；只对 `origin = 'public'` 且令牌哈希相等的行返回 status、refusal、answer、已验证引用、unverified |
 
-每个写入口都满足下面 6 条，例外只有两处。第一，第 1 条和第 3 条不适用于「私有 RSS 读取」：它是 GET 路由（令牌在路径里，RSS 阅读器只发 GET，所以不经过 Origin 检查），只写该行的 `last_read_at`，每 6 小时最多一次，只对 `status = 'active'` 且 `disabled_at` 为空的读者行；响应头由 `src/server/edge.ts` 对 `/rss/p/` 下所有状态码统一设置（`Cache-Control: private, no-store`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex, nofollow`）。第二，第 3 条不适用于「读者撤销 watch」：撤销和私有 RSS 读取都不受 `READER_WATCH_ENABLED` 影响（第 6 节「读者 watch」的「开关」）。
+每个写入口都满足下面 6 条，读者 watch 的例外有两处，读者 Ask 的例外见本段末尾。第一，第 1 条和第 3 条不适用于「私有 RSS 读取」：它是 GET 路由（令牌在路径里，RSS 阅读器只发 GET，所以不经过 Origin 检查），只写该行的 `last_read_at`，每 6 小时最多一次，只对 `status = 'active'` 且 `disabled_at` 为空的读者行；响应头由 `src/server/edge.ts` 对 `/rss/p/` 下所有状态码统一设置（`Cache-Control: private, no-store`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex, nofollow`）。第二，第 3 条不适用于「读者撤销 watch」：撤销和私有 RSS 读取都不受 `READER_WATCH_ENABLED` 影响（第 6 节「读者 watch」的「开关」）。读者 Ask（#133）另有三处例外：
+
+- 规则 3（自己的开关）不适用于「读者读回答」，同撤销。
+- 规则 4（加盐 IP 哈希、按网络限额）：v1 例外。只有全站上限 `READER_ASK_LIMITS.publicPerDay = 30`（每 UTC 日一条 `INSERT … SELECT … WHERE count < 30`）。按网络限额（每网络每日 3 次）在 #166 补上；补上之前，`ASK_PUBLIC_ENABLED` 只在演示期间为 `"true"`。
+- 规则 5（不调用模型）：`askAboutStory` 本身不调用模型；Ask 消费者调用，档位 `CALL_TIERS.adminAsk`、渠道 `gateway`。公开问题（`origin = 'public'`）跳过第 9 步补充抓取：只用本事件已批准文章的正文，每个问题最多一次 reason 调用。
 
 1. 写入用 `method: "POST"` 的 server function，handler 里再检查一次请求方法是 `POST`（不依赖框架拒绝 GET）。请求经过 `src/server/edge.ts` 的 Origin 检查（对 GET、HEAD、OPTIONS 以外的方法生效）。Origin 检查之后，`handleFetch` 对 `/_serverFn/*` 的非安全方法请求（路径判断与 `handleFetch` 里已有的 `normalizePath(pathname)` 以 `/_serverfn` 开头相同）在解析之前检查请求体大小，这个上限对所有 server function 生效，不只是本表的入口：上限 `SERVER_FN_MAX_BODY_BYTES = 65536`（64 KB；后台有上限的输入字符串最长 1000 个字符，板块和信源配置 JSON 远小于 64 KB）；`Content-Length` 大于上限 → 413；`Content-Length` 不是合法的非负整数 → 400；`Content-Length` 缺失时不返回 411，而是按字节计数读 `request.body`，超过上限就取消读取并返回 413，没超过就把读到的字节用 `new Request(request, { body: bytes })` 交给 handler（浏览器或 HTTP/2 请求可能不带这个头，不能因此让所有后台写失败）。这两种拒绝的写法同 `forbidden()`：纯文本正文，413 是 `payload_too_large`，400 是 `bad_content_length`（这两个字符串是本契约定的），带安全头和 `no-store`，不调用 handler。GET 的 `/_serverFn/*` 和 `/_serverFn/*` 以外的 POST 不检查。检查必须放在 edge：`@tanstack/start-server-core` 的 `server-functions-handler.js` 里，`handleServerAction` 先解析请求体（JSON 用 `await request.json()`，表单用 `request.formData()`），再调用 `action(...)`；函数中间件和 handler 都在 `action` 里运行，所以后台的 Access 中间件也是在解析之后才拒绝。框架自己只限制 GET 的 `payload` 查询参数（`MAX_PAYLOAD_SIZE = 1e6`），不限制 POST 请求体。私有 RSS 是 GET：它唯一的写是 `last_read_at`，只延长令牌持有者自己那一行的寿命。
 2. 输入用 zod 严格 schema（`.strict()`）校验，未知字段拒绝；长度和字符集写在第 6 节「读者 watch」。
@@ -198,7 +205,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
   - **被拒**：和现在一样，行写回 `failed`、`error = 'budget_exceeded'`，`failures` 不变，不花钱。工作排到以后：artifacts / evidence / watch 的到期扫描会重新入队，`generate` 消费者对 `BudgetExceededError` 直接 ack（不再重试进 DLQ）；归组消费者对它重置 `requeue_count`，文章保持 `analyzed` 等下一轮。
   - **已知行为**：日报导语（第 5 档）被拒时，当天日报不写导语，只显示已批准的标题和摘要，不会第二天补写。生产没有 `digest.timezone`，默认 UTC，所以日报在预算日开始（00:00 UTC）时生成，此时第 5 档放行。改成别的时区后，日报会在预算日中途生成，导语可能被第 5 档拒掉。
 - **归组**：`Q_GROUP` 并发 1，批内 `for…of` 顺序处理，不用 `Promise.all`。候选事件 = Vectorize 召回 ∪ D1 里 30 分钟内新建的事件（Vectorize 索引是异步的）。`event_articles.article_id` 唯一。
-- **预算渠道**：`workers_ai`、`gateway`、`jina`。
+- **预算渠道**：`workers_ai`、`gateway`、`jina`。v1 不设独立的 `ask` 预算渠道（#133 验收 2 记为演示期偏离）：公开 Ask 与后台 Ask 共用 gateway 上限，档位 `adminAsk`。全站每日最多 30 问 × `ASK_QUESTION_MAX_COST_MICROS`。独立的 fail-closed `ask` 渠道在 #133 后续切片实现。
 - **事件 revision**：什么时候加 1、三种写法和全部写路径见本节下面的「事件 revision」。产物键 = `(event_id, type, audience, input_revision, prompt_version, model)`，只有 `input_revision` 等于当前 revision 时才写入，避免旧任务覆盖新结果。
 - **多表更新**用 D1 `batch()` 一次提交。
 - **正文**按 `bodies/{article_id}/{sha256}.md` 存，不覆盖；论断证据引用的是具体版本。采集时 feed 自带的 `content:encoded` 原样存在 `feed/{sha256hex(canonical_url)}.html`（#5 写，在插入 `articles` 之前写，每次抓取覆盖写），它是正文抓取第 0 档的原始输入，不是正文版本；#6 按 `canonical_url` 算出键去读，有就用。
@@ -604,7 +611,7 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 | `digests` | `(industry_id, kind, period_start)` 唯一 |
 | `watches` / `watch_hits` | `watch_hits (watch_id, event_id, event_revision)` 唯一；`watches.owner_kind admin\|reader`（非空，默认 `admin`，ADD COLUMN，不加 CHECK）；`watches.token_hash` 唯一（可空，只有读者 watch 有）；`watch_hits.status` 增加 `delivered`（读者 watch 的命中，不进审核队列、不公开）。见第 6 节「读者 watch」 |
 | `reader_watch_admissions` | `id` 自增主键，`logical_key` 非空，不唯一；按 `day` 建索引；每行是一次读者 watch 判定尝试，用于每日尝试次数上限（第 6 节「读者 watch」） |
-| `questions` | Ask，只在后台 |
+| `questions` | Ask：后台提问（`origin = 'admin'`），以及开关 `ASK_PUBLIC_ENABLED` 打开时事件页的读者提问（`origin = 'public'`，只回给持有令牌的提问者，不公开发布）。`origin` 无表级 CHECK（加 CHECK 要重建表），写入方只写这两个值 |
 | `source_candidates` / `discovery_runs` | 发现 |
 | `companies` / `filings` / `financial_facts` | EDGAR |
 | `funding_rounds` | `(company_key, round_key)` 唯一，`superseded_by` 记录更正 |
