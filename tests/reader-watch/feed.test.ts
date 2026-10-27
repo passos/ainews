@@ -3,7 +3,11 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sweepReaderWatches } from "../../src/pipeline/watch/reader";
 import { revokeReaderWatchCore } from "../../src/server/reader-watch/create";
-import { readerFeedResponse } from "../../src/server/reader-watch/feed";
+import {
+  citedOnly,
+  readerFeedResponse,
+  serveReaderFeed,
+} from "../../src/server/reader-watch/feed";
 import { newReaderToken, tokenHash } from "../../src/server/reader-watch/token";
 import {
   db,
@@ -76,13 +80,42 @@ async function insertHit(
   eventId: number,
   rationale: string,
   status: "delivered" | "published" | "pending_review" = "delivered",
-): Promise<void> {
-  await env.DB.prepare(
+): Promise<number> {
+  const row = await env.DB.prepare(
     `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
-     VALUES (?1, ?2, 1, ?3, '', ?4, ?5)`,
+     VALUES (?1, ?2, 1, ?3, '', ?4, ?5) RETURNING id`,
   )
     .bind(watchId, eventId, NOW - HOUR_MS, rationale, status)
-    .run();
+    .first<{ id: number }>();
+  return row!.id;
+}
+
+async function setWatch(
+  id: number,
+  o: { lastReadAt?: number | null; status?: string },
+): Promise<void> {
+  if (o.lastReadAt !== undefined) {
+    await env.DB.prepare("UPDATE watches SET last_read_at = ?2 WHERE id = ?1")
+      .bind(id, o.lastReadAt)
+      .run();
+  }
+  if (o.status !== undefined) {
+    await env.DB.prepare("UPDATE watches SET status = ?2 WHERE id = ?1")
+      .bind(id, o.status)
+      .run();
+  }
+}
+
+const PRIVATE_HEADERS: Record<string, string> = {
+  "Cache-Control": "private, no-store",
+  "Referrer-Policy": "no-referrer",
+  "X-Robots-Tag": "noindex, nofollow",
+};
+
+function expectPrivateHeaders(res: Response): void {
+  for (const [name, value] of Object.entries(PRIVATE_HEADERS)) {
+    expect(res.headers.get(name), name).toBe(value);
+  }
 }
 
 const cite = (ids: unknown) => JSON.stringify({ articleIds: ids });
@@ -111,7 +144,11 @@ describe("private reader RSS (#132)", () => {
       "Cited agent paper",
       "Uncited side story",
     ]);
-    await insertHit(id, cited.eventId, cite([cited.articleIds[0]]));
+    const hitId = await insertHit(
+      id,
+      cited.eventId,
+      cite([cited.articleIds[0]]),
+    );
     const published = await seedApprovedEvent("Published event", [
       "Published-status story",
     ]);
@@ -147,7 +184,11 @@ describe("private reader RSS (#132)", () => {
     expect(xml).toContain(
       "Private feed. Anyone with this address can read it.",
     );
-    expect(xml).toContain(`<guid isPermaLink="false">r${id}-`);
+    expect(xml).toContain(`<guid isPermaLink="false">r${id}-${hitId}</guid>`);
+    // The channel links the site root.
+    expect(xml).toMatch(
+      /<channel><title>[^<]*<\/title><link>https:\/\/news\.example\/<\/link>/,
+    );
     expect(xml).not.toContain(token);
     expect(xml).not.toContain("/rss/p/");
   });
@@ -253,5 +294,115 @@ describe("private reader RSS (#132)", () => {
       expect(miss.headers.get("Referrer-Policy")).toBe("no-referrer");
       expect(miss.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
     }
+  });
+
+  it("410 for a reader row that is paused without disabled_at (fail closed)", async () => {
+    const token = newReaderToken();
+    const id = await insertWatch(token);
+    expect((await feed(token)).status).toBe(200);
+    await setWatch(id, { status: "paused" });
+    const res = await feed(token);
+    expect(res.status).toBe(410);
+    expectPrivateHeaders(res);
+
+    // disabled_at set on a row still marked active: also gone.
+    const half = newReaderToken();
+    const halfId = await insertWatch(half);
+    await env.DB.prepare("UPDATE watches SET disabled_at = ?2 WHERE id = ?1")
+      .bind(halfId, NOW)
+      .run();
+    expect((await feed(half)).status).toBe(410);
+
+    const revoked = newReaderToken();
+    await insertWatch(revoked);
+    await revokeReaderWatchCore(
+      env.DB,
+      { token: revoked },
+      { method: "POST", now: NOW },
+    );
+    const gone = await feed(revoked);
+    expect(gone.status).toBe(410);
+    expectPrivateHeaders(gone);
+  });
+
+  it("writes last_read_at of the read watch only, from exactly 6 hours on", async () => {
+    const tokenA = newReaderToken();
+    const a = await insertWatch(tokenA);
+    const b = await insertWatch(newReaderToken());
+    await setWatch(b, { lastReadAt: NOW - 10 * HOUR_MS });
+
+    await setWatch(a, { lastReadAt: NOW - 21_599_999 });
+    expect((await feed(tokenA)).status).toBe(200);
+    expect(await lastReadAt(a)).toBe(NOW - 21_599_999);
+
+    await setWatch(a, { lastReadAt: NOW - 21_600_000 });
+    expect((await feed(tokenA)).status).toBe(200);
+    expect(await lastReadAt(a)).toBe(NOW);
+    expect(await lastReadAt(b)).toBe(NOW - 10 * HOUR_MS);
+  });
+
+  it("titles an item with its newest cited article, never an uncited one", async () => {
+    const token = newReaderToken();
+    const id = await insertWatch(token);
+    // The cited article has an empty title; a newer approved article is not cited.
+    const ev = await seedApprovedEvent("Founding event title", [
+      "",
+      "Uncited newest story",
+    ]);
+    await insertHit(id, ev.eventId, cite([ev.articleIds[0]]));
+    const xml = await (await feed(token)).text();
+    expect(items(xml)).toBe(1);
+    expect(xml).toContain("<item><title>Watch update</title>");
+    expect(xml).not.toContain("Uncited newest story");
+    expect(xml).not.toContain("Founding event title");
+  });
+
+  it("drops a hit with no visible cited article", () => {
+    const hit = {
+      id: 1,
+      eventId: 2,
+      eventTitle: "Event title",
+      eventRevision: 1,
+      hitAt: NOW,
+      summary: "",
+      rationale: cite([999]),
+      articles: [
+        {
+          id: 3,
+          title: "Visible but uncited",
+          summary: null,
+          url: null,
+          sourceName: "Wire",
+          publishedAt: null,
+        },
+      ],
+    };
+    expect(citedOnly([hit])).toEqual([]);
+    const kept = citedOnly([{ ...hit, rationale: cite([3]) }]);
+    expect(kept.map((h) => h.eventTitle)).toEqual(["Visible but uncited"]);
+  });
+
+  it("shows each reader only their own hits", async () => {
+    const tokenA = newReaderToken();
+    const tokenB = newReaderToken();
+    const a = await insertWatch(tokenA);
+    const b = await insertWatch(tokenB);
+    const evA = await seedApprovedEvent("Event A", ["Story for reader A"]);
+    const evB = await seedApprovedEvent("Event B", ["Story for reader B"]);
+    await insertHit(a, evA.eventId, cite(evA.articleIds));
+    await insertHit(b, evB.eventId, cite(evB.articleIds));
+
+    const xmlA = await (await feed(tokenA)).text();
+    const xmlB = await (await feed(tokenB)).text();
+    expect(xmlA).toContain("Story for reader A");
+    expect(xmlA).not.toContain("Story for reader B");
+    expect(xmlB).toContain("Story for reader B");
+    expect(xmlB).not.toContain("Story for reader A");
+  });
+
+  it("serveReaderFeed reads env.DB and env.SITE_URL", async () => {
+    const res = await serveReaderFeed(newReaderToken());
+    expect(res.status).toBe(404);
+    expectPrivateHeaders(res);
   });
 });
