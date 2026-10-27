@@ -37,8 +37,8 @@ export function LaunchRealityCheckCard({
           {check.subject} · Claims by {check.claimant}
         </p>
         <p className="text-sm text-muted-foreground">
-          {k} of {n} {n === 1 ? "claim has" : "claims have"} independent
-          evidence in these sources.
+          {k} of {n} {n === 1 ? "claim has" : "claims have"} evidence from other
+          outlets in these sources.
         </p>
       </header>
       <ol className="flex flex-col gap-3">
