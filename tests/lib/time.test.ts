@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   dayBoundsUtc,
   formatUtc,
+  formatUtcDate,
   isWeeklyDigestDue,
   localDate,
   parseFeedDate,
@@ -150,6 +151,25 @@ describe("parseFeedDate", () => {
     expect(parseFeedDate("2026-02-31", "+00:00")).toBeNull();
     expect(parseFeedDate("2026-13-01", "+00:00")).toBeNull();
     expect(parseFeedDate("2026-10-22", "Asia/Shanghai")).toBeNull();
+  });
+});
+
+describe("formatUtcDate", () => {
+  it("is date-only, English, UTC, with no suffix", () => {
+    expect(formatUtcDate(Date.UTC(2026, 9, 26, 12))).toBe("Oct 26, 2026");
+  });
+
+  it("keeps the UTC day at both edges, whatever the machine time zone", () => {
+    // 23:30 UTC is already the next day in Asia/Shanghai.
+    expect(formatUtcDate(Date.parse("2026-10-26T23:30:00Z"))).toBe(
+      "Oct 26, 2026",
+    );
+    expect(formatUtcDate(Date.parse("2026-10-27T00:00:00Z"))).toBe(
+      "Oct 27, 2026",
+    );
+    expect(formatUtcDate(Date.parse("2026-10-26T00:00:00Z"))).toBe(
+      "Oct 26, 2026",
+    );
   });
 });
 

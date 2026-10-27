@@ -306,7 +306,7 @@ describe("On this page anchor nav", () => {
       /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u,
     );
     expect(html).not.toMatch(/\buppercase\b/);
-    expect(html).toContain("First seen");
+    expect(html).toContain("First report");
     expect(html).toContain("Original source");
   });
 
