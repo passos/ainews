@@ -1,10 +1,10 @@
 # Daily: architecture overview
 
 This document explains how Daily works, for a reader who is new to the code.
-The binding contract for implementers is [`architecture.md`](architecture.md)
-(in Chinese). If the two documents disagree, `architecture.md` wins.
+The binding contract for implementers is [`architecture.md`](architecture.md).
+If the two documents disagree, `architecture.md` wins.
 
-Requirements come from [`Newsren_Plan.md`](Newsren_Plan.md). References like
+Requirements come from [`Newsren_Plan.md`](../plan/Newsren_Plan.md). References like
 `N§2.2` point to a section of that plan.
 
 ## 1. What the system does

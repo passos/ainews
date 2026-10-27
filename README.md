@@ -6,9 +6,9 @@ links back to the exact source text. A human editor approves everything that
 goes public.
 
 - Live site: <https://news.ioenv.com>
-- Product plan: [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)
+- Product plan: [`docs/plan/Newsren_Plan.md`](docs/plan/Newsren_Plan.md)
 - 3-minute demo script: [`docs/demo.md`](docs/demo.md)
-- Architecture overview: [`docs/architecture-overview.md`](docs/architecture-overview.md)
+- Architecture overview: [`docs/architecture/architecture-overview.md`](docs/architecture/architecture-overview.md)
 
 It runs as one TanStack Start app on one Cloudflare Worker (`ainews-app`).
 
@@ -73,8 +73,8 @@ cron (every 10 min)
 - Fixed steps are code. Fast judgements use Jev; writing and reasoning use
   Gemini 3.8 Flash; embeddings use `@cf/baai/bge-m3`.
 
-Details: [`docs/architecture-overview.md`](docs/architecture-overview.md). The
-binding implementation contract is [`docs/architecture.md`](docs/architecture.md).
+Details: [`docs/architecture/architecture-overview.md`](docs/architecture/architecture-overview.md). The
+binding implementation contract is [`docs/architecture/architecture.md`](docs/architecture/architecture.md).
 
 ## Safety switches
 
@@ -93,16 +93,16 @@ env all of them are `"false"`.
 
 ## Documents
 
-| File                                                             | What it is                                            |
-| ---------------------------------------------------------------- | ----------------------------------------------------- |
-| [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)                   | Product requirements                                  |
-| [`docs/demo.md`](docs/demo.md)                                   | 3-minute demo script                                  |
-| [`docs/architecture-overview.md`](docs/architecture-overview.md) | How the system works                                  |
-| [`docs/architecture.md`](docs/architecture.md)                   | Architecture contract (Chinese)                       |
-| [`docs/design/decisions.md`](docs/design/decisions.md)           | Scope and technical decisions the owner confirmed     |
-| [`docs/deploy.md`](docs/deploy.md)                               | Deployment runbook                                    |
-| [`AGENTS.md`](AGENTS.md)                                         | Rules and process for coding agents                   |
-| Epic [#26](https://github.com/githonllc/ainews/issues/26)        | Milestones and their gates; every task is a sub-issue |
+| File                                                                                       | What it is                                            |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| [`docs/plan/Newsren_Plan.md`](docs/plan/Newsren_Plan.md)                                   | Product requirements                                  |
+| [`docs/demo.md`](docs/demo.md)                                                             | 3-minute demo script                                  |
+| [`docs/architecture/architecture-overview.md`](docs/architecture/architecture-overview.md) | How the system works                                  |
+| [`docs/architecture/architecture.md`](docs/architecture/architecture.md)                   | Architecture contract                                 |
+| [`docs/design/decisions.md`](docs/design/decisions.md)                                     | Scope and technical decisions the owner confirmed     |
+| [`docs/deploy.md`](docs/deploy.md)                                                         | Deployment runbook                                    |
+| [`AGENTS.md`](AGENTS.md)                                                                   | Rules and process for coding agents                   |
+| Epic [#26](https://github.com/githonllc/ainews/issues/26)                                  | Milestones and their gates; every task is a sub-issue |
 
 ## Requirements
 

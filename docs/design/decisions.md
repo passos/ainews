@@ -1,421 +1,421 @@
-# Scope 决定（2026-10-22）
+# Scope decisions (2026-10-22)
 
-来源：设计稿 v0.2（`core-design.html`）页底导出，由使用者粘回对话，原样保存。
-同时附加的要求：本周内完成 Newsren 计划书的 Stage 1–4。
+Source: exported at the bottom of design draft v0.2 (`core-design.html`). The owner pasted it back into the conversation. It is saved as is.
+The owner added one more requirement: finish Stage 1–4 of the Newsren plan within this week.
 
-与下面 scope 行冲突时的解读规则（待使用者确认，见 `docs/plan/week-plan.html` 01 节）：
-Q 答案和"Stage 1–4 全做"优先于 scope 行。
+Rule for conflicts with the scope lines below (the owner must still confirm it; see `docs/plan/week-plan.html`, section 01):
+The Q answers and "do all of Stage 1–4" take priority over the scope lines.
 
 ```
-ainews scope 决定（* = 改了推荐）
+ainews scope decisions (* = changed from the recommendation)
 
 ## v1
-- 采集 RSS / Atom
-- 采集网页列表页
-- JS 渲染页面
-- 正文抓取梯
-- 去重
-- 预筛
-- 评分与门槛
-- 摘要与标题改写
-- 事件归组
-- 日报
-- 公开网站
-- RSS 输出
-- 人工覆盖
-- 模型调用账本
-- 多行业
-- AI 起草行业配置
-- AI 发现信源
-- 信源健康监测
-- 日报邮件 *
-- 四个种子板块
-- 条目级溯源
-- 证据类型标签
+- Collect RSS / Atom
+- Collect web list pages
+- JS-rendered pages
+- Body fetch ladder
+- Dedup
+- Pre-filter
+- Scoring and thresholds
+- Summary and headline rewrite
+- Event grouping
+- Daily digest
+- Public website
+- RSS output
+- Manual override
+- Model call ledger
+- Multiple industries
+- AI-drafted industry config
+- AI source discovery
+- Source health monitoring
+- Daily digest email *
+- Four seed sections
+- Item-level provenance
+- Evidence type labels
 - Story Brief
-- 三档解释
-- 发布前审核
-- 金融安全边界
-- 事件时间线
-- 追到一手来源 *
+- Three-tier explanations
+- Pre-publication review
+- Finance safety boundary
+- Event timeline
+- Trace to primary source *
 - Follow a Topic *
-- 论断级证据 *
-- 课堂材料 *
-- 行业影响报告 *
-- API 型信源 *
-- 可信度与成本看板 *
+- Claim-level evidence *
+- Classroom materials *
+- Industry impact report *
+- API-type sources *
+- Credibility and cost dashboard *
 
-## 以后
-- 周报 / 月报
-- 候选自动启用
-- 定期重新发现
-- 门槛校准
-- 站内搜索
+## Later
+- Weekly / monthly report
+- Automatic enabling of candidates
+- Periodic re-discovery
+- Threshold calibration
+- On-site search
 - Ask Newsren
 
-## 不做
-- 模型排行榜
-- X / 微信公众号信源
-- 讨论帖热度信号
-- 飞书推送
-- IndexNow 提交
-- 精选账本 + 增量同步 API
-- 公开 JSON API *
+## Not doing
+- Model leaderboard
+- X / WeChat official account sources
+- Discussion-thread heat signal
+- Feishu push
+- IndexNow submission
+- Curated ledger + incremental sync API
+- Public JSON API *
 - MCP / Agent Markdown *
-- 模块插件系统
-- 访客反馈
-- 全文翻译
-- 图片代理 / OG 图
-- 多管理员 / 角色
+- Module plugin system
+- Visitor feedback
+- Full-text translation
+- Image proxy / OG image
+- Multiple admins / roles
 
-## 问题
-- Q1 · 网站给谁看？ 公开阅读，只有后台需要登录
-- Q2 · 后台怎么登录？ 有自己的域名接入 Cloudflare：Access 只保护 /admin *
-- Q3 · 输出语言？ 统一英文 *
-- Q4 · AI 发现的信源怎么启用？ 评估过线的自动启用，我事后可以停用 *
-- Q5 · 事件归组用什么召回候选事件？ v1 就上 Vectorize + 嵌入 *
-- Q6 · 模型怎么付费？ AI Gateway Unified Billing：预付 credits，一个账单
-- Q7 · 报告节奏？ 日报 + 周报 *
-- Q8 · 预期规模？ ≤ 5 个板块，每个 ≤ 50 个信源
-- Q9 · 站名？ Personal News
-- Q10 · 先跑通哪个板块，以及你已知的必盯信源？ Technology, arXiv, cs.ai, MIT Technology Review
-- Q11 · Ask Newsren 做成什么形式？ v1 只在后台给管理员用 *
-- Q12 · Follow a Topic 做成什么形式？ 管理员建关注主题，每个主题有公开页和 RSS
-- Q13 · 抓取梯要不要接第三方免费 reader（第 3 档）？ 接 Jina Reader，全局开关默认关，可以按信源单独打开
-- Q14 · 抓到的正文存在哪里？ 存在 R2，长期保留 *
+## Questions
+- Q1 · Who is the website for? Public reading; only the admin area needs login
+- Q2 · How does the admin log in? Own domain on Cloudflare: Access protects /admin only *
+- Q3 · Output language? English only *
+- Q4 · How are AI-discovered sources enabled? Sources that pass the evaluation are enabled automatically; I can disable them later *
+- Q5 · What recalls candidate events for event grouping? Vectorize + embeddings from v1 *
+- Q6 · How are models paid for? AI Gateway Unified Billing: prepaid credits, one bill
+- Q7 · Report cadence? Daily + weekly *
+- Q8 · Expected scale? ≤ 5 sections, ≤ 50 sources each
+- Q9 · Site name? Personal News
+- Q10 · Which section runs first, and which must-watch sources do you already know? Technology, arXiv, cs.ai, MIT Technology Review
+- Q11 · What form does Ask Newsren take? In v1, only the admin uses it, in the admin area *
+- Q12 · What form does Follow a Topic take? The admin creates topics; each topic has a public page and an RSS feed
+- Q13 · Does the fetch ladder use a third-party free reader (tier 3)? Use Jina Reader; the global switch is off by default; it can be turned on per source
+- Q14 · Where is the fetched body stored? In R2, kept long term *
 ```
 
-# 技术与执行决定（2026-10-22，第二轮）
+# Technical and execution decisions (2026-10-22, round 2)
 
-使用者原文：
+The owner's original text:
 
 ```
-1. cloudflare account 使用 simon 这个账户
-2. 技术栈采用 TanStack, using follow instruction
+1. Use the cloudflare account named simon
+2. Use TanStack for the tech stack, using follow instruction
    Build a TanStack Start application with file-based TanStack Router routes, validated search params, route loaders, typed server functions, full-document SSR, and streaming. Keep server-only work behind explicit boundaries, choose the appropriate SSR mode per route, and target the deployment runtime without changing the application model.
-3. 部署在 cloudflare 单 worker 上，使用 D1 + Drizzle + R2, domain name news.ioenv.com , 管理员邮箱 simon.jinyu.liu@gmail.com , 我会自行在后台配置 zero trust app, AI Gateway 我自行充值
-4. 固定流程使用确定性脚本和逻辑，快速判断使用 Jev 作为判断模型，其它考虑使用 google gemini 3.8 flash, Claude sonnet 5.5 或者 OpenAI 等效模型
-5. 所有规划好的工作在 githonllc/ainews 上开 epic issue + sub-issues, PR + CI + auto merge
-6. JINA_API_KEY, CF_AI_API_TOKEN, CLOUDFLARE_ACCOUNT_ID 储存在 .env.prod 中
-7. AIHOT 作为参考项目，@docs/Newsren_Plan.md 是实际项目需求必须满足，读者邮件订阅以后再做. 内容抓取暂时不考虑需要 Browser 才能抓取的内容，优先选择 jina 和CF的免费额度可以支持的内容源
-8. 项目进度无需过多顾虑timeline，按照全部完成的优先级做任务拆解和排期，可以参考选项A的安排，但是无需砍掉最耗时的核心功能（可以延后）
+3. Deploy on a single cloudflare worker, using D1 + Drizzle + R2, domain name news.ioenv.com , admin email simon.jinyu.liu@gmail.com , I will set up the zero trust app in the dashboard myself, and I will top up AI Gateway myself
+4. Fixed processes use deterministic scripts and logic. Quick judgments use Jev as the judgment model. For the rest, consider google gemini 3.8 flash, Claude sonnet 5.5, or an equivalent OpenAI model
+5. Open an epic issue + sub-issues for all planned work on githonllc/ainews, with PR + CI + auto merge
+6. JINA_API_KEY, CF_AI_API_TOKEN, CLOUDFLARE_ACCOUNT_ID are stored in .env.prod
+7. AIHOT is a reference project. @docs/Newsren_Plan.md holds the real project requirements and must be met. Reader email subscription comes later. For now, do not consider content that needs a Browser to fetch. Prefer content sources that the free quotas of jina and CF can support
+8. Do not worry much about the timeline. Break down and schedule tasks by the priority of finishing everything. You may follow the arrangement of option A, but do not cut the most time-consuming core feature (it may be delayed)
 CF worker name ainews-app
 ```
 
-由此对第一轮的调整：
-
-- 截止日期取消，按里程碑 M0–M4 排期（`docs/plan/week-plan.html`）。
-- "JS 渲染页面"和抓取梯第 4 档（Browser Run）改为以后；需要浏览器才能抓的信源不收。
-- 第一轮 01 节的四处解读照此执行：Ask 只在后台；周报进 v1、月报以后；过线自动启用，带上限；日报邮件只发管理员，读者邮件订阅以后。
-- 技术栈以 `docs/architecture.md` 为准，替代周计划 v1 的 04 节和评审文件里 Hono 相关的条目。
-
-# 第三轮决定（2026-10-22）
-
-- **Newsren 的两个缺口按推荐做**（使用者原话："两个缺口都按推荐做"）：
-  - N§2.1 My Newsren：读者偏好存在读者自己的浏览器里（`localStorage`），不发给服务器。包括解释档位、关注的板块、收藏的 watch。规格见 #10 和 #17。
-  - N§9 Usefulness：每个 Story Brief 和每份日报下面放"有用 / 没用"两个按钮，匿名、不收文字。这是公开站唯一的写入口，原始 IP 不入库，同一个人对同一项每天只算一票。规格见 #24。
-- **AI Gateway** 的 id 是 `ainews`，使用者已经建好。
-- **部署凭证**：新建了 Account API token `ainews-deploy`，原来的个人 token 不再给本项目用。`.env.prod` 和 GitHub secret `CLOUDFLARE_API_TOKEN` 都换成了它。
-- **CI 改在使用者的 wsl 主机上跑 self-hosted runner**（`wsl-ainews-1`、`wsl-ainews-2`），原因是 GitHub 托管的 runner 被账单拦住了。
-- **Zero Trust 应用和 Web Analytics 由使用者配置**。AUD tag、team domain 和 `CF_BEACON_TOKEN` 拿到后再写进 vars。
-- **分工**：ainews-design 会话负责设计和评审；ainews-impl 会话负责实现和事务性操作（push、开 PR、合并、部署、改仓库设置）。
-
-# 第四轮决定（2026-10-23）
-
-- **每日模型预算 $2**，按渠道拆：`gateway` $1.90（Jev、Gemini、Sonnet），`workers_ai` $0.10（嵌入），`jina` $0。#3 的种子数据已写入生产库，以后在后台（#9）改。
-- **Jev 从 AI Gateway credits 扣费**（使用者在 Gateway 日志里确认）。嵌入模型 bge-m3 的计费渠道还没确认，记在 #9 的待办里。
-- **Zero Trust 应用由 ainews-impl 用 API 建**：`ainews-admin`，只保护 `news.ioenv.com/admin`，只允许 `simon.jinyu.liu@gmail.com`，会话 24 小时。使用者登录后，后台页面和 Check session 都显示了邮箱，M0 完成。
-- **已知限制**：架构测试 R1/R2 只查直接导入，不查传递导入（经过 `components/` 或后台 helper 间接导入 `server/db`、`providers/`）。后续单独开 issue 补。
-
-# 第五轮决定（2026-10-23）
-
-- 2026-10-23 使用者决定：不用 Sonnet；`reason` 用 Gemini 3.8 Flash（备选 OpenAI gpt-6-luna）。见 #53。
-- 2026-10-23 ainews-design 决定：Q_INGEST 消费并发上限为 2，防止补队积压时突发调用触发网关限流（05:42Z 出现 32 次 2018）。见 #53。
-
-# 第六轮决定（2026-10-26）
-
-使用者原话（2026-10-26）："以需求文档 @docs/Newsren_Plan.md 为准，你来替我做最佳产品和用户体验的决策，我全部采纳你的建议"；
-随后补充："特别注意，你的决策着眼点是产品和用户体验，而不是最容易实现的方案或者成本最低的方案或者风险最小的方案"。
-本轮各条是 **ainews-design 代决**，依据是上面两句授权和 `Newsren_Plan.md`（N）。起因是 2026-10-26 的全面审查：
-15 个 PR 零评审合并，合并的 M2–M4 功能读者在线上几乎看不到。经过两路评审，都是 Anthropic 家族，标 [degraded]。
-
-## 审核与发布（N§6 "Require human approval for publishing initially"，N§4 "Human editorial review for any finance story"）
-
-- 生成内容到达读者之前，仍然必须经过人工批准。不放宽这条，改的是批准的成本：
-  - **事件级一键批准**：一次动作发布该事件当前 revision 的全部产物，以及带 verified 原文片段的论断。Finance 仍逐条批准。
-  - **已发布版本只在"已批准文章集合单纯变大"时保留**：新 revision 生成待审的新版本，旧版本继续显示，直到新版本被批准。
-    拒绝文章、人工改写、改板块、重新分析，都要在同一个 `batch()` 里立刻撤下旧版本。
-  - **去抖**：只对 revision 已变化、且 `updated_at` 距今 ≥30 分钟的事件重生成，一次审核会话只触发一次。
-  - **论断守卫**：没有 verified 原文片段的论断，不能批准，也不能公开。
-- **日报和周报**：条目自动发布，但只用已批准文章自己的标题和摘要。模型写的 `one_liner` 和导语另走审核，批准后才显示。
-  Finance 的日报和周报整份人工发布。管理员邮件要等 Email Service 接好，所以重开 #12，标明这一项还没完成。
-- **"已批准"的定义只有一个**：pipeline 里约 20 处内联复制，全部换成 `approvedArticleWhere`。
-
-## 读者功能
-
-- **产物全覆盖**（N§7 "one-click student, educator, and professional explanations"）：每个入选事件都生成 Story Brief、
-  三档解释、学习材料和本板块的编辑产品，不设分数门槛。调度器和 build 共用同一个资格函数。
-- **生成物都带来源**（N§6 Critical product requirements 第一条）：Story Brief、三档解释和学习材料，都要显示来源文章、发布时间和抓取时间。
-- **Ask 开放给读者**（N§7 Stage 2 "Readers get useful, evidence-backed answers"，N§1 Reader loop）：本条取代第二轮"Ask 只在后台"。
-  - 入口：每个事件页都有 "Ask about this story"。回答只依据该事件已批准的正文，逐句引用；查不到时说明查不到的是什么。
-  - 回答只给提问者本人，不发布到公开页。限流按网络地址设，只防滥用。
-  - **单独预算、服务端开关**（使用者原话，2026-10-26："读者ask走单独的budget，且受服务端的feature flag控制启用与否"）：
-    - 读者 Ask 的调用记到独立的预算渠道 `ask`，不占 `gateway` 的 $1.90；`ask` 用完后，当天的 Ask 显示"今天的提问额度已用完"，不影响流水线。
-    - 新开关 `ASK_PUBLIC_ENABLED`，和其他安全阀一样只认字符串 `"true"`，默认 `"false"`。为 `"false"` 时，公开页不显示入口，服务端也拒绝请求。
-    - `ask` 的日额度和开关的打开时间都由使用者在打开时决定，开关单独开 PR。后台的 Ask 仍走原有渠道，不受这个开关影响。
-  - 开放的前提是先做离线评估（N§6 "after evaluation"）：题集上引用正确率与拒答正确率都达标。
-  - v1 不含 Finance 板块（N§4 "no personalized investment advice"）。
-  - 契约 `docs/architecture.md` 的 `questions` 行另开一个 PR 修改。
-- **读者自建关注**（N§2.1 最高优先级、N§2.6、N§7 "Follow a Topic: save specific questions"）：读者不注册，
-  用自然语言写下要跟的问题和命中条件，系统给一个私有 RSS 地址。只在出现实质进展时命中，同一进展不重复命中。
-  管理员建的 watch 保留，作为公开示范，并在公开站加一个列表入口。邮件推送等读者订阅以后再做。
-- **补齐 N§3 Technology 的编辑产品**：Launch Reality Check、Technology Evolution Timeline。Technology 是目前唯一有数据的板块。
-
-## 文章阅读页（使用者原话，2026-10-26："我希望在保留原始链接的同时，能够在服务端保存抓取到的内容，用于格式化后默认展示"）
-
-- 新增公开页 `/a/$articleId`。首页、板块页、事件页里的文章标题默认链到这个页面；每张卡片和阅读页上都保留"在 {信源} 阅读原文"的原始链接。
-- 页面从上到下：标题；信源、发布时间、抓取时间；原始链接；带"AI summary"标签的 AI 摘要；格式化后的正文；页底再放一次原始链接。
-  Finance 文章页显示免责声明（N§4）。
-- 正文只显示已批准的那一版（`reviews.body_sha`），经过 `approvedArticleWhere`。R2 里没有正文时，退回到摘要加原始链接。
-- 渲染：在服务端把 markdown 转成 HTML，并按白名单净化。链接只允许 http/https（`safeHttpUrl`），外链加 `rel="noopener nofollow"`。
-  图片只允许 https，加 `loading="lazy"` 和 `referrerpolicy="no-referrer"`。去掉 script、iframe、form、style。
-  排版：正文宽度约 68 字符；标题、引用、代码、表格的样式要齐全，表格可横向滚动；亮色和暗色都要做；375px 下不能出现横向滚动。
-- `<link rel="canonical">` 指向原文。
-- 证据联动：Inspect evidence 里的每条引文都链到 `/a/$id#:~:text=…`，读者能在站内看到高亮的原文段落；原始链接同时保留。
-- **版权（N§6 Editorial quality gate 的 "licensing"）**：每个信源新增一个显示方式，取值 `full`、`excerpt` 或 `summary`。
-  - `full`：显示全文。
-  - `excerpt`：显示开头若干段，不超过正文的 25%，也不超过约 300 词，之后接"在 {信源} 继续阅读"。
-  - `summary`：只显示摘要。
-
-  新加的列默认是 `excerpt`。每个信源的取值：
-  - 政府和公共领域来源（Federal Reserve、SEC、FINRA、NIST、ed.gov、NCES、CISA）用 `full`。
-  - arXiv 用 `full`：现在存的是摘要，arXiv 的元数据（含摘要）采用 CC0。
-  - 商业媒体（MIT Technology Review 等）用 `excerpt`。
-
-  管理员可以在后台把任何一个信源切到 `full`，前提是已经确认对方允许转载。
-
-- RSS：条目链接改成 `/a/$id`，描述里带上原始链接；guid 不变。
-- 这个页面不调用模型，不占每日预算，排在 W2 的第一项。
-
-## Funding Round Tracker（#23，N§3 line 104、N§4）
-
-- 模型提取只生成提案。管理员批准是写入 `funding_rounds` 的唯一途径，提案本身不可修改，新报道生成新提案。
-- 管理员的操作有四种：批准为新轮；批准为对已发布轮 X 的更正；拒绝；撤回某个已发布轮。
-  - 提案的批准和拒绝都带 `WHERE state='pending'`，并用 `changes()=1` 串起来。
-  - 更正行 = X 的全部字段，再用提案里原文明确写出的字段覆盖。
-  - `superseded_by` 只能从 NULL 写一次。写入顺序要实测外键行为后再定。
-  - 批准前检查：所有来源文章都已经批准。
-- 管理员体验：每条提案预先配好最可能对应的已发布轮，逐字段列出差异和支持每个字段的原文片段。
-- 读者体验：`/funding` 可以按板块、阶段、投资方筛选，并显示趋势。每个数字都链接到原文片段，被更正的记录显示更正时间和原因。不给创业公司排名。
-- 字段政策：只记录原文明确写出的字段。身份由公司、具体轮次、公告日期三项确定，缺失或冲突时由管理员在提案上决定。
-
-## 信源（N§7 Stage 1 "Approved source feeds"）
-
-- 每个板块都要同时有一手来源和独立报道，这样才能把厂商的说法和独立评测对照起来。候选：
-  - Technology 增加：厂商一手新闻页（OpenAI、Google DeepMind、Anthropic）、独立评测（Epoch AI）、CISA 安全通告。
-  - Education：The Hechinger Report、EdSurge、ed.gov 新闻、NCES。
-  - Industry：Supply Chain Dive、Manufacturing Dive、NIST 新闻。
-  - Finance：Federal Reserve press releases、SEC press releases、FINRA news、TechCrunch Venture。
-- 每个候选都用项目 UA 验证：robots、feed、正文抓取梯，不需要浏览器才算通过。ainews-design 从验证通过的里定名单。
-  写生产时，先 dry-run，执行一次，前后的计数都要贴出来。
-
-## 钱与开关
-
-- **每日预算仍是 $2**（使用者原话，2026-10-26："预算按 $2 执行"）：`gateway` $1.90，`workers_ai` $0.10，`jina` $0。
-  上面的读者功能都在这个上限内做。设计方因此补一条：**按读者价值分配预算**，额度不够时先保证排在前面的：
-  1. 文章预筛、评分与摘要（Stage 1）；
-  2. 已批准事件的 Story Brief 与三档解释；
-  3. 论断与证据；
-  4. 学习材料、板块编辑产品、watch 判定；
-  5. 日报和周报的导语。
-
-  读者 Ask 不在这个排序里，它走单独的 `ask` 预算（见上）。额度用完后，后面的任务排队到第二天，不丢数据。后台预算页要显示每一档当天的花费。
-
-- 所有新的 write 和 reason 调用，做一次批量真实探测，确认 `finishReason=STOP`，预计花费不超过 $0.10。
-- `DISCOVERY_ENABLED` 保持 `"false"`。重新打开之前要先满足：probe 遵守 crawl-delay、带项目 UA、跨主机查 robots；
-  有当天预算；websearch 经过 `createModelClient` 记账。改这个开关仍然要单独开 PR，并经使用者同意。
-
-## 流程
-
-- 每个 PR 合并前，在 GitHub 上留两路评审的评论，适用时标 [degraded]。合并用 `--match-head-commit`，绑定评审过的 head。
-- #23 和 #24 的 0020 迁移号冲突：后合并的一方 rebase 后，重新运行 `db:generate`。
-- 5 个 `/private/tmp/ainews-review-*` worktree 的内容 main 上都已经有了，用 `git worktree remove` 清理。
-
-## 仍需使用者亲手做
-
-- 打开读者 Ask 时，定 `ask` 预算的日额度，并同意 `ASK_PUBLIC_ENABLED` 的开关 PR。
-- 在 `ioenv.com` 上接好 Email Service，并确认发件地址。
-- 提供能读 AI Gateway 日志的凭据，用于 M1 关口的对账，并确认 embed 的计费渠道。
-
-# 第七轮决定（2026-10-26）
-
-W1（#80–#86、#92、#95）在本轮做完并部署。除标明"使用者原话"的条目外，其余都是 **ainews-design 代决**，授权与第六轮相同。
-每条后面括号里的编号，是实现它的 issue 和 PR。
-
-## 站点与语言
-
-- **站名改为 Daily**（使用者原话："整个网站名称由 Personal News 改为 Daily"）。读者看到的站名只在 `src/lib/site.ts` 的
-  `SITE_NAME` 定义一次，抓取 UA 是 `DailyBot/1.0 (+https://news.ioenv.com)`。（#89，PR #91）
-  - 模型提示词里还有 17 处 "Personal News"（`src/pipeline/artifacts/prompts.ts` 14 处，`digest/prompt.ts` 2 处，`evidence/prompts.ts` 1 处），
-    读者看不到，**这次不改**：改提示词文字会改变 prompt hash，已有产物都要付费重新生成。下次因为别的原因改这几份提示词时，顺手一起换掉。
-  - 一起改名的还有 `SEC_USER_AGENT`、README、AGENTS.md 和 architecture.md。不改的：仓库名、Worker 名、域名、
-    浏览器存储键 `pn:prefs:v1`（改了读者的设置会丢），以及需求原文 `Newsren_Plan.md`。
-- **读者看得到的文字一律用英文**（使用者原话："在进行UI改进的时候，记住整个网站全部使用英文"）。
-  范围包括邮件、RSS、空状态和免责声明，也不加载中文字体。CI 会扫描 `src/components`、`src/routes`、`src/lib`、`src/server/publication`，
-  注释以外的字符串和页面文字里不能出现中文。后台页面不在扫描范围内。（#95，PR #96）
-- **UI 采用墨水屏风格**（使用者原话见 #87；补充："墨水屏方案看起来好多了，可以采纳，同时可以再借鉴一下 fastcade 项目的
-  landing page 的页面风格设计。不过字体方面选择适合阅读的字体"）。mock v2：<https://claude.ai/artifact/Lfc3QdrDPknc2twUejatuL>。
-  - 主色是灰和白。取消各板块的强调色，只保留一种低饱和度的语义色。与 TASTES 里偏好饱和色的那一条冲突时，以使用者原话为准。
-  - 版式借鉴 fastcade landing page：5:4 不对称首屏、一屏一个大元素、3px 实线、整幅灰色色带、直角。
-    不借鉴它的配色、倾斜排版和无衬线大标题。首页当日卡片只放真实数据。
-  - 字体：标题用 Newsreader，正文用 Literata（自托管），界面控件用系统无衬线体。
-  - 新增的硬编码颜色类不能比基线多。这项放在最后一波（W5）。favicon 要换成同样风格，控制台不能再报 `/favicon.ico` 404。（#87）
-
-## 信源名称（#80，PR #93）
-
-- 没有真实信源的文章（例如一手文件），在各自板块下挂到占位信源 `feed_url='system:primary-documents'`。
-  占位信源的状态是 `paused`，没有 `site_domain`，所以采集永远不会认领它；第一次用到时才创建。
-  不采用"匹配不到信源就跳过"，因为那样会丢掉大部分一手来源（N§2.5）。
-  公开页的来源栏显示文档所在的域名；公开的信源列表不列出占位信源。
-- 后台新建、编辑信源，以及批准候选信源时，`feed_url` 都不能以 `system:` 开头：先去掉首尾空格再判断，大小写不敏感，违反返回 400。
-  SQL 里也带同一个条件，作为第二道防线。
-
-## "已批准"的定义（#84，PR #101）
-
-- 只有一个定义：`APPROVED_ARTICLE_SQL` / `approvedArticleWhere`。下面三个常量是例外，每个都只能在白名单里出现一次：
-  - `ANY_BODY_APPROVED_SQL`：不要求正文版本一致，只用于证据的孤儿恢复，全仓只允许 `src/pipeline/evidence/primary.ts` 用一次。
-    要不要收紧，在 #103 决定。
-  - `APPROVED_BY_SQL`：阅读页要返回批准人，不能复用 EXISTS 的写法。
-  - `CARD_COLUMNS` 里的副本：别名是 `a2`/`r2`。
-- 测试 `EXPECTED_USES` 固定每个 pipeline 文件引用这个定义的次数，任何一处被删掉，测试就变红。
-  九个文件还缺行为测试，后台 TypeScript 里还有一份副本，都记在 #102。
-
-## 文章阅读页（#86，PR #97）
-
-- 摘要标签分三种："AI summary"、"Editor's summary"、"Summary from {source}"。
-  全文模式的署名是 "Original text by the authors, as published by {source}."；证据引文上的链接文字是 "Highlight in original ↗"。
-- `excerpt` 模式不显示图片。字数只统计含字母或数字的词，图片 alt 也算在内。
-- HTML 净化：只有 `svg` 和 `math` 的 `/>` 算自闭合；结束标签的名字后面必须紧跟空格、`/` 或 `>`；
-  空元素只删掉标签本身；扫描是线性的，200 KB 的恶意正文要在 500 ms 内渲染完。
-- R2 读取失败时，页面显示摘要和原始链接，返回 200。
-- 摘录里如果出现证据引文，要另外标出来，放在 W2 做。（#100）
-- 证据引文落在显示范围之外时，链到原文的 `#:~:text=` 并注明，不在站内显示超出版权范围的正文。
-- arXiv 用 `full` 时，页面同时保留 AI summary 和作者原文，原文前加 "Abstract" 小标题。
-  切到 `full` 需要写生产库，SQL 和 dry-run 已经准备好，**等使用者同意**。
-- watch 页里的文章链接改到 `/a/$id`，放在 W3。
-
-## 重新分析（#81，PR #108）
-
-- 重新分析不删账本，改为文章的 `analysis_generation` 加 1。这个值进入所有分析调用的账本 key，旧答案不会被拿回来，
-  旧的 `llm_calls` 和 `analyses` 行都保留。generation 为 0 时，key 和以前逐字节相同，部署后存量文章不会被重新付费分析。
-- 改 stage 时，必须同时满足"期望的旧 stage"和"期望的 generation"两个条件；分析结果提交时，也检查 generation，被新一轮重新分析超过的结果不写入。
-- 请求参数用 zod 校验，缺少 `expectedStage` 返回 400。
-- **已知行为，接受**：管理员在上一轮还没跑完时再点一次，进行中的那次调用照样计费。#81 已经否决了加租约的方案。
-- 目标：新的分析结果获批之前，读者看到的文章摘要仍是旧的已批准版本。现状只做到"新分析落库之前"：
-  新分析行一落库，公开页的 `CARD_FROM` 就取到最新一行，摘要不经审核就换掉了（#109 (c)）。这一缺口并入 W2 的审核体验 issue。
-- 后续问题记在 #109：事件 revision 加 1 的时机；EDGAR 文档抓取失败时会写入占位正文；公开页、后台、产物三处读取的"最新分析行"规则不一致。
-
-## EDGAR 修订（#83，PR #106）
-
-- `financial_facts.superseded_by` 的含义是："比它新、已经批准的修订文件中，最新的那条事实"。匹配条件是同公司、同概念、同单位、同 `period_end`，
-  并且来自不同的 filing。每次批准或拒绝，都在同一个 `batch()` 里用一条语句，从当前审核状态整体重算。
-  结果只取决于当前状态，与批准的顺序无关。唯一的读取方只判断这个字段是否为 NULL。
-- 重新抓取时如果正文变了，文章回到审核队列；在新版本被批准之前，原文件的数字保持隐藏（N§6）。
-- 第六轮"`superseded_by` 只写一次"那条只针对 `funding_rounds`；filings 的修订指针在拒绝或撤回时要回退。
-- 已知缺口：修订被批准后，原事件的 revision 不加 1，事件产物不会因为修订而重新生成。放到 W4 的 EDGAR 跟进里做。
-
-## 事件归组（#82，PR #88）
-
-- 新建事件的分支也用 `changes()=1` 串起来。消息重投时返回 `already_grouped`，不再给事件的 revision 加 1。
-- "重新分析的结果落库之前，就按新 revision 生成了产物"这个风险，由 W2 的去抖处理，并记在 #109。
-
-## Watch 命中（#85，PR #105）
-
-- 所有板块的命中都先进入待审，`auto` 板块也一样（设计裁决 1）：命中摘要是模型写的。
-- 公开站页眉只有在存在 watch 时才显示 Watches 入口。
-- 写入命中时不检查 revision：命中的含义是"在 revision R 出现了进展"。文章之后被撤下，由公开页的"已批准"条件把它挡住。
-- 去重：每个 watch 先去掉自己已经引用过的文章，没有剩下的文章就不调用模型。新建的 watch 只看创建之后才批准的文章（`created_at`，不是 `updated_at`）。
-  账本 key 包含这次真正送审的文章集合的 hash。
-- 接受：和上一次评估的分界恰好是同一毫秒批准的文章，会被漏掉。
-
-## 调度（#92，PR #107）
-
-- 产物、证据、watch 三类调度都用 `enqueueDueEvents` 选事件：只选当前 revision 还没有终态结果的事件。
-  排序是 `<kind>_scheduled_at ASC, id ASC`，入队时间在发送成功之后才写，所以总是失败的事件不会一直占着队头。
-- 终态包括：成功、解析失败、`CallFailedError`。可以重试的错误不写完成标记，R2 读取出错也算可以重试。
-- 迁移回填只标记旧查询已经不会再入队的事件。新的待处理集合是旧候选集的子集。
-  每次运行的花费可以比以前多，因为轮转会轮到旧 `LIMIT 20` 之外的事件，但上限是"待处理事件数 × 产物类型数"。
-- 去掉产物的分数门槛（第六轮）会增加调用，单独放在 #104：等预算分档上线后再做，PR 里要写出每天预计增加的花费。
-
-## 后续波次的调整
-
-- **信源**（使用者原话："最后，完成全部任务之后，我需要你补充一下新闻数据源，可以参考 https://aihot.news/"）：
-  第六轮"每个板块都配一手来源和独立报道"并入 W6（#90），排在 W5 之后。aihot.news 只作参考，不用它的名称和 logo。
-  每个信源都要通过接入红线，按 #8 的方式开 draft PR，附确认清单。
-- **Funding Round Tracker（#23）在 W4 按第六轮的 D1 设计重做。** 之前的 v3 保存在分支 `wip/issue-23-v3`，PR #74 已关闭。
-  契约 #76 的第二版作废并关闭，W4 写第三版时从 main 重新起草。
-
-## 评审流程
-
-- 合并前，要有绑定评审过的 head 的凭据，合并用 `--match-head-commit`。rebase 以后，按 range-diff 和冲突的解决方式重新出凭据。
-- 第一路来自非 Anthropic 家族，顺序是 codex → agy → grok。三家都没有额度时，第一路换成 fable，第二路是 opus 的契约评审，凭据标 [degraded]
-  （#108 就是这样，探测时间 17:39Z）。
-- 修复只要不超出上一轮的修复清单，增量由 ainews-design 亲自评审，不再派新一轮评审。
-- RED commit 可以因为缺少新接口而 typecheck 失败，前提是在 PR 正文里写明。证明缺陷本身的测试（defect witness）要长期保留，后面只改调用方式。
-- PR 正文的变异表要区分"实现者亲自跑过"和"agent 报告"两种。
-
-## 仍需使用者亲手做（本轮新增）
-
-- 同意把 arXiv cs.AI 的 `content_display` 改成 `full`。这是一行生产写入，不花钱，可以撤回。
-
-# 第八轮决定（2026-10-26）
-
-W2 契约（#112）在本轮定稿。使用者原话："使用 autopilot 继续自行裁决推进, 使用无人值守模式"。以下都是 **ainews-design 代决**，授权与第六轮相同；
-钱、开关和生产写入仍要使用者同意。
-
-## 事件版本与去抖（#112，PR #120）
-
-- 公开的产物和论断只取一个窗口：`(events.withdrawn_through, revision]`。revision 的写法分三种：增长、变更、只撤下。
-  详细规则写在 `architecture.md` 第 6 节「事件 revision」，实现在 #113。
-- **去抖**：在最后一次加 1 之后静默 30 分钟，或第一次加 1 之后满 2 小时，两者先到就到期。
-  本条取代第六轮"只看 `updated_at` 距今 ≥ 30 分钟"：只看静默时间时，一直有人审核的事件永远不到期。
-- `<kind>_pending_since` 只在写该类终态标记时清空，入队时不清空（本条取代第三批裁决的"入队时清空"）。
-- 接受的已知行为：
-  - 同一 revision 可能被重复入队。生成器对 `(event, revision, 类型)` 必须幂等，#113 给 artifacts 补一个测试。
-  - 超过 2 小时的审核会话会多次触发，但每 2 小时最多一次。
-- **自动批准在提交时用 SQL 重新判断板块**：条件是 `publish_mode = 'auto'`，并且 slug 不是 `finance`。
-  - 现在的代码只在分析开始时判断。如果分析期间管理员把文章改到 Finance，这篇文章仍会被自动批准。
-  - 生产没有受到影响：四个板块都是 `review`。在 #113 修复。
-- 正文变化：旧正文或新正文任意一个有批准记录，就按"变更"处理。
-- 在事件里的文章不能改板块（返回 409），所以改板块时没有已发布的版本需要撤下。第六轮"改板块要立刻撤下"由此满足。
-- 读者看到的分析行是批准记录里写的那一行（`reviews.analysis_id`，读取用 `READER_ANALYSIS_ID_SQL`）。
-  - 所有显示读者内容的页面都用它，包括论断审核页。
-  - `CANDIDATE_ANALYSIS_ID_SQL` 只用于文章审核队列和归组。
-  - 本条完成第七轮"新分析获批之前，读者看到的仍是旧的已批准版本"的目标。
-- 在 R 的产物生成之后才批准的论断，不进入任何产物。到 R+1 时重新抽取证据，新的论断要重新审核。
-
-## 孤儿恢复（#103）
-
-- 采用方案 B，收紧规则。
-  - 证据的孤儿恢复改用 `APPROVED_ARTICLE_SQL`。当前正文没有批准记录的孤儿，不再挂回事件，要先重新审核。
-  - 删除 `ANY_BODY_APPROVED_SQL` 和它在白名单里的条目。本条取代第七轮"要不要收紧，在 #103 决定"。
-
-## 日报文案（#114，PR #119）
-
-- 日报的导语和每条一句话点评属于模型写的文案。整份文案经管理员批准（`digests.copy_approved_at`）后才公开。
-  批准之前，公开页和 RSS 只显示条目本身。
-- 条目标题只取已批准的文章，不取存储里的标题：存储的标题可能来自后来被撤销批准的文章。
-- Finance 的日报只能手动发布。
-
-## 仍需使用者亲手做（本轮更新）
-
-- arXiv cs.AI 的 `content_display` 已经改为 `full`（使用者原话："全部同意"，2026-10-26T19:27:13Z 执行，记录在 #86）。
-- 在后台批准日报 9 和 13 的文案（#114 部署后核对完成再做）。
-
-## 读者 Ask（#133，演示期）
-
-- 读者 Ask 的回答是给提问者本人的研究结果，不是发布内容：不进公开页、RSS、站点地图。
-  - 回答标注 "Model answer · not editor-reviewed"，下附一行 "Check it against the quoted sources below."。
-  - 只显示与本事件已批准正文逐字核对过的引用，其余列在 "Could not verify"。
-  - 拒答时不显示模型草稿；不做补充抓取；Finance 不开放。
-  - 这是"生成内容先审核后发布"的唯一例外，开关 `ASK_PUBLIC_ENABLED` 默认 `"false"`。
+Changes to round 1 that follow from this:
+
+- The deadline is cancelled. Work is scheduled by milestones M0–M4 (`docs/plan/week-plan.html`).
+- "JS-rendered pages" and fetch ladder tier 4 (Browser Run) move to later. Sources that need a browser to fetch are not accepted.
+- The four readings in section 01 of round 1 apply as follows: Ask is admin-only; the weekly report is in v1 and the monthly report is later; sources that pass are enabled automatically, with a cap; the daily digest email goes to the admin only, and reader email subscription is later.
+- For the tech stack, `docs/architecture/architecture.md` is authoritative. It replaces section 04 of week plan v1 and the Hono-related items in the review file.
+
+# Round 3 decisions (2026-10-22)
+
+- **The two Newsren gaps follow the recommendation** (the owner's words: "do both gaps as recommended"):
+  - N§2.1 My Newsren: reader preferences live in the reader's own browser (`localStorage`). They are not sent to the server. They include the explanation tier, followed sections, and saved watches. The spec is in #10 and #17.
+  - N§9 Usefulness: under each Story Brief and each daily digest, show two buttons, "useful / not useful". They are anonymous and take no free text. This is the only write entry on the public site. The raw IP is not stored. One person counts for one vote per item per day. The spec is in #24.
+- The **AI Gateway** id is `ainews`. The owner has already created it.
+- **Deploy credentials**: a new Account API token `ainews-deploy` was created. The old personal token is no longer used for this project. `.env.prod` and the GitHub secret `CLOUDFLARE_API_TOKEN` both use the new token.
+- **CI runs on self-hosted runners on the owner's wsl host** (`wsl-ainews-1`, `wsl-ainews-2`). The reason is that billing blocks the GitHub-hosted runners.
+- **The owner sets up the Zero Trust app and Web Analytics.** The AUD tag, the team domain, and `CF_BEACON_TOKEN` go into vars after the owner provides them.
+- **Division of work**: the ainews-design session does design and review; the ainews-impl session does implementation and transactional operations (push, open PR, merge, deploy, change repo settings).
+
+# Round 4 decisions (2026-10-23)
+
+- **The daily model budget is $2**, split by channel: `gateway` $1.90 (Jev, Gemini, Sonnet), `workers_ai` $0.10 (embeddings), `jina` $0. The seed data from #3 is already in the production database. Change it later in the admin area (#9).
+- **Jev is billed from AI Gateway credits** (the owner confirmed this in the Gateway logs). The billing channel of the embedding model bge-m3 is not confirmed yet. It is a to-do in #9.
+- **ainews-impl creates the Zero Trust app through the API**: `ainews-admin`. It protects only `news.ioenv.com/admin`, allows only `simon.jinyu.liu@gmail.com`, and has a 24-hour session. After the owner logged in, the admin page and Check session both showed the email. M0 is complete.
+- **Known limitation**: architecture tests R1/R2 check direct imports only. They do not check transitive imports (indirect imports of `server/db` or `providers/` through `components/` or admin helpers). Open a separate issue later to fill this gap.
+
+# Round 5 decisions (2026-10-23)
+
+- 2026-10-23, the owner decided: do not use Sonnet. `reason` uses Gemini 3.8 Flash (fallback: OpenAI gpt-6-luna). See #53.
+- 2026-10-23, ainews-design decided: the Q_INGEST consumer concurrency limit is 2. This stops bursts of calls from triggering gateway rate limits when the backlog queue is full (32 errors 2018 at 05:42Z). See #53.
+
+# Round 6 decisions (2026-10-26)
+
+The owner's words (2026-10-26): "Take the requirements document @docs/Newsren_Plan.md as the standard. You make the best product and user-experience decisions for me. I adopt all your recommendations".
+Then the owner added: "Note in particular: your decisions focus on product and user experience, not on the easiest solution, the lowest-cost solution, or the lowest-risk solution".
+Each item in this round is **decided by ainews-design on the owner's behalf**. The basis is the two sentences above and `Newsren_Plan.md` (N). The trigger was the full review on 2026-10-26:
+15 PRs were merged with zero review, and readers can hardly see the merged M2–M4 features on the live site. Two reviewers reviewed it. Both are from the Anthropic family, marked [degraded].
+
+## Review and publishing (N§6 "Require human approval for publishing initially", N§4 "Human editorial review for any finance story")
+
+- Generated content must still get human approval before it reaches readers. This rule is not relaxed. What changes is the cost of approval:
+  - **One-click approval at event level**: one action publishes all artifacts of the event's current revision, and the claims that have a verified source snippet. Finance is still approved item by item.
+  - **A published version stays only when "the set of approved articles only grows"**: a new revision produces a new version that waits for review. The old version stays visible until the new version is approved.
+    Rejecting an article, a manual rewrite, a section change, or a re-analysis must take down the old version at once, in the same `batch()`.
+  - **Debounce**: regenerate only events whose revision has changed and whose `updated_at` is at least 30 minutes old. One review session triggers it once.
+  - **Claim guard**: a claim with no verified source snippet cannot be approved and cannot be made public.
+- **Daily and weekly reports**: items are published automatically, but they use only the title and summary of the approved article itself. The model-written `one_liner` and lead go through a separate review. They show only after approval.
+  Finance daily and weekly reports are published by hand as a whole. The admin email waits until Email Service is connected. So #12 is reopened, and it states that this item is not finished.
+- **There is only one definition of "approved"**: about 20 inline copies in the pipeline are all replaced by `approvedArticleWhere`.
+
+## Reader features
+
+- **Artifacts for every event** (N§7 "one-click student, educator, and professional explanations"): every selected event gets a Story Brief,
+  three-tier explanations, learning materials, and the editorial products of its section. There is no score threshold. The scheduler and the build share one eligibility function.
+- **Generated content always carries its sources** (N§6 Critical product requirements, item 1): Story Briefs, three-tier explanations, and learning materials must show the source articles, the publish time, and the fetch time.
+- **Ask is open to readers** (N§7 Stage 2 "Readers get useful, evidence-backed answers", N§1 Reader loop): this item replaces "Ask is admin-only" from round 2.
+  - Entry: every event page has "Ask about this story". The answer relies only on the approved body of that event and cites it sentence by sentence. When it finds nothing, it says what it could not find.
+  - The answer goes only to the person who asked. It is not published on a public page. The rate limit is set per network address. It only guards against abuse.
+  - **Separate budget, server-side switch** (the owner's words, 2026-10-26: "Reader ask uses a separate budget, and the server-side feature flag controls whether it is enabled"):
+    - Reader Ask calls are booked to a separate budget channel `ask`. They do not use the $1.90 of `gateway`. When `ask` is used up, that day's Ask shows "Today's question quota is used up" and the pipeline is not affected.
+    - New switch `ASK_PUBLIC_ENABLED`. Like the other safety valves, it accepts only the string `"true"`. The default is `"false"`. When it is `"false"`, the public pages show no entry and the server rejects requests.
+    - The owner decides the daily quota of `ask` and the time to turn the switch on, when turning it on. The switch change is a separate PR. Ask in the admin area still uses the existing channel and is not affected by this switch.
+  - A precondition for opening it is an offline evaluation (N§6 "after evaluation"): on the question set, both citation accuracy and refusal accuracy must reach the target.
+  - v1 does not include the Finance section (N§4 "no personalized investment advice").
+  - The `questions` row of the contract `docs/architecture/architecture.md` changes in a separate PR.
+- **Reader-created follows** (N§2.1 highest priority, N§2.6, N§7 "Follow a Topic: save specific questions"): the reader does not register.
+  The reader writes the question to follow and the match condition in natural language, and the system gives a private RSS address. It hits only when there is substantive progress. The same progress never hits twice.
+  Watches created by the admin stay as public examples, and the public site gets a list entry for them. Email push waits until reader subscription is built.
+- **Fill the N§3 Technology editorial products**: Launch Reality Check, Technology Evolution Timeline. Technology is the only section with data now.
+
+## Article reading page (the owner's words, 2026-10-26: "While keeping the original link, I want to save the fetched content on the server and show it by default after formatting")
+
+- Add the public page `/a/$articleId`. Article titles on the home page, the section pages, and the event pages link to this page by default. Every card and the reading page keep the original link "Read the original at {source}".
+- The page, top to bottom: title; source, publish time, fetch time; original link; AI summary with an "AI summary" label; formatted body; the original link again at the bottom.
+  A Finance article page shows the disclaimer (N§4).
+- The body shows only the approved version (`reviews.body_sha`), through `approvedArticleWhere`. When R2 has no body, fall back to the summary plus the original link.
+- Rendering: convert markdown to HTML on the server and sanitize it with an allowlist. Links allow only http/https (`safeHttpUrl`). External links get `rel="noopener nofollow"`.
+  Images allow only https and get `loading="lazy"` and `referrerpolicy="no-referrer"`. Remove script, iframe, form, and style.
+  Layout: body width of about 68 characters; full styles for headings, quotes, code, and tables; tables scroll horizontally; do both light and dark; no horizontal scroll at 375px.
+- `<link rel="canonical">` points to the original.
+- Evidence linking: every quote in Inspect evidence links to `/a/$id#:~:text=…`, so the reader sees the highlighted passage on this site. The original link stays too.
+- **Copyright (N§6 Editorial quality gate, "licensing")**: each source gets a new display mode with the value `full`, `excerpt`, or `summary`.
+  - `full`: show the full text.
+  - `excerpt`: show the first paragraphs, at most 25% of the body and at most about 300 words, then "Continue reading at {source}".
+  - `summary`: show only the summary.
+
+  The new column defaults to `excerpt`. The value for each source:
+  - Government and public-domain sources (Federal Reserve, SEC, FINRA, NIST, ed.gov, NCES, CISA) use `full`.
+  - arXiv uses `full`: what is stored now is the abstract, and arXiv metadata (including abstracts) is CC0.
+  - Commercial media (MIT Technology Review and others) use `excerpt`.
+
+  The admin can switch any source to `full` in the admin area, provided it is confirmed that the other side allows reprinting.
+
+- RSS: item links change to `/a/$id`, and the description carries the original link. The guid does not change.
+- This page does not call a model and does not use the daily budget. It is the first item of W2.
+
+## Funding Round Tracker (#23, N§3 line 104, N§4)
+
+- Model extraction produces proposals only. Admin approval is the only way to write to `funding_rounds`. A proposal itself cannot be modified; a new report produces a new proposal.
+- The admin has four actions: approve as a new round; approve as a correction of published round X; reject; withdraw a published round.
+  - Approve and reject of a proposal both carry `WHERE state='pending'` and are chained with `changes()=1`.
+  - A correction row = all fields of X, overwritten by the fields the proposal's source text states explicitly.
+  - `superseded_by` can be written from NULL only once. Decide the write order after testing the foreign key behavior.
+  - Check before approval: all source articles are already approved.
+- Admin experience: each proposal is pre-matched to the most likely published round. It lists the differences field by field, with the source snippet that supports each field.
+- Reader experience: `/funding` can filter by section, stage, and investor, and it shows trends. Every number links to the source snippet. A corrected record shows the correction time and reason. Startups are not ranked.
+- Field policy: record only the fields the source text states explicitly. Identity is set by three items: company, specific round, and announcement date. When one is missing or in conflict, the admin decides on the proposal.
+
+## Sources (N§7 Stage 1 "Approved source feeds")
+
+- Every section needs both primary sources and independent reporting, so that a vendor's claims can be compared with independent evaluations. Candidates:
+  - Technology adds: vendor primary news pages (OpenAI, Google DeepMind, Anthropic), independent evaluation (Epoch AI), CISA security advisories.
+  - Education: The Hechinger Report, EdSurge, ed.gov news, NCES.
+  - Industry: Supply Chain Dive, Manufacturing Dive, NIST news.
+  - Finance: Federal Reserve press releases, SEC press releases, FINRA news, TechCrunch Venture.
+- Verify every candidate with the project UA: robots, feed, and body fetch ladder. It passes only if no browser is needed. ainews-design picks the list from those that pass.
+  When writing to production, run a dry-run first, run it once, and post the counts before and after.
+
+## Money and switches
+
+- **The daily budget is still $2** (the owner's words, 2026-10-26: "Run the budget at $2"): `gateway` $1.90, `workers_ai` $0.10, `jina` $0.
+  All the reader features above stay within this cap. So the design side adds one rule: **allocate the budget by reader value**. When the quota is not enough, the items ranked first are served first:
+  1. Article pre-filter, scoring, and summary (Stage 1);
+  2. Story Brief and three-tier explanations of approved events;
+  3. Claims and evidence;
+  4. Learning materials, section editorial products, watch judgment;
+  5. Leads of the daily and weekly reports.
+
+  Reader Ask is not in this ranking. It uses the separate `ask` budget (see above). When the quota is used up, the later tasks queue until the next day. No data is lost. The admin budget page must show the spend of each tier for that day.
+
+- For all new write and reason calls, run one batch of real probes to confirm `finishReason=STOP`. The expected cost is at most $0.10.
+- `DISCOVERY_ENABLED` stays `"false"`. Before it is turned on again, these must be met: the probe obeys crawl-delay, carries the project UA, and checks robots across hosts;
+  there is budget for the day; websearch is booked through `createModelClient`. Changing this switch still needs a separate PR and the owner's consent.
+
+## Process
+
+- Before each PR is merged, leave a comment on GitHub with the two reviews, marked [degraded] when it applies. Merge with `--match-head-commit`, bound to the reviewed head.
+- The migration number 0020 conflicts between #23 and #24: the one merged later rebases and runs `db:generate` again.
+- The content of the 5 `/private/tmp/ainews-review-*` worktrees is already on main. Clean them up with `git worktree remove`.
+
+## Still to be done by the owner by hand
+
+- When Reader Ask is turned on, set the daily quota of the `ask` budget and agree to the PR for the `ASK_PUBLIC_ENABLED` switch.
+- Connect Email Service on `ioenv.com` and confirm the sender address.
+- Provide credentials that can read the AI Gateway logs, for the reconciliation at the M1 gate, and confirm the billing channel of embed.
+
+# Round 7 decisions (2026-10-26)
+
+W1 (#80–#86, #92, #95) was finished and deployed in this round. Except for items marked "the owner's words", all items are **decided by ainews-design on the owner's behalf**, with the same authority as round 6.
+The numbers in parentheses after each item are the issue and PR that implement it.
+
+## Site and language
+
+- **The site name changes to Daily** (the owner's words: "Change the name of the whole website from Personal News to Daily"). The site name that readers see is defined once, as `SITE_NAME` in `src/lib/site.ts`.
+  The fetch UA is `DailyBot/1.0 (+https://news.ioenv.com)`. (#89, PR #91)
+  - The model prompts still have 17 occurrences of "Personal News" (14 in `src/pipeline/artifacts/prompts.ts`, 2 in `digest/prompt.ts`, 1 in `evidence/prompts.ts`).
+    Readers cannot see them. **They are not changed this time**: changing the prompt text changes the prompt hash, and all existing artifacts would have to be regenerated at a cost. The next time these prompts are changed for another reason, replace them together.
+  - Also renamed: `SEC_USER_AGENT`, README, AGENTS.md, and architecture.md. Not renamed: the repo name, the Worker name, the domain name,
+    the browser storage key `pn:prefs:v1` (a change would lose reader settings), and the original requirements file `Newsren_Plan.md`.
+- **All text that readers can see is in English** (the owner's words: "When you improve the UI, remember that the whole website uses English only").
+  The scope includes email, RSS, empty states, and disclaimers. No Chinese font is loaded. CI scans `src/components`, `src/routes`, `src/lib`, and `src/server/publication`.
+  Outside comments, no Chinese may appear in strings or page text. Admin pages are not scanned. (#95, PR #96)
+- **The UI uses the e-ink style** (the owner's original words are in #87; the owner added: "The e-ink option looks much better. Adopt it. Also borrow from the page style of the fastcade project's
+  landing page. But for fonts, choose fonts suited to reading"). Mock v2: <https://claude.ai/artifact/Lfc3QdrDPknc2twUejatuL>.
+  - The main colors are grey and white. Remove the accent color of each section and keep only one low-saturation semantic color. If this conflicts with the TASTES item that prefers saturated colors, the owner's words win.
+  - The layout borrows from the fastcade landing page: a 5:4 asymmetric first screen, one large element per screen, 3px solid lines, full-width grey bands, right angles.
+    It does not borrow its colors, slanted layout, or sans-serif large headings. The home page's card for the current day holds real data only.
+  - Fonts: Newsreader for headings, Literata (self-hosted) for body text, and a system sans-serif for interface controls.
+  - New hard-coded color classes must not exceed the baseline. This item goes in the last wave (W5). The favicon must change to the same style, and the console must not report a `/favicon.ico` 404 any more. (#87)
+
+## Source names (#80, PR #93)
+
+- An article with no real source (for example a primary document) is attached to the placeholder source `feed_url='system:primary-documents'` under its own section.
+  The placeholder source has status `paused` and no `site_domain`, so collection never claims it. It is created the first time it is used.
+  We do not use "skip if no source matches", because that would drop most primary sources (N§2.5).
+  The source column on public pages shows the domain of the document. The public source list does not show the placeholder source.
+- When the admin creates or edits a source, or approves a candidate source, `feed_url` must not start with `system:`. Trim leading and trailing spaces first, then check, case-insensitive. A violation returns 400.
+  The SQL carries the same condition as a second line of defense.
+
+## Definition of "approved" (#84, PR #101)
+
+- There is only one definition: `APPROVED_ARTICLE_SQL` / `approvedArticleWhere`. The three constants below are exceptions. Each may appear only once in the allowlist:
+  - `ANY_BODY_APPROVED_SQL`: does not require the body version to match. It is used only for orphan recovery of evidence. In the whole repo only `src/pipeline/evidence/primary.ts` may use it, once.
+    Whether to tighten it is decided in #103.
+  - `APPROVED_BY_SQL`: the reading page must return the approver, so the EXISTS form cannot be reused.
+  - The copy in `CARD_COLUMNS`: the aliases are `a2`/`r2`.
+- The test `EXPECTED_USES` fixes how many times each pipeline file references this definition. If any one is deleted, the test turns red.
+  Nine files still lack behavior tests, and one more copy exists in the admin TypeScript. Both are recorded in #102.
+
+## Article reading page (#86, PR #97)
+
+- There are three summary labels: "AI summary", "Editor's summary", "Summary from {source}".
+  The credit line in full mode is "Original text by the authors, as published by {source}."; the link text on an evidence quote is "Highlight in original ↗".
+- `excerpt` mode shows no images. The word count counts only words that contain a letter or a digit, and image alt text counts too.
+- HTML sanitizing: only `svg` and `math` treat `/>` as self-closing; after the name of an end tag there must be a space, `/`, or `>` right away;
+  for an empty element, only the tag itself is removed; the scan is linear, and a malicious 200 KB body must render within 500 ms.
+- When an R2 read fails, the page shows the summary and the original link and returns 200.
+- If an evidence quote appears in an excerpt, mark it separately. This is done in W2. (#100)
+- When an evidence quote falls outside the displayed range, link to `#:~:text=` of the original and say so. Do not show body text beyond the copyright range on this site.
+- When arXiv uses `full`, the page keeps both the AI summary and the author's original text, and puts a small heading "Abstract" before the original text.
+  Switching to `full` needs a production database write. The SQL and the dry-run are ready, **waiting for the owner's consent**.
+- Change the article links in the watch page to `/a/$id`. This is done in W3.
+
+## Re-analysis (#81, PR #108)
+
+- Re-analysis does not delete the ledger. It adds 1 to the article's `analysis_generation`. This value goes into the ledger key of all analysis calls, so old answers are never returned.
+  The old `llm_calls` and `analyses` rows are kept. When generation is 0, the key is byte-for-byte the same as before, so existing articles are not re-analyzed at a cost after deployment.
+- When changing the stage, both conditions must hold: "expected old stage" and "expected generation". When an analysis result is committed, the generation is checked too. A result overtaken by a newer re-analysis is not written.
+- Request parameters are validated with zod. A missing `expectedStage` returns 400.
+- **Known behavior, accepted**: if the admin clicks again while the previous run is not finished, the call in progress is still billed. #81 already rejected the lease approach.
+- Goal: until the new analysis result is approved, the article summary that readers see stays the old approved version. The current state achieves this only "before the new analysis is stored":
+  once the new analysis row is stored, `CARD_FROM` on the public page picks the latest row, and the summary is replaced without review (#109 (c)). This gap goes into the W2 review-experience issue.
+- Follow-up problems are recorded in #109: when to add 1 to the event revision; a placeholder body is written when an EDGAR document fetch fails; the rule for the "latest analysis row" differs across the public page, the admin area, and the artifacts.
+
+## EDGAR revisions (#83, PR #106)
+
+- `financial_facts.superseded_by` means: "among the newer, approved revision filings, the latest fact". The match condition is the same company, concept, unit, and `period_end`,
+  and a different filing. On each approval or rejection, recompute it as a whole from the current review state, with one statement in the same `batch()`.
+  The result depends only on the current state, not on the order of approvals. The only reader checks just whether this field is NULL.
+- If the body changed on re-fetch, the article returns to the review queue. Until the new version is approved, the numbers of the original filing stay hidden (N§6).
+- The item "`superseded_by` is written only once" in round 6 applies to `funding_rounds` only. The revision pointer of filings must roll back on reject or withdrawal.
+- Known gap: after a revision is approved, the revision of the original event does not add 1, so the event artifacts are not regenerated because of the revision. This is done in the W4 EDGAR follow-up.
+
+## Event grouping (#82, PR #88)
+
+- The branch that creates a new event is also chained with `changes()=1`. On message redelivery it returns `already_grouped` and no longer adds 1 to the event's revision.
+- The risk that "artifacts are generated for the new revision before the re-analysis result is stored" is handled by the W2 debounce and recorded in #109.
+
+## Watch hits (#85, PR #105)
+
+- Hits in all sections go to pending review first, `auto` sections too (design ruling 1): the hit summary is written by a model.
+- The public site header shows the Watches entry only when a watch exists.
+- Do not check the revision when writing a hit: a hit means "progress appeared at revision R". If the article is taken down later, the "approved" condition of the public page blocks it.
+- Dedup: each watch first drops the articles it already cited. If no article is left, no model is called. A new watch looks only at articles approved after its creation (`created_at`, not `updated_at`).
+  The ledger key includes the hash of the set of articles actually sent for judgment.
+- Accepted: an article approved in the exact same millisecond as the boundary of the previous evaluation is missed.
+
+## Scheduling (#92, PR #107)
+
+- The three schedulers (artifacts, evidence, watch) all select events with `enqueueDueEvents`: it selects only events whose current revision has no terminal result yet.
+  The order is `<kind>_scheduled_at ASC, id ASC`. The enqueue time is written only after the send succeeds, so an event that always fails does not hold the head of the queue.
+- Terminal states are: success, parse failure, `CallFailedError`. A retryable error writes no completion mark. An R2 read error also counts as retryable.
+- The migration backfill marks only events that the old query would no longer enqueue. The new pending set is a subset of the old candidate set.
+  Each run may spend more than before, because the rotation now reaches events beyond the old `LIMIT 20`. The upper bound is "number of pending events × number of artifact types".
+- Removing the score threshold for artifacts (round 6) increases calls. It is handled separately in #104: do it after the budget tiers are live, and the PR must state the expected extra daily spend.
+
+## Adjustments to later waves
+
+- **Sources** (the owner's words: "Finally, after all tasks are done, I need you to add more news data sources. You can refer to https://aihot.news/"):
+  the round 6 rule "every section gets primary sources and independent reporting" merges into W6 (#90), after W5. aihot.news is a reference only. Do not use its name or logo.
+  Every source must pass the onboarding red lines. Open a draft PR with a confirmation checklist, in the manner of #8.
+- **Funding Round Tracker (#23) is redone in W4 with the D1 design of round 6.** The earlier v3 is kept in branch `wip/issue-23-v3`, and PR #74 is closed.
+  The second version of contract #76 is void and closed. In W4, draft the third version from main again.
+
+## Review process
+
+- Before merging, there must be a record bound to the reviewed head. Merge with `--match-head-commit`. After a rebase, issue a new record based on the range-diff and on how the conflicts were resolved.
+- The first reviewer is from a non-Anthropic family, in the order codex → agy → grok. When none of the three has quota, the first reviewer becomes fable and the second is an opus contract review. The record is marked [degraded]
+  (this is what happened for #108, probe time 17:39Z).
+- A fix that stays within the previous round's fix list is reviewed incrementally by ainews-design itself. No new review round is dispatched.
+- A RED commit may fail typecheck because a new interface is missing, if the PR body says so. A test that proves the defect itself (defect witness) must be kept for the long term. Later changes only the way it is called.
+- The mutation table in the PR body must separate two kinds: "run by the implementer personally" and "reported by an agent".
+
+## Still to be done by the owner by hand (new in this round)
+
+- Agree to change `content_display` of arXiv cs.AI to `full`. This is a one-line production write. It costs no money and can be reverted.
+
+# Round 8 decisions (2026-10-26)
+
+The W2 contract (#112) is finalized in this round. The owner's words: "Use autopilot, keep deciding and moving forward on your own, use unattended mode". The items below are all **decided by ainews-design on the owner's behalf**, with the same authority as round 6.
+Money, switches, and production writes still need the owner's consent.
+
+## Event versions and debounce (#112, PR #120)
+
+- Public artifacts and claims take only one window: `(events.withdrawn_through, revision]`. A revision is written in three ways: grow, change, withdraw only.
+  The detailed rules are in `architecture.md` section 6, "Event revision". The implementation is in #113.
+- **Debounce**: it is due after 30 minutes of quiet since the last +1, or after 2 hours since the first +1, whichever comes first.
+  This item replaces the round 6 rule "look only at `updated_at` being at least 30 minutes old": with quiet time alone, an event that someone keeps reviewing never becomes due.
+- `<kind>_pending_since` is cleared only when the terminal mark of that kind is written. It is not cleared at enqueue. (This item replaces the "clear at enqueue" ruling of the third batch.)
+- Accepted known behavior:
+  - The same revision may be enqueued more than once. The generator must be idempotent for `(event, revision, kind)`. #113 adds a test for artifacts.
+  - A review session longer than 2 hours triggers more than once, but at most once every 2 hours.
+- **Auto-approval re-checks the section in SQL at commit time**: the condition is `publish_mode = 'auto'` and the slug is not `finance`.
+  - The current code checks only when the analysis starts. If the admin moves the article to Finance during the analysis, the article is still auto-approved.
+  - Production is not affected: all four sections are `review`. Fixed in #113.
+- Body change: if either the old body or the new body has an approval record, treat it as a "change".
+- An article that is in an event cannot change section (returns 409), so when a section changes there is no published version to take down. This satisfies the round 6 rule "take down at once on a section change".
+- The analysis row that readers see is the row written in the approval record (`reviews.analysis_id`, read with `READER_ANALYSIS_ID_SQL`).
+  - Every page that shows reader content uses it, including the claim review page.
+  - `CANDIDATE_ANALYSIS_ID_SQL` is used only for the article review queue and for grouping.
+  - This item completes the round 7 goal "until the new analysis is approved, readers still see the old approved version".
+- A claim approved after the artifacts of R were generated does not enter any artifact. At R+1, evidence is extracted again, and the new claims must be reviewed again.
+
+## Orphan recovery (#103)
+
+- Option B is adopted: tighten the rule.
+  - Orphan recovery of evidence uses `APPROVED_ARTICLE_SQL`. An orphan whose current body has no approval record is no longer attached back to an event. It must be reviewed again first.
+  - Delete `ANY_BODY_APPROVED_SQL` and its entry in the allowlist. This item replaces the round 7 rule "whether to tighten it is decided in #103".
+
+## Daily digest copy (#114, PR #119)
+
+- The lead and the one-line comment of each item in the daily digest are model-written copy. The whole copy is made public only after the admin approves it (`digests.copy_approved_at`).
+  Before approval, the public page and RSS show only the items themselves.
+- Item titles come only from approved articles, not from stored titles: a stored title may come from an article whose approval was later revoked.
+- The Finance daily digest can only be published manually.
+
+## Still to be done by the owner by hand (updated in this round)
+
+- `content_display` of arXiv cs.AI has been changed to `full` (the owner's words: "Agree to all", done at 2026-10-26T19:27:13Z, recorded in #86).
+- Approve the copy of daily digests 9 and 13 in the admin area (do it after the post-deploy check of #114 is complete).
+
+## Reader Ask (#133, demo period)
+
+- A Reader Ask answer is a research result for the person who asked. It is not published content: it does not go into public pages, RSS, or the sitemap.
+  - The answer is labeled "Model answer · not editor-reviewed", with one line below it, "Check it against the quoted sources below.".
+  - It shows only the quotes that were checked verbatim against the approved body of this event. The rest are listed under "Could not verify".
+  - On refusal, the model draft is not shown. No extra fetching is done. Finance is not open.
+  - This is the only exception to "generated content is reviewed before publishing". The switch `ASK_PUBLIC_ENABLED` defaults to `"false"`.
