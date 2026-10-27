@@ -57,6 +57,9 @@ export interface FilteredDigestResult {
   suppressIntro: boolean;
 }
 
+// Reader-visible name for an item whose approved articles all have empty titles.
+const UNTITLED_ITEM = "Untitled story";
+
 // copyApproved: the admin approved this digest's model copy (#114). Without it,
 // the stored oneLiner is never read; items show the live approved summary.
 async function filterSurvivingItems(
@@ -101,16 +104,24 @@ async function filterSurvivingItems(
     if (!existing) {
       activeEventInfo.set(er.event_id, {
         revision: er.event_revision,
-        firstTitle: er.title,
+        firstTitle: er.title.trim() === "" ? "" : er.title,
         latestSummary: er.summary || "",
         count: 1,
       });
     } else {
       existing.count += 1;
+      // The first non-empty approved title names the event.
+      if (existing.firstTitle === "" && er.title.trim() !== "") {
+        existing.firstTitle = er.title;
+      }
       if (er.summary) {
         existing.latestSummary = er.summary;
       }
     }
+  }
+
+  for (const info of activeEventInfo.values()) {
+    if (info.firstTitle === "") info.firstTitle = UNTITLED_ITEM;
   }
 
   const survivingItems: DigestItemView[] = [];
