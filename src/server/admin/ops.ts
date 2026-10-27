@@ -11,6 +11,7 @@ import {
 } from "../../providers/tiers";
 import { syncRevisionDiff } from "../../pipeline/evidence/diff";
 import { isSystemSource } from "../../lib/source-attribution";
+import { FINANCE_SLUG } from "../../lib/sections";
 import {
   DEFAULT_CONTENT_DISPLAY,
   type ContentDisplay,
@@ -37,7 +38,7 @@ import {
   sources,
 } from "../db/schema";
 
-export const FINANCE_SLUG = "finance";
+export { FINANCE_SLUG } from "../../lib/sections";
 
 export interface PendingArticleView {
   id: number;
