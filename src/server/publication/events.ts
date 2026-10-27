@@ -344,3 +344,46 @@ export async function getEventSources(
         y.count - x.count || (x.name < y.name ? -1 : x.name > y.name ? 1 : 0),
     );
 }
+
+export interface ArtifactSourceView {
+  id: number;
+  title: string;
+  /** Epoch milliseconds; null when the feed gave no publish time. */
+  publishedAt: number | null;
+  /** Epoch milliseconds. */
+  fetchedAt: number;
+}
+
+interface ArtifactSourceRow {
+  id: number;
+  title: string;
+  published_at: number | null;
+  fetched_at: number;
+}
+
+/**
+ * The source articles of an event's artifacts: today the artifacts are built
+ * from the event's approved articles, so that is the list. Fields come from
+ * `articles` only.
+ */
+export async function getEventArtifactSources(
+  db: Db,
+  eventId: number,
+): Promise<ArtifactSourceView[]> {
+  const rows = await db.all<ArtifactSourceRow>(sql`
+    SELECT a.id AS id,
+           COALESCE(NULLIF(a.title_override, ''), a.title) AS title,
+           a.published_at AS published_at,
+           a.fetched_at AS fetched_at
+    FROM event_articles ea
+    JOIN articles a ON a.id = ea.article_id
+    WHERE ea.event_id = ${eventId} AND ${approvedArticleWhere}
+    ORDER BY COALESCE(a.published_at, a.fetched_at) ASC, a.id ASC
+  `);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    publishedAt: r.published_at,
+    fetchedAt: r.fetched_at,
+  }));
+}

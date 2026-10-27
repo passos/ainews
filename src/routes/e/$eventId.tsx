@@ -17,7 +17,11 @@ import { SupplyChainRippleCard } from "../../components/artifacts/SupplyChainRip
 import { EarningsDecoderCard } from "../../components/artifacts/EarningsDecoderCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
-import { getEvent, getEventSources } from "../../server/publication/api";
+import {
+  getEvent,
+  getEventArtifactSources,
+  getEventSources,
+} from "../../server/publication/api";
 import { SITE_NAME } from "../../lib/site";
 
 export async function loadEvent(
@@ -26,14 +30,21 @@ export async function loadEvent(
     getEvent: (eventId: number) => getEvent({ data: { eventId } }),
     getEventSources: (eventId: number) =>
       getEventSources({ data: { eventId } }),
+    getEventArtifactSources: (eventId: number) =>
+      getEventArtifactSources({ data: { eventId } }),
   },
 ) {
   const eventId = Number(params.eventId);
   if (Number.isNaN(eventId) || eventId <= 0) throw notFound();
-  const data = await fns.getEvent(eventId);
+  // Awaited, not streamed: the artifact cards are in the shell and show them.
+  const [data, artifactSources] = await Promise.all([
+    fns.getEvent(eventId),
+    fns.getEventArtifactSources(eventId),
+  ]);
   if (!data) throw notFound();
   return {
     data,
+    artifactSources,
     // Streamed after the shell
     sources: fns.getEventSources(eventId),
   };
@@ -59,7 +70,7 @@ export const Route = createFileRoute("/e/$eventId")({
 });
 
 function EventPage() {
-  const { data, sources } = Route.useLoaderData();
+  const { data, artifactSources, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
   const {
     section,
@@ -105,6 +116,7 @@ function EventPage() {
         <StoryBriefCard
           brief={artifacts.brief}
           verifiedClaims={verifiedClaims}
+          sources={artifactSources}
         />
       )}
 
@@ -116,6 +128,7 @@ function EventPage() {
         <AudienceExplainCard
           explanations={artifacts.explanations}
           initialAudience={audience}
+          sources={artifactSources}
         />
       )}
 
@@ -126,6 +139,7 @@ function EventPage() {
           <LearningMaterialCard
             materials={artifacts.learningMaterials}
             initialAudience={audience}
+            sources={artifactSources}
           />
         )}
 

@@ -426,6 +426,30 @@ async function main() {
   if (noEvent.res.status !== 404)
     fail(`GET /e/999999 returned ${noEvent.res.status}`);
 
+  // Event page (#115): the three artifact cards each list their source
+  // articles with a reader link and both times. Scripts are cut out first:
+  // the loader data in them repeats the attribute text.
+  const eventPage = await page("/e/1");
+  if (eventPage.res.status !== 200)
+    fail(`GET /e/1 returned ${eventPage.res.status}`);
+  const eventHtml = eventPage.text.replace(/<script\b[\s\S]*?<\/script>/gi, "");
+  const sourceBlocks = [
+    ...eventHtml.matchAll(
+      /<footer\b[^>]*aria-label="Artifact sources"[^>]*>[\s\S]*?<\/footer>/g,
+    ),
+  ].map((m) => m[0]);
+  if (sourceBlocks.length !== 3) {
+    fail(`GET /e/1 has ${sourceBlocks.length} Artifact sources blocks, want 3`);
+  }
+  for (const block of sourceBlocks) {
+    for (const needle of ['href="/a/', "Published", "Fetched"]) {
+      if (!block.includes(needle)) {
+        fail(`GET /e/1 Artifact sources block lacks "${needle}"`);
+      }
+    }
+  }
+  console.log("ok: GET /e/1 has 3 Artifact sources blocks");
+
   // Invalid search params: TanStack redirects (307) to the canonical URL
   // without them. The redirect target serves page 1.
   const oddPath = "/s/technology?audience=bogus&page=-3";
