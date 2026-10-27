@@ -17,9 +17,14 @@ import { SITE_NAME } from "../../lib/site";
  * The only definition of a public watch (#132): owner_kind is exactly
  * 'admin'. A reader watch, or any other owner kind, is never public. Every
  * public read of `watches` uses it, and public queries do not alias
- * `watches` (tests/public-watch-filter.node.test.ts).
+ * `watches` (tests/public-watch-filter.node.test.ts). Admin hit operations
+ * alias `watches` and use adminWatchSql(alias).
  */
-export const ADMIN_WATCH_SQL = "watches.owner_kind = 'admin'";
+export function adminWatchSql(alias: string): string {
+  return `${alias}.owner_kind = 'admin'`;
+}
+
+export const ADMIN_WATCH_SQL = adminWatchSql("watches");
 
 /** ADMIN_WATCH_SQL as a drizzle fragment, for public reads. */
 export const adminWatchWhere: SQL = sql.raw(ADMIN_WATCH_SQL);

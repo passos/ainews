@@ -17,6 +17,7 @@ import {
 } from "../../lib/content-display";
 import { getDb } from "../db/client";
 import { APPROVED_ARTICLE_SQL } from "../publication/articles";
+import { adminWatchSql } from "../publication/watches";
 import {
   conditionalReviewRevisionBumpStatement,
   revisionBumpStatement,
@@ -1743,7 +1744,7 @@ export async function listWatches(
         (SELECT COUNT(*) FROM watch_hits wh WHERE wh.watch_id = w.id) AS hit_count
       FROM watches w
       LEFT JOIN industries i ON i.id = w.industry_id
-      WHERE w.owner_kind = 'admin'
+      WHERE ${adminWatchSql("w")}
       ORDER BY w.created_at DESC`,
     )
     .all<{
@@ -1908,8 +1909,9 @@ export async function listWatchHits(
         wh.rationale,
         wh.status
       FROM watch_hits wh
+      JOIN watches w ON w.id = wh.watch_id
       JOIN events e ON e.id = wh.event_id
-      WHERE wh.watch_id = ?1
+      WHERE wh.watch_id = ?1 AND ${adminWatchSql("w")}
       ORDER BY wh.hit_at DESC`,
     )
     .bind(watchId)
@@ -1938,7 +1940,8 @@ export async function listWatchHits(
   }));
 }
 
-export type WatchHitStatus = "published" | "pending_review" | "rejected";
+export type WatchHitStatus =
+  "published" | "pending_review" | "rejected" | "delivered";
 
 export interface PendingWatchHit {
   id: number;
@@ -1978,7 +1981,7 @@ export async function listPendingWatchHits(
       JOIN watches w ON w.id = wh.watch_id
       JOIN events e ON e.id = wh.event_id
       JOIN industries i ON i.id = e.industry_id
-      WHERE wh.status = 'pending_review'
+      WHERE wh.status = 'pending_review' AND ${adminWatchSql("w")}
       ORDER BY wh.hit_at DESC, wh.id DESC`,
     )
     .all<PendingWatchHit>();
@@ -1998,7 +2001,8 @@ export async function reviewWatchHit(
   const res = await database
     .prepare(
       `UPDATE watch_hits SET status = ?1
-       WHERE id = ?2 AND status = 'pending_review'`,
+       WHERE id = ?2 AND status = 'pending_review'
+         AND watch_id IN (SELECT w.id FROM watches w WHERE ${adminWatchSql("w")})`,
     )
     .bind(targetStatus, data.hitId)
     .run();
