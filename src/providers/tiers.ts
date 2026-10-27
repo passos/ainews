@@ -28,6 +28,8 @@ export const CALL_TIERS = {
   adminAsk: 3,
   /** watch/evaluate.ts: judge and hit summary (write). */
   watch: 4,
+  /** watch/evaluate.ts: reader watch judge (#132). */
+  readerWatch: 5,
   /** digest/build.ts: daily (write) and weekly (reason) digest. */
   digest: 5,
   /** discover/run.ts, discover/draft.ts. */

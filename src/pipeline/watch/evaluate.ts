@@ -9,16 +9,23 @@ import {
   type ModelTransport,
 } from "../../providers/transport";
 import type { PipelineEnv } from "../messages";
+import { isEnabled } from "../../lib/flags";
+import { FINANCE_SLUG } from "../../lib/sections";
+import { utcDay } from "../../providers/budget";
+import { READER_WATCH_LIMITS } from "../../server/reader-watch/limits";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import {
   WATCH_PROMPT_VERSION,
   buildWatchJudgeQuestion,
   buildWatchSummaryPrompt,
 } from "./prompts";
+import { admitReaderJudge } from "./reader";
 
 export interface WatchDeps {
   db?: D1Database;
   models?: ModelClient;
+  /** Reader watch judges (tier 5, CALL_TIERS.readerWatch). */
+  readerModels?: ModelClient;
   transport?: ModelTransport;
   now?: () => number;
 }
@@ -35,6 +42,7 @@ interface EventRow {
   title: string;
   revision: number;
   industry_id: number;
+  industry_slug: string | null;
   updated_at: number;
   watch_evaluated_revision: number;
   watch_evaluated_through: number | null;
@@ -57,6 +65,7 @@ interface WatchRow {
   keywords: string;
   industry_id: number | null;
   status: "active" | "paused";
+  owner_kind: "admin" | "reader";
   created_at: number;
 }
 
@@ -128,7 +137,14 @@ export async function markWatchEvaluated(
 }
 
 export async function evaluateEventWatches(
-  env: Pick<PipelineEnv, "DB" | "AI" | "AI_GATEWAY_ID" | "MODEL_CALLS_ENABLED">,
+  env: Pick<
+    PipelineEnv,
+    | "DB"
+    | "AI"
+    | "AI_GATEWAY_ID"
+    | "MODEL_CALLS_ENABLED"
+    | "READER_WATCH_ENABLED"
+  >,
   eventId: number,
   nowMs = Date.now(),
   deps: WatchDeps = {},
@@ -138,28 +154,39 @@ export async function evaluateEventWatches(
     return { eventId, eventRevision: 0, evaluatedCount: 0, hitCount: 0 };
   }
 
+  const transport =
+    deps.transport ??
+    (env.AI
+      ? bindingTransport(env.AI, env.AI_GATEWAY_ID ?? "ainews")
+      : { run: () => Promise.reject(new Error("no AI binding")) });
+  const modelEnv = { MODEL_CALLS_ENABLED: env.MODEL_CALLS_ENABLED ?? "false" };
   const models =
     deps.models ??
     createModelClient({
       tier: CALL_TIERS.watch,
       db,
-      transport:
-        deps.transport ??
-        (env.AI
-          ? bindingTransport(env.AI, env.AI_GATEWAY_ID ?? "ainews")
-          : { run: () => Promise.reject(new Error("no AI binding")) }),
-      env: {
-        MODEL_CALLS_ENABLED: env.MODEL_CALLS_ENABLED ?? "false",
-      },
+      transport,
+      env: modelEnv,
+      now: deps.now,
+    });
+  // Reader watches judge on tier 5; the tier belongs to the client.
+  const readerModels =
+    deps.readerModels ??
+    createModelClient({
+      tier: CALL_TIERS.readerWatch,
+      db,
+      transport,
+      env: modelEnv,
       now: deps.now,
     });
 
   // 1. Fetch event
   const event = await db
     .prepare(
-      `SELECT e.id, e.title, e.revision, e.industry_id, e.updated_at,
-              e.watch_evaluated_revision, e.watch_evaluated_through
+      `SELECT e.id, e.title, e.revision, e.industry_id, i.slug AS industry_slug,
+              e.updated_at, e.watch_evaluated_revision, e.watch_evaluated_through
        FROM events e
+       LEFT JOIN industries i ON i.id = e.industry_id
        WHERE e.id = ?1`,
     )
     .bind(eventId)
@@ -277,13 +304,19 @@ export async function evaluateEventWatches(
       .join(","),
   );
 
-  // 4. Fetch active watches
+  // 4. Fetch active watches. Reader watches only while READER_WATCH_ENABLED
+  // is on (#132). ORDER BY id: without it SQLite's multi-index OR returns
+  // every admin row before every reader row.
   const { results: activeWatches } = await db
     .prepare(
-      `SELECT id, slug, question, criteria, keywords, industry_id, status, created_at
+      `SELECT id, slug, question, criteria, keywords, industry_id, status,
+              owner_kind, created_at
        FROM watches
-       WHERE status = 'active' AND owner_kind = 'admin'`,
+       WHERE status = 'active'
+         AND (owner_kind = 'admin' OR (?1 = 1 AND owner_kind = 'reader'))
+       ORDER BY id`,
     )
+    .bind(isEnabled(env, "READER_WATCH_ENABLED") ? 1 : 0)
     .all<WatchRow>();
 
   if (!activeWatches || activeWatches.length === 0) {
@@ -298,10 +331,17 @@ export async function evaluateEventWatches(
 
   let evaluatedCount = 0;
   let hitCount = 0;
+  // Set when today's reader judge attempts are used up: the remaining reader
+  // watches of this event are skipped and the revision stays unmarked.
+  let readerCapped = false;
 
   for (const watch of activeWatches) {
     // Rule 1: Scope filter
     if (watch.industry_id !== null && watch.industry_id !== event.industry_id) {
+      continue;
+    }
+    // Reader watches never judge Finance events (N§4).
+    if (watch.owner_kind === "reader" && event.industry_slug === FINANCE_SLUG) {
       continue;
     }
 
@@ -411,10 +451,30 @@ export async function evaluateEventWatches(
 
     const questions = buildWatchJudgeQuestion(watch.question, watch.criteria);
 
+    const isReader = watch.owner_kind === "reader";
+    if (isReader) {
+      if (readerCapped) continue;
+      if (
+        !(await admitReaderJudge(
+          db,
+          judgeKey,
+          utcDay(nowMs),
+          nowMs,
+          READER_WATCH_LIMITS.judgeCallsPerDay,
+        ))
+      ) {
+        readerCapped = true;
+        continue;
+      }
+    }
+
     let answers: { progress?: { noul: number } } | undefined;
     try {
-      answers = (await models.judge(judgeKey, state, questions)) as
-        { progress?: { noul: number } } | undefined;
+      answers = (await (isReader ? readerModels : models).judge(
+        judgeKey,
+        state,
+        questions,
+      )) as { progress?: { noul: number } } | undefined;
     } catch (e) {
       // Out of attempts is a settled outcome for this watch only. Every
       // other error is retryable and leaves the revision unmarked.
@@ -426,6 +486,43 @@ export async function evaluateEventWatches(
     const noulVal = answers?.progress?.noul ?? 0;
     // Strict > 1 for percentage scale, otherwise >= 0.5 (so noul = 1.0 is a hit)
     const isHit = noulVal > 1 ? noulVal >= 50 : noulVal >= 0.5;
+
+    // No revision condition: the hit records a development at this
+    // revision and does not expire when the event moves on (invariant 3).
+    // A later retraction is hidden by the public article guard.
+    const recordHit = (
+      summary: string,
+      status: "pending_review" | "delivered",
+    ) =>
+      db
+        .prepare(
+          `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           ON CONFLICT (watch_id, event_id, event_revision) DO NOTHING`,
+        )
+        .bind(
+          watch.id,
+          event.id,
+          event.revision,
+          nowMs,
+          summary,
+          JSON.stringify({
+            noul: noulVal,
+            promptVersion: WATCH_PROMPT_VERSION,
+            articleIds: watchNew.map((a) => a.id),
+          }),
+          status,
+        )
+        .run();
+
+    // A reader hit has no model-written text: no write call, empty summary,
+    // never reviewed or public (#132). The private RSS shows only the cited
+    // approved articles' own titles and summaries.
+    if (isHit && isReader) {
+      hitCount++;
+      await recordHit("", "delivered");
+      continue;
+    }
 
     if (isHit) {
       hitCount++;
@@ -470,33 +567,16 @@ export async function evaluateEventWatches(
           watchNew[0]?.title || "Material development confirmed by evaluation.";
       }
 
-      // No revision condition: the hit records a development at this
-      // revision and does not expire when the event moves on (invariant 3).
-      // A later retraction is hidden by the public article guard.
-      await db
-        .prepare(
-          `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-           ON CONFLICT (watch_id, event_id, event_revision) DO NOTHING`,
-        )
-        .bind(
-          watch.id,
-          event.id,
-          event.revision,
-          nowMs,
-          summaryText || "Material development confirmed by evaluation.",
-          JSON.stringify({
-            noul: noulVal,
-            promptVersion: WATCH_PROMPT_VERSION,
-            articleIds: watchNew.map((a) => a.id),
-          }),
-          watchHitInitialStatus(),
-        )
-        .run();
+      await recordHit(
+        summaryText || "Material development confirmed by evaluation.",
+        watchHitInitialStatus(),
+      );
     }
   }
 
-  await markEvaluated(maxEffectiveAt);
+  // At the reader cap the revision stays unmarked: the due-event scan
+  // re-enqueues it, and watches already judged answer from the ledger.
+  if (!readerCapped) await markEvaluated(maxEffectiveAt);
 
   return {
     eventId,

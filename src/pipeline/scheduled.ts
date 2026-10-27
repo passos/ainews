@@ -6,6 +6,7 @@ import { enqueueDueEvidence } from "./evidence/schedule";
 import { trackDuePrimarySources } from "./evidence/primary";
 import type { PipelineEnv } from "./messages";
 import { requeueStuck } from "./requeue";
+import { sweepReaderWatches } from "./watch/reader";
 import { enqueueDueWatches } from "./watch/schedule";
 
 /** Cron, every 10 minutes (wrangler.jsonc). */
@@ -22,6 +23,7 @@ export async function runScheduled(
   const tracked = await trackDuePrimarySources(env, now);
   const evidence = await enqueueDueEvidence(env, now);
   const watches = await enqueueDueWatches(env, now);
+  const swept = await sweepReaderWatches(env, now);
   const edgar = await pollDueCompanies(env, now);
   console.log({
     cron: controller.cron,
@@ -32,6 +34,7 @@ export async function runScheduled(
     tracked: tracked.length,
     evidence: evidence.length,
     watches: watches.length,
+    readerWatchesDisabled: swept.disabled,
     edgar: edgar.polledCount,
   });
 }
