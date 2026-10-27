@@ -1,8 +1,11 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, getRouteApi } from "@tanstack/react-router";
+import { FollowOwnLink } from "../../components/FollowForm";
 import { Disclaimer } from "../../components/Disclaimer";
 import { FollowButton } from "../../components/FollowButton";
 import { SITE_NAME } from "../../lib/site";
 import { getPublicWatches } from "../../server/publication/api";
+
+const rootRoute = getRouteApi("__root__");
 
 export const Route = createFileRoute("/w/")({
   loader: async () => ({ watches: await getPublicWatches() }),
@@ -12,6 +15,7 @@ export const Route = createFileRoute("/w/")({
 
 function WatchListPage() {
   const { watches } = Route.useLoaderData();
+  const { readerWatchEnabled } = rootRoute.useLoaderData();
   return (
     <section
       aria-labelledby="watches-title"
@@ -27,6 +31,7 @@ function WatchListPage() {
         Each watch follows one question. It lists a development only when newly
         approved reporting changes the answer.
       </p>
+      {readerWatchEnabled && <FollowOwnLink />}
       {watches.length === 0 ? (
         <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           No topic watches yet.

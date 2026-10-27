@@ -13,6 +13,7 @@ import { PrefsSync } from "../components/PrefsSync";
 import { SectionNav, WatchesNavLink } from "../components/SectionNav";
 import { ThemeSwitcher } from "../components/ThemeSwitcher";
 import { AUDIENCES } from "../lib/reader-prefs";
+import { showWatchesNav } from "../lib/follow";
 import { THEME_INIT_SCRIPT } from "../lib/theme";
 import { getSiteShell } from "../server/publication/site";
 import appCss from "../styles.css?url";
@@ -56,7 +57,8 @@ function RootDocument({ children }: { children: ReactNode }) {
 }
 
 function RootLayout() {
-  const { name, sections, hasWatches } = Route.useLoaderData();
+  const { name, sections, hasWatches, readerWatchEnabled } =
+    Route.useLoaderData();
   const { audience } = Route.useSearch();
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-5">
@@ -80,7 +82,9 @@ function RootLayout() {
         <div className="mt-3 flex flex-col gap-2 border-y-2 py-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-1">
             <SectionNav sections={sections} />
-            {hasWatches && <WatchesNavLink />}
+            {showWatchesNav({ hasWatches, readerWatchEnabled }) && (
+              <WatchesNavLink />
+            )}
           </div>
           <AudienceSelector current={audience} />
         </div>

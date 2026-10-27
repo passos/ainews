@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isEnabled } from "../../lib/flags";
 import { SITE_NAME } from "../../lib/site";
 import { getDb } from "../db/client";
 import { listSections } from "./articles";
@@ -19,5 +20,7 @@ export async function loadSiteShell() {
     beaconToken: beaconToken.trim(),
     // The header links to /w only while an active watch exists.
     hasWatches: await hasActiveWatches(getDb(env.DB)),
+    // /follow and its links exist only while the switch is on (#132).
+    readerWatchEnabled: isEnabled(env, "READER_WATCH_ENABLED"),
   };
 }
