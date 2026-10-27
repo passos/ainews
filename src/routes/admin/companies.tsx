@@ -7,6 +7,7 @@ import {
   toggleCompanyTracking,
   triggerPollCompany,
 } from "../../server/admin/companies";
+import { ADMIN_TABLE } from "../../components/admin/table";
 
 export const Route = createFileRoute("/admin/companies")({
   ssr: "data-only",
@@ -161,8 +162,8 @@ function AdminCompaniesPage() {
         </form>
       )}
 
-      <div className="border rounded-lg overflow-hidden bg-card">
-        <table className="w-full text-sm text-left">
+      <div className="overflow-x-auto rounded-lg border bg-card">
+        <table className={`w-full text-sm text-left ${ADMIN_TABLE}`}>
           <thead className="bg-muted text-muted-foreground uppercase text-xs font-semibold">
             <tr>
               <th className="px-4 py-3">Ticker</th>

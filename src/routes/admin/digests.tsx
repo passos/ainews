@@ -5,6 +5,7 @@ import {
   listAdminDigests,
   publishDigest,
 } from "../../server/admin/digests";
+import { ADMIN_TABLE } from "../../components/admin/table";
 
 export const Route = createFileRoute("/admin/digests")({
   ssr: "data-only",
@@ -208,7 +209,7 @@ function AdminDigestsPage() {
           </p>
         ) : (
           <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-left text-sm">
+            <table className={`w-full text-left text-sm ${ADMIN_TABLE}`}>
               <thead className="bg-muted/50 font-mono text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="p-3">Section</th>

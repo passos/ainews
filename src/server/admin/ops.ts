@@ -231,7 +231,7 @@ export async function listSources(
   search?: { industryId?: number; status?: string },
 ) {
   const d = getDb(database);
-  let query = d
+  const query = d
     .select({
       id: sources.id,
       industryId: sources.industryId,
@@ -256,19 +256,25 @@ export async function listSources(
       jinaEnabled: sources.jinaEnabled,
       contentDisplay: sources.contentDisplay,
       createdAt: sources.createdAt,
+      // Articles of this source (not sightings): the delete dialog says how
+      // many stay on the site. One subselect, no N+1.
+      articleCount: sql<number>`(SELECT count(*) FROM articles WHERE articles.source_id = ${sources.id})`,
     })
     .from(sources)
     .innerJoin(industries, sql`${sources.industryId} = ${industries.id}`)
     .$dynamic();
 
+  // Deleted sources (see deleteSource) are not listed. `where` replaces, so
+  // the conditions are joined once.
+  const conditions = [sql`${sources.feedUrl} NOT LIKE 'deleted:%'`];
   if (search?.industryId !== undefined) {
-    query = query.where(sql`${sources.industryId} = ${search.industryId}`);
+    conditions.push(sql`${sources.industryId} = ${search.industryId}`);
   }
   if (search?.status) {
-    query = query.where(sql`${sources.status} = ${search.status}`);
+    conditions.push(sql`${sources.status} = ${search.status}`);
   }
 
-  return query.orderBy(sources.id);
+  return query.where(sql.join(conditions, sql` AND `)).orderBy(sources.id);
 }
 
 export async function getSource(database: D1Database, id: number) {
@@ -276,7 +282,9 @@ export async function getSource(database: D1Database, id: number) {
   const rows = await d
     .select()
     .from(sources)
-    .where(sql`${sources.id} = ${id}`);
+    .where(
+      sql`${sources.id} = ${id} AND ${sources.feedUrl} NOT LIKE 'deleted:%'`,
+    );
   return rows[0] ?? null;
 }
 
@@ -350,7 +358,7 @@ export async function updateSource(
        SET name = ?1, feed_url = ?2, site_domain = ?3, interval_minutes = COALESCE(?4, interval_minutes),
            utc_offset = COALESCE(?5, utc_offset), config = COALESCE(?6, config), jina_enabled = COALESCE(?7, jina_enabled),
            content_display = COALESCE(?9, content_display)
-       WHERE id = ?8 AND feed_url NOT LIKE 'system:%'`,
+       WHERE id = ?8 AND feed_url NOT LIKE 'system:%' AND feed_url NOT LIKE 'deleted:%'`,
     )
     .bind(
       data.name,
@@ -370,9 +378,18 @@ export async function updateSource(
 }
 
 export async function deleteSource(database: D1Database, id: number) {
+  // Soft delete, no schema change: articles and article_sightings keep their
+  // foreign key and stay on the site under this row. The 'deleted:<id>:' prefix
+  // hides the row from admin lists and writes, and frees the unique key
+  // (industry_id, feed_url), so the same URL can be added again as a new row.
+  // Paused, so collection (status = 'active') skips it.
   const res = await database
     .prepare(
-      "DELETE FROM sources WHERE id = ?1 AND feed_url NOT LIKE 'system:%'",
+      `UPDATE sources
+       SET status = 'paused', paused_reason = NULL,
+           feed_url = 'deleted:' || id || ':' || feed_url
+       WHERE id = ?1 AND feed_url NOT LIKE 'system:%'
+         AND feed_url NOT LIKE 'deleted:%'`,
     )
     .bind(id)
     .run();
@@ -387,7 +404,8 @@ export async function resumeSource(database: D1Database, id: number) {
     .prepare(
       `UPDATE sources
        SET status = 'active', fail_count = 0, empty_fetches = 0, paused_reason = NULL
-       WHERE id = ?1 AND feed_url NOT LIKE 'system:%'`,
+       WHERE id = ?1 AND feed_url NOT LIKE 'system:%'
+         AND feed_url NOT LIKE 'deleted:%'`,
     )
     .bind(id)
     .run();
@@ -397,9 +415,19 @@ export async function resumeSource(database: D1Database, id: number) {
 }
 
 export async function triggerCollect(
+  database: D1Database,
   qIngest: { send: (msg: unknown) => Promise<unknown> },
   sourceId: number,
 ) {
+  const live = await database
+    .prepare(
+      "SELECT 1 FROM sources WHERE id = ?1 AND feed_url NOT LIKE 'deleted:%'",
+    )
+    .bind(sourceId)
+    .first();
+  if (!live) {
+    throw new Response("Source not found or not collectable", { status: 400 });
+  }
   await qIngest.send({ kind: "collect", sourceId });
 }
 

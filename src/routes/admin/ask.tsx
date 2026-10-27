@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { ASK_TITLE } from "../../components/admin/labels";
 import { formatUtc } from "../../lib/time";
 import { listQuestions, submitQuestion } from "../../server/admin/ask";
 import type {
@@ -70,7 +71,7 @@ function AdminAskPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-serif text-2xl font-bold tracking-tight">
-            Ask Newsren (Admin Research Desk)
+            {ASK_TITLE}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Ask evidence-backed research questions across verified articles or
