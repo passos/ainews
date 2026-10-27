@@ -1,16 +1,7 @@
-import type {
-  TechnologyEvolutionTimeline,
-  TimelineKind,
-} from "../../lib/artifacts/types";
+import { timelineDisplayDate } from "../../lib/artifacts/grounding";
+import type { TechnologyEvolutionTimeline } from "../../lib/artifacts/types";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
-
-const KIND_LABELS: Record<TimelineKind, string> = {
-  release: "Release",
-  evaluation: "Evaluation",
-  correction: "Correction",
-  adoption: "Adoption",
-};
 
 export function EvolutionTimelineCard({
   timeline,
@@ -37,12 +28,16 @@ export function EvolutionTimelineCard({
       <ol className="flex flex-col gap-3">
         {timeline.entries.map((e, i) => (
           <li key={i} className="min-w-0 border-l-2 border-border pl-3">
+            {/* The kind and dateSource are model judgments and are not shown;
+                the date is checked against the quote or comes from the DB. */}
             <p className="flex flex-wrap gap-x-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              <span>{e.date}</span>
-              <span>{KIND_LABELS[e.kind]}</span>
-              {e.dateSource === "report_published" && (
-                <span>Date of report</span>
-              )}
+              <span>
+                {timelineDisplayDate(
+                  e.date,
+                  e.source.quote,
+                  sources.find((s) => s.id === e.source.articleId)?.publishedAt,
+                )}
+              </span>
             </p>
             {/* The verified quote, not the model's paraphrase in e.description. */}
             <blockquote className="wrap-anywhere text-sm">

@@ -39,6 +39,10 @@ import {
 import type { TextRequest } from "../../providers/adapters";
 import { WRITE_THINKING } from "../analyze/prompts";
 import { localDate } from "../../lib/time";
+import {
+  normalizeSourceText,
+  sourceTextContains,
+} from "../../lib/artifacts/grounding";
 
 export const STORY_BRIEF_PROMPT_VERSION = "brief-v1";
 export const AUDIENCE_EXPLAIN_PROMPT_VERSION = "explain-v1";
@@ -1307,38 +1311,6 @@ export function parseEarningsDecoderOutput(
 // Technology products: Launch Reality Check, Technology Evolution Timeline (N§3)
 // -----------------------------------------------------------------------------
 
-/** Collapses whitespace only: case is kept, so "50 MW" does not match "50 mW". */
-function normalizeSourceText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-const WORD_CHAR_AT_END = /[\p{L}\p{N}]$/u;
-const WORD_CHAR_AT_START = /^[\p{L}\p{N}]/u;
-
-/**
- * True when `needle` is not empty and occurs in `text` after normalising both,
- * at word boundaries: the body characters next to the match are not letters
- * or digits, so "50 mW" does not match inside "150 mW". Every occurrence is
- * tried, so an earlier hit inside a word does not hide a later valid one.
- */
-function sourceTextContains(
-  text: string | null | undefined,
-  needle: string,
-): boolean {
-  const n = normalizeSourceText(needle);
-  if (n.length === 0 || !text) return false;
-  const body = normalizeSourceText(text);
-  for (let i = body.indexOf(n); i !== -1; i = body.indexOf(n, i + 1)) {
-    if (
-      !WORD_CHAR_AT_END.test(body.slice(0, i)) &&
-      !WORD_CHAR_AT_START.test(body.slice(i + n.length))
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** The quote is copied from the cited article of this material. */
 function quoteIsGrounded(
   material: ArtifactEventMaterial,
@@ -1351,23 +1323,32 @@ function quoteIsGrounded(
 }
 
 /**
- * The domain key of an article: lowercase, one trailing "." and a leading
- * "www." removed, then the last two labels ("blog.vendor.com" -> "vendor.com").
+ * The domain key of an article. The host is read by the URL parser, which
+ * drops a port, lowercases, turns an IDN into punycode and writes IP
+ * addresses in one form ("0x7f.1" -> "127.0.0.1", "[0:0::1]" -> "[::1]").
+ * Trailing dots are removed. An IP literal is its own key; for a name, a
+ * leading "www." is removed and the last two labels kept
+ * ("blog.vendor.com" -> "vendor.com").
  * There is no public-suffix list, so multi-part suffixes collapse:
  * "x.co.uk" and "y.co.uk" both give "co.uk". That errs toward dropping
- * evidence, which is the safe direction. "" when the article or domain is missing.
+ * evidence, which is the safe direction. "" when the article is missing or
+ * the domain is not a host name.
  */
 function articleDomain(
   material: ArtifactEventMaterial,
   articleId: number,
 ): string {
-  let d =
-    material.articles
-      .find((a) => a.id === articleId)
-      ?.sourceDomain.toLowerCase() ?? "";
-  if (d.endsWith(".")) d = d.slice(0, -1);
-  if (d.startsWith("www.")) d = d.slice(4);
-  return d.split(".").slice(-2).join(".");
+  const raw =
+    material.articles.find((a) => a.id === articleId)?.sourceDomain ?? "";
+  let host: string;
+  try {
+    host = new URL(`https://${raw}`).hostname.replace(/\.+$/, "");
+  } catch {
+    return "";
+  }
+  if (host.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
+  if (host.startsWith("www.")) host = host.slice(4);
+  return host.split(".").slice(-2).join(".");
 }
 
 function groundedName(material: ArtifactEventMaterial, value: string): string {

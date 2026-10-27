@@ -5,6 +5,7 @@ import type {
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
 
+// The verdict is the model's reading of the evidence; code cannot verify it.
 const VERDICT_LABELS: Record<LaunchVerdict, string> = {
   independent_support: "Other outlets report supporting evidence",
   independent_dispute: "Other outlets report contrary evidence",
@@ -33,43 +34,49 @@ export function LaunchRealityCheckCard({
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
           Launch Reality Check
         </h3>
-        <p className="wrap-anywhere text-sm">
-          {check.subject} · Claims by {check.claimant}
-        </p>
+        {/* The subject is a grounded name. The claimant is not shown: the
+            quote and its source article stand for who made the claim. */}
+        <p className="wrap-anywhere text-sm">{check.subject}</p>
         <p className="text-sm text-muted-foreground">
           {k} of {n} {n === 1 ? "claim has" : "claims have"} evidence from other
           outlets in these sources.
         </p>
       </header>
       <ol className="flex flex-col gap-3">
-        {check.claims.map((c, i) => (
-          <li key={i} className="min-w-0 border-l-2 border-border pl-3">
-            {/* The verified quote, not the model's paraphrase in c.claim. */}
-            <p className="wrap-anywhere text-sm font-bold">
-              &quot;{c.claimQuote.quote}&quot;{" "}
-              <a
-                href={`/a/${c.claimQuote.articleId}`}
-                className="font-mono text-xs font-normal hover:underline"
-              >
-                Claim source
-              </a>
-            </p>
-            <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              {VERDICT_LABELS[c.verdict]}
-            </p>
-            {c.independentEvidence.map((e, j) => (
-              <blockquote key={j} className="wrap-anywhere text-sm">
-                &quot;{e.quote}&quot;{" "}
+        {check.claims.map((c, i) => {
+          const title = sources.find(
+            (s) => s.id === c.claimQuote.articleId,
+          )?.title;
+          return (
+            <li key={i} className="min-w-0 border-l-2 border-border pl-3">
+              {/* The verified quote, not the model's paraphrase in c.claim. */}
+              <p className="wrap-anywhere text-sm font-bold">
+                &quot;{c.claimQuote.quote}&quot;
+                {title !== undefined && <> &mdash; quoted in {title}</>}{" "}
                 <a
-                  href={`/a/${e.articleId}`}
-                  className="font-mono text-xs hover:underline"
+                  href={`/a/${c.claimQuote.articleId}`}
+                  className="font-mono text-xs font-normal hover:underline"
                 >
-                  Evidence source
+                  Claim source
                 </a>
-              </blockquote>
-            ))}
-          </li>
-        ))}
+              </p>
+              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                Model assessment: {VERDICT_LABELS[c.verdict]}
+              </p>
+              {c.independentEvidence.map((e, j) => (
+                <blockquote key={j} className="wrap-anywhere text-sm">
+                  &quot;{e.quote}&quot;{" "}
+                  <a
+                    href={`/a/${e.articleId}`}
+                    className="font-mono text-xs hover:underline"
+                  >
+                    Evidence source
+                  </a>
+                </blockquote>
+              ))}
+            </li>
+          );
+        })}
       </ol>
       <p className="mt-3 text-xs text-muted-foreground">
         Quotes are checked against the source text; whether a benchmark is
