@@ -48,6 +48,9 @@ export function AudienceSelector({
               buttonVariants({ variant: "outline", size: "xs" }),
               "rounded-sm border-2 font-mono text-[0.68rem] font-bold uppercase tracking-wider",
               "aria-[current=true]:bg-primary aria-[current=true]:text-primary-foreground",
+              // The router sets aria-current="page" on the active link and
+              // overrides the "true" above.
+              "aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground",
             )}
           >
             {LABELS[audience]}

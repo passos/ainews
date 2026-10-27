@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { ArticleCard } from "../../components/ArticleCard";
+import { AudienceSelector } from "../../components/AudienceSelector";
 import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainCard";
 import { ClassroomDiscussionCard } from "../../components/artifacts/ClassroomDiscussionCard";
 import { EducationEvidenceCard } from "../../components/artifacts/EducationEvidenceCard";
@@ -24,6 +25,12 @@ import {
   getEventArtifactSources,
   getEventSources,
 } from "../../server/publication/api";
+import type {
+  ArtifactSourceView,
+  EventSourceView,
+  EventView,
+} from "../../server/publication/events";
+import type { Audience } from "../../lib/reader-prefs";
 import { SITE_NAME } from "../../lib/site";
 
 export async function loadEvent(
@@ -79,6 +86,27 @@ export const Route = createFileRoute("/e/$eventId")({
 function EventPage() {
   const { data, artifactSources, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
+  return (
+    <EventPageView
+      data={data}
+      artifactSources={artifactSources}
+      sources={sources}
+      audience={audience}
+    />
+  );
+}
+
+export function EventPageView({
+  data,
+  artifactSources,
+  sources,
+  audience,
+}: {
+  data: EventView;
+  artifactSources: ArtifactSourceView[];
+  sources: Promise<EventSourceView[]>;
+  audience: Audience | undefined;
+}) {
   const {
     section,
     articles,
@@ -132,11 +160,14 @@ function EventPage() {
       )}
 
       {hasExplanations && (
-        <AudienceExplainCard
-          explanations={artifacts.explanations}
-          initialAudience={audience}
-          sources={artifactSources}
-        />
+        <>
+          <AudienceSelector current={audience} />
+          <AudienceExplainCard
+            explanations={artifacts.explanations}
+            initialAudience={audience}
+            sources={artifactSources}
+          />
+        </>
       )}
 
       {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}

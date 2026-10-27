@@ -7,7 +7,6 @@ import {
   createRootRoute,
 } from "@tanstack/react-router";
 import { z } from "zod";
-import { AudienceSelector } from "../components/AudienceSelector";
 import { Beacon } from "../components/Beacon";
 import { PrefsSync } from "../components/PrefsSync";
 import { SectionNav, WatchesNavLink } from "../components/SectionNav";
@@ -56,6 +55,46 @@ function RootDocument({ children }: { children: ReactNode }) {
   );
 }
 
+export function SiteHeader({
+  name,
+  sections,
+  hasWatches,
+  readerWatchEnabled,
+}: {
+  name: string;
+  sections: { slug: string; name: string }[];
+  hasWatches: boolean;
+  readerWatchEnabled: boolean;
+}) {
+  return (
+    <header className="border-t-[6px] border-foreground pt-2 pb-3">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
+        <Link
+          to="/"
+          search={(prev) => ({ audience: prev.audience })}
+          className="font-serif text-3xl font-black uppercase leading-none tracking-tight sm:text-5xl"
+        >
+          {name}
+        </Link>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <p className="font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
+            Approved stories · every one traced to its source
+          </p>
+          <ThemeSwitcher />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 border-y-2 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-1">
+          <SectionNav sections={sections} />
+          {showWatchesNav({ hasWatches, readerWatchEnabled }) && (
+            <WatchesNavLink />
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function RootLayout() {
   const { name, sections, hasWatches, readerWatchEnabled } =
     Route.useLoaderData();
@@ -63,32 +102,12 @@ function RootLayout() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-5">
       <PrefsSync audience={audience} />
-      <header className="border-t-[6px] border-foreground pt-2 pb-3">
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
-          <Link
-            to="/"
-            search={(prev) => ({ audience: prev.audience })}
-            className="font-serif text-3xl font-black uppercase leading-none tracking-tight sm:text-5xl"
-          >
-            {name}
-          </Link>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <p className="font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
-              Approved stories · every one traced to its source
-            </p>
-            <ThemeSwitcher />
-          </div>
-        </div>
-        <div className="mt-3 flex flex-col gap-2 border-y-2 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-1">
-            <SectionNav sections={sections} />
-            {showWatchesNav({ hasWatches, readerWatchEnabled }) && (
-              <WatchesNavLink />
-            )}
-          </div>
-          <AudienceSelector current={audience} />
-        </div>
-      </header>
+      <SiteHeader
+        name={name}
+        sections={sections}
+        hasWatches={hasWatches}
+        readerWatchEnabled={readerWatchEnabled}
+      />
       <main className="flex-1 pb-8">
         <Outlet />
       </main>
