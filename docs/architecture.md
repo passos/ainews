@@ -123,7 +123,7 @@ tests/
 | 读者撤销 watch | `src/server/reader-watch/api.ts` `revokeReaderWatch` | 该行的 `status`、`disabled_at`、`updated_at` |
 | 私有 RSS 读取 | `src/routes/rss/p/{$token}[.]xml.ts` → `serveReaderFeed` | 该行的 `last_read_at`，每 6 小时最多一次 |
 
-每个写入口都满足：
+每个写入口都满足下面 6 条，例外只有两处。第一，第 1 条和第 3 条不适用于「私有 RSS 读取」：它是 GET 路由（令牌在路径里，RSS 阅读器只发 GET，所以不经过 Origin 检查），只写该行的 `last_read_at`，每 6 小时最多一次，只对 `status = 'active'` 且 `disabled_at` 为空的读者行；响应头由 `src/server/edge.ts` 对 `/rss/p/` 下所有状态码统一设置（`Cache-Control: private, no-store`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex, nofollow`）。第二，第 3 条不适用于「读者撤销 watch」：撤销和私有 RSS 读取都不受 `READER_WATCH_ENABLED` 影响（第 6 节「读者 watch」的「开关」）。
 
 1. 写入用 `method: "POST"` 的 server function，handler 里再检查一次请求方法是 `POST`（不依赖框架拒绝 GET）。请求经过 `src/server/edge.ts` 的 Origin 检查（对 GET、HEAD、OPTIONS 以外的方法生效）。Origin 检查之后，`handleFetch` 对 `/_serverFn/*` 的非安全方法请求（路径判断与 `handleFetch` 里已有的 `normalizePath(pathname)` 以 `/_serverfn` 开头相同）在解析之前检查请求体大小，这个上限对所有 server function 生效，不只是本表的入口：上限 `SERVER_FN_MAX_BODY_BYTES = 65536`（64 KB；后台有上限的输入字符串最长 1000 个字符，板块和信源配置 JSON 远小于 64 KB）；`Content-Length` 大于上限 → 413；`Content-Length` 不是合法的非负整数 → 400；`Content-Length` 缺失时不返回 411，而是按字节计数读 `request.body`，超过上限就取消读取并返回 413，没超过就把读到的字节用 `new Request(request, { body: bytes })` 交给 handler（浏览器或 HTTP/2 请求可能不带这个头，不能因此让所有后台写失败）。这两种拒绝的写法同 `forbidden()`：纯文本正文，413 是 `payload_too_large`，400 是 `bad_content_length`（这两个字符串是本契约定的），带安全头和 `no-store`，不调用 handler。GET 的 `/_serverFn/*` 和 `/_serverFn/*` 以外的 POST 不检查。检查必须放在 edge：`@tanstack/start-server-core` 的 `server-functions-handler.js` 里，`handleServerAction` 先解析请求体（JSON 用 `await request.json()`，表单用 `request.formData()`），再调用 `action(...)`；函数中间件和 handler 都在 `action` 里运行，所以后台的 Access 中间件也是在解析之后才拒绝。框架自己只限制 GET 的 `payload` 查询参数（`MAX_PAYLOAD_SIZE = 1e6`），不限制 POST 请求体。私有 RSS 是 GET：它唯一的写是 `last_read_at`，只延长令牌持有者自己那一行的寿命。
 2. 输入用 zod 严格 schema（`.strict()`）校验，未知字段拒绝；长度和字符集写在第 6 节「读者 watch」。
@@ -533,7 +533,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 - **已知行为**：推迟期间事件进入新的 revision 时，被推迟的读者 watch 下次只把最新 revision 的报道当作新报道，较早的报道放进「旧报道」。只在达到每日判定尝试上限或第 5 档被拒时发生，不多花钱。不加补判机制。
 - 到期扫描（#92 `enqueueDueEvents`）按 `watch_scheduled_at` 从旧到新轮转，每轮最多 20 个事件，所以停在上限的事件不会挤掉其他事件；已经写入的命中不受影响。
 - issue 原文"超出后新建请求返回明确的错误，不排队"针对建立请求：每地址上限和全站上限都立即返回错误码。每日判定上限不针对建立请求，它推迟的是后台判定，不是读者的请求。
-- **命中**：读者 watch 的命中不调用 `write`，`summary` 写空字符串，`status` 写 `delivered`。私有 RSS 只显示该命中引用的（`rationale.articleIds`）、当前仍满足 `approvedArticleWhere` 的文章自己的标题和摘要，同第六轮日报条目的做法。`rationale` 不是合法 JSON、没有 `articleIds`、`articleIds` 不是数组或是空数组时，私有 RSS 不输出这个命中。理由：第六轮"生成内容到达读者之前，仍然必须经过人工批准"，不放宽；送后台审核的话，审核量随匿名读者数增长；而且 write 平均每次 3,083 µ$，500 次命中最坏每天 $1.54，超过第 5 档的窗口。
+- **命中**：读者 watch 的命中不调用 `write`，`summary` 写空字符串，`status` 写 `delivered`。私有 RSS 只显示该命中引用的（`rationale.articleIds`）、当前仍满足 `approvedArticleWhere` 的文章自己的标题和摘要，同第六轮日报条目的做法。条目标题是最新一篇仍可见的被引用文章自己的标题，标题为空时用固定文字 `Watch update`；不用事件标题（`events.title` 来自建立事件的那篇文章，可能没被引用或没被批准）。没有仍可见的被引用文章的命中不输出。读者行不是 `active`，或 `disabled_at` 非空，私有 RSS 返回 410。`rationale` 不是合法 JSON、没有 `articleIds`、`articleIds` 不是数组或是空数组时，私有 RSS 不输出这个命中。理由：第六轮"生成内容到达读者之前，仍然必须经过人工批准"，不放宽；送后台审核的话，审核量随匿名读者数增长；而且 write 平均每次 3,083 µ$，500 次命中最坏每天 $1.54，超过第 5 档的窗口。
 - 不新增 write 或 reason 调用点，不需要新的 finishReason 探测。
 
 **清理**：`sweepReaderWatches`（`src/pipeline/watch/reader.ts`）由 `runScheduled` 每轮 cron 调用一次，不看开关（它只停用、只删除）。
