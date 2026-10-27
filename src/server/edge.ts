@@ -44,12 +44,28 @@ function siteOrigin(siteUrl: string): string | null {
   }
 }
 
+// The private reader feed /rss/p/{token}.xml (architecture §6 "读者 watch"):
+// set after the site headers, on every status, so a 500 or an overwritten
+// Referrer-Policy cannot leak the token URL.
+const PRIVATE_FEED_HEADERS: [string, string][] = [
+  ["Cache-Control", "private, no-store"],
+  ["Referrer-Policy", "no-referrer"],
+  ["X-Robots-Tag", "noindex, nofollow"],
+];
+
 // Copies the headers, so responses with immutable headers (redirects) work,
 // and keeps the body stream as is.
-function withHeaders(res: Response, noStore: boolean): Response {
+function withHeaders(
+  res: Response,
+  noStore: boolean,
+  privateFeed = false,
+): Response {
   const headers = new Headers(res.headers);
   for (const [name, value] of SECURITY_HEADERS) headers.set(name, value);
   if (noStore) headers.set("Cache-Control", "no-store");
+  if (privateFeed) {
+    for (const [name, value] of PRIVATE_FEED_HEADERS) headers.set(name, value);
+  }
   return new Response(res.body, {
     status: res.status,
     statusText: res.statusText,
@@ -57,8 +73,12 @@ function withHeaders(res: Response, noStore: boolean): Response {
   });
 }
 
-function forbidden(): Response {
-  return withHeaders(new Response("Forbidden", { status: 403 }), true);
+function forbidden(privateFeed = false): Response {
+  return withHeaders(
+    new Response("Forbidden", { status: 403 }),
+    true,
+    privateFeed,
+  );
 }
 
 function refuse(status: number, text: string): Response {
@@ -106,6 +126,8 @@ export async function handleFetch(
 ): Promise<Response> {
   const { pathname } = new URL(request.url);
   const admin = isAdminPath(pathname);
+  const normalized = normalizePath(pathname) ?? "";
+  const privateFeed = normalized.startsWith("/rss/p/");
 
   if (admin && !(await requireAdmin(request, env, deps.getKey))) {
     return forbidden();
@@ -114,10 +136,10 @@ export async function handleFetch(
   if (!SAFE_METHODS.has(request.method)) {
     const expected = siteOrigin(env.SITE_URL);
     const origin = request.headers.get("Origin");
-    if (expected === null || origin !== expected) return forbidden();
+    if (expected === null || origin !== expected) return forbidden(privateFeed);
   }
 
-  const serverFn = (normalizePath(pathname) ?? "").startsWith("/_serverfn");
+  const serverFn = normalized.startsWith("/_serverfn");
   let forwarded = request;
   if (serverFn && !SAFE_METHODS.has(request.method)) {
     const capped = await capBody(request);
@@ -132,5 +154,5 @@ export async function handleFetch(
     console.error("handler failed", error);
     res = new Response("Internal Server Error", { status: 500 });
   }
-  return withHeaders(res, admin || serverFn);
+  return withHeaders(res, admin || serverFn, privateFeed);
 }

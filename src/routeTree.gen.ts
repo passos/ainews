@@ -34,6 +34,7 @@ import { Route as AdminSourcesIndexRouteImport } from './routes/admin/sources/in
 import { Route as AdminSourcesSourceIdRouteImport } from './routes/admin/sources/$sourceId'
 import { Route as DigestSectionDateRouteImport } from './routes/digest/$section/$date'
 import { Route as RssDigestChar123sectionChar125DotxmlRouteImport } from './routes/rss/digest/{$section}[.]xml'
+import { Route as RssPChar123tokenChar125DotxmlRouteImport } from './routes/rss/p/{$token}[.]xml'
 import { Route as RssWChar123watchChar125DotxmlRouteImport } from './routes/rss/w/{$watch}[.]xml'
 
 const IndexRoute = IndexRouteImport.update({
@@ -164,6 +165,12 @@ const RssDigestChar123sectionChar125DotxmlRoute =
     path: '/rss/digest/{$section}.xml',
     getParentRoute: () => rootRouteImport,
   } as any)
+const RssPChar123tokenChar125DotxmlRoute =
+  RssPChar123tokenChar125DotxmlRouteImport.update({
+    id: '/rss/p/{$token}.xml',
+    path: '/rss/p/{$token}.xml',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const RssWChar123watchChar125DotxmlRoute =
   RssWChar123watchChar125DotxmlRouteImport.update({
     id: '/rss/w/{$watch}.xml',
@@ -195,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
   '/digest/$section/$date': typeof DigestSectionDateRoute
   '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
+  '/rss/p/{$token}.xml': typeof RssPChar123tokenChar125DotxmlRoute
   '/rss/w/{$watch}.xml': typeof RssWChar123watchChar125DotxmlRoute
   '/admin/industries/': typeof AdminIndustriesIndexRoute
   '/admin/sources/': typeof AdminSourcesIndexRoute
@@ -222,6 +230,7 @@ export interface FileRoutesByTo {
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
   '/digest/$section/$date': typeof DigestSectionDateRoute
   '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
+  '/rss/p/{$token}.xml': typeof RssPChar123tokenChar125DotxmlRoute
   '/rss/w/{$watch}.xml': typeof RssWChar123watchChar125DotxmlRoute
   '/admin/industries': typeof AdminIndustriesIndexRoute
   '/admin/sources': typeof AdminSourcesIndexRoute
@@ -251,6 +260,7 @@ export interface FileRoutesById {
   '/admin/sources/$sourceId': typeof AdminSourcesSourceIdRoute
   '/digest/$section/$date': typeof DigestSectionDateRoute
   '/rss/digest/{$section}.xml': typeof RssDigestChar123sectionChar125DotxmlRoute
+  '/rss/p/{$token}.xml': typeof RssPChar123tokenChar125DotxmlRoute
   '/rss/w/{$watch}.xml': typeof RssWChar123watchChar125DotxmlRoute
   '/admin/industries/': typeof AdminIndustriesIndexRoute
   '/admin/sources/': typeof AdminSourcesIndexRoute
@@ -281,6 +291,7 @@ export interface FileRouteTypes {
     | '/admin/sources/$sourceId'
     | '/digest/$section/$date'
     | '/rss/digest/{$section}.xml'
+    | '/rss/p/{$token}.xml'
     | '/rss/w/{$watch}.xml'
     | '/admin/industries/'
     | '/admin/sources/'
@@ -308,6 +319,7 @@ export interface FileRouteTypes {
     | '/admin/sources/$sourceId'
     | '/digest/$section/$date'
     | '/rss/digest/{$section}.xml'
+    | '/rss/p/{$token}.xml'
     | '/rss/w/{$watch}.xml'
     | '/admin/industries'
     | '/admin/sources'
@@ -336,6 +348,7 @@ export interface FileRouteTypes {
     | '/admin/sources/$sourceId'
     | '/digest/$section/$date'
     | '/rss/digest/{$section}.xml'
+    | '/rss/p/{$token}.xml'
     | '/rss/w/{$watch}.xml'
     | '/admin/industries/'
     | '/admin/sources/'
@@ -352,6 +365,7 @@ export interface RootRouteChildren {
   WIndexRoute: typeof WIndexRoute
   DigestSectionDateRoute: typeof DigestSectionDateRoute
   RssDigestChar123sectionChar125DotxmlRoute: typeof RssDigestChar123sectionChar125DotxmlRoute
+  RssPChar123tokenChar125DotxmlRoute: typeof RssPChar123tokenChar125DotxmlRoute
   RssWChar123watchChar125DotxmlRoute: typeof RssWChar123watchChar125DotxmlRoute
 }
 
@@ -532,6 +546,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RssDigestChar123sectionChar125DotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rss/p/{$token}.xml': {
+      id: '/rss/p/{$token}.xml'
+      path: '/rss/p/{$token}.xml'
+      fullPath: '/rss/p/{$token}.xml'
+      preLoaderRoute: typeof RssPChar123tokenChar125DotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rss/w/{$watch}.xml': {
       id: '/rss/w/{$watch}.xml'
       path: '/rss/w/{$watch}.xml'
@@ -594,6 +615,7 @@ const rootRouteChildren: RootRouteChildren = {
   DigestSectionDateRoute: DigestSectionDateRoute,
   RssDigestChar123sectionChar125DotxmlRoute:
     RssDigestChar123sectionChar125DotxmlRoute,
+  RssPChar123tokenChar125DotxmlRoute: RssPChar123tokenChar125DotxmlRoute,
   RssWChar123watchChar125DotxmlRoute: RssWChar123watchChar125DotxmlRoute,
 }
 export const routeTree = rootRouteImport

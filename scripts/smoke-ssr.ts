@@ -543,6 +543,21 @@ async function main() {
   if (noFeed.status !== 404)
     fail(`GET /rss/nope.xml returned ${noFeed.status}`);
 
+  // Private reader feed: an unknown well-formed token is a 404 that keeps
+  // the private headers through the real edge (#132).
+  const privatePath = `/rss/p/${"A".repeat(43)}.xml`;
+  const privateFeed = await page(privatePath);
+  if (privateFeed.res.status !== 404)
+    fail(`GET ${privatePath} returned ${privateFeed.res.status}`);
+  for (const [name, value] of [
+    ["cache-control", "private, no-store"],
+    ["referrer-policy", "no-referrer"],
+    ["x-robots-tag", "noindex, nofollow"],
+  ] as const) {
+    const got = privateFeed.res.headers.get(name);
+    if (got !== value) fail(`GET ${privatePath} ${name} is "${got}"`);
+  }
+
   // Digest pages & RSS
   const digestPage = await page("/digest/technology/2026-10-21");
   if (digestPage.res.status !== 200) {

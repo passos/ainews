@@ -105,6 +105,59 @@ export async function getWatchView(
       .filter(Boolean);
   }
 
+  const hitItems = await loadVisibleHits(
+    db,
+    watchRow.id,
+    "published",
+    watchRow.industryDisclaimer,
+  );
+
+  // If the watch has no section disclaimer, but hits include section disclaimers (e.g. a Finance event in a global watch),
+  // surface the Finance disclaimer (or first section disclaimer) to the watch page
+  const financeHitDisclaimer = hitItems.find(
+    (h) =>
+      h.disclaimer &&
+      (h.disclaimer.toLowerCase().includes("investment") ||
+        h.disclaimer.toLowerCase().includes("education only")),
+  )?.disclaimer;
+
+  const effectiveWatchDisclaimer =
+    watchRow.industryDisclaimer ||
+    financeHitDisclaimer ||
+    hitItems.find((h) => h.disclaimer)?.disclaimer ||
+    null;
+
+  return {
+    watch: {
+      id: watchRow.id,
+      slug: watchRow.slug,
+      question: watchRow.question,
+      criteria: watchRow.criteria,
+      keywords,
+      status: watchRow.status,
+      industryId: watchRow.industryId,
+      industryName: watchRow.industryName,
+      industrySlug: watchRow.industrySlug,
+      industryDisclaimer: effectiveWatchDisclaimer,
+      createdAt: watchRow.createdAt,
+    },
+    hits: hitItems,
+  };
+}
+
+/**
+ * The hits of one watch with `status`, newest first (at most 50), each with
+ * the event's approved articles. Drops a hit when no approved article is
+ * left, or when an article it cites (rationale.articleIds) is no longer
+ * approved. Admin watch pages read 'published'; the private reader feed
+ * (server/reader-watch/feed.ts) reads 'delivered'.
+ */
+export async function loadVisibleHits(
+  db: Db,
+  watchId: number,
+  status: "published" | "delivered",
+  watchDisclaimer: string | null,
+): Promise<WatchHitItem[]> {
   // Fetch hits ordered newest first (capped at 50 to prevent unbounded query latency)
   const hitsQuery = await db.all<{
     id: number;
@@ -132,8 +185,8 @@ export async function getWatchView(
     FROM watch_hits wh
     JOIN events e ON e.id = wh.event_id
     LEFT JOIN industries i ON i.id = e.industry_id
-    WHERE wh.watch_id = ${watchRow.id}
-      AND wh.status = 'published'
+    WHERE wh.watch_id = ${watchId}
+      AND wh.status = ${status}
     ORDER BY wh.hit_at DESC
     LIMIT 50
   `);
@@ -194,8 +247,7 @@ export async function getWatchView(
       continue;
     }
 
-    const hitDisclaimer =
-      h.event_industry_disclaimer || watchRow.industryDisclaimer;
+    const hitDisclaimer = h.event_industry_disclaimer || watchDisclaimer;
 
     const eventTitle =
       articlesQuery[articlesQuery.length - 1]?.title || h.event_title;
@@ -220,37 +272,7 @@ export async function getWatchView(
     });
   }
 
-  // If the watch has no section disclaimer, but hits include section disclaimers (e.g. a Finance event in a global watch),
-  // surface the Finance disclaimer (or first section disclaimer) to the watch page
-  const financeHitDisclaimer = hitItems.find(
-    (h) =>
-      h.disclaimer &&
-      (h.disclaimer.toLowerCase().includes("investment") ||
-        h.disclaimer.toLowerCase().includes("education only")),
-  )?.disclaimer;
-
-  const effectiveWatchDisclaimer =
-    watchRow.industryDisclaimer ||
-    financeHitDisclaimer ||
-    hitItems.find((h) => h.disclaimer)?.disclaimer ||
-    null;
-
-  return {
-    watch: {
-      id: watchRow.id,
-      slug: watchRow.slug,
-      question: watchRow.question,
-      criteria: watchRow.criteria,
-      keywords,
-      status: watchRow.status,
-      industryId: watchRow.industryId,
-      industryName: watchRow.industryName,
-      industrySlug: watchRow.industrySlug,
-      industryDisclaimer: effectiveWatchDisclaimer,
-      createdAt: watchRow.createdAt,
-    },
-    hits: hitItems,
-  };
+  return hitItems;
 }
 
 export interface ActiveWatchItem {
