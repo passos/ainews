@@ -860,6 +860,39 @@ describe("Technology product cards (#131)", () => {
     expect(html).toMatch(/<\/footer><\/section>$/);
   });
 
+  it("LaunchRealityCheckCard counts claims by retained evidence, not by verdict", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const base = check.claims[0];
+    const withEvidence = base.independentEvidence;
+    expect(withEvidence.length).toBeGreaterThan(0);
+    const render = (claims: (typeof base)[]) =>
+      renderToStaticMarkup(
+        createElement(LaunchRealityCheckCard, {
+          check: { ...check, claims },
+          sources: SOURCES,
+        }),
+      );
+    // Verdict says support, but every evidence item was filtered out: not counted.
+    expect(
+      render([
+        { ...base, verdict: "independent_support", independentEvidence: [] },
+        { ...base, verdict: "independent_support", independentEvidence: [] },
+      ]),
+    ).toContain("0 of 2 claims have evidence from other outlets");
+    // Verdict says none, but a retained item exists: counted.
+    expect(
+      render([
+        {
+          ...base,
+          verdict: "no_independent_evidence",
+          independentEvidence: withEvidence,
+        },
+        { ...base, verdict: "independent_dispute", independentEvidence: [] },
+      ]),
+    ).toContain("1 of 2 claims have evidence from other outlets");
+  });
+
   it("LaunchRealityCheckCard names each verdict by who reports the evidence", async () => {
     const { LaunchRealityCheckCard } =
       await import("../src/components/artifacts/LaunchRealityCheckCard");
