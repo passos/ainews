@@ -320,7 +320,7 @@ describe("generateEventArtifacts", () => {
     expect(modelCalled).toBe(false);
   });
 
-  it("generates Story Brief for standard event (score >= select but < deep)", async () => {
+  it("a sub-deep event gets Story Brief, three explainers and learning materials (round 6, #104)", async () => {
     await ensureBudget();
     const config = JSON.stringify({
       analysis: {
@@ -394,13 +394,43 @@ describe("generateEventArtifacts", () => {
       .run();
 
     let callsMade = 0;
-    const transport = makeFakeTransport((_model, _input) => {
+    const transport = makeFakeTransport((_model, input) => {
       callsMade++;
+      const inputStr = JSON.stringify(input);
+      if (inputStr.includes("Story Brief")) {
+        return {
+          whatHappened: "Engine published.",
+          whatIsNew: "Novel architecture.",
+          whatEvidenceExists: "Benchmarks.",
+          whatToWatchNext: "Adoption.",
+        };
+      }
+      if (
+        inputStr.toLowerCase().includes("learning materials") ||
+        inputStr.includes("conceptExplainer")
+      ) {
+        return {
+          audience: "student",
+          conceptExplainer: "Adaptive tutor basics.",
+          glossary: [{ term: "Tutor", definition: "Teaching agent." }],
+          quiz: [
+            {
+              question: "How does it adapt?",
+              options: ["Pacing", "Color"],
+              answerIndex: 0,
+              explanation: "Adjusts to pace.",
+            },
+          ],
+          discussionQuestions: ["Will this help?"],
+          activities: ["Try problems."],
+        };
+      }
       return {
-        whatHappened: "A new quantum circuit was verified.",
-        whatIsNew: "Two-qubit gate fidelity reached 99.9%.",
-        whatEvidenceExists: "Published benchmark tests on 50 samples.",
-        whatToWatchNext: "Scaling to 100 qubits next quarter.",
+        audience: "student",
+        overview: "Overview.",
+        keyPoints: ["Point 1"],
+        implications: ["Implication 1"],
+        glossary: [{ term: "Term", definition: "Def" }],
       };
     });
 
@@ -408,12 +438,13 @@ describe("generateEventArtifacts", () => {
       transport,
     });
     expect(res.status).toBe("generated");
-    expect(res.generatedCount).toBe(1); // Story Brief only
-    expect(callsMade).toBe(1);
+    // Story Brief (1) + Audience Explains (3) + Learning Materials (3)
+    expect(res.generatedCount).toBe(7);
+    expect(callsMade).toBe(7);
 
-    // Verify row in event_artifacts
+    // Verify rows in event_artifacts
     const rows = await env.DB.prepare(
-      "SELECT type, audience, input_revision, status, content FROM event_artifacts WHERE event_id = ?1",
+      "SELECT type, audience, input_revision, status, content FROM event_artifacts WHERE event_id = ?1 ORDER BY type, audience",
     )
       .bind(event!.id)
       .all<{
@@ -424,13 +455,23 @@ describe("generateEventArtifacts", () => {
         content: string;
       }>();
 
-    expect(rows.results).toHaveLength(1);
-    expect(rows.results[0].type).toBe("story_brief");
-    expect(rows.results[0].audience).toBe("");
-    expect(rows.results[0].input_revision).toBe(1);
-    expect(rows.results[0].status).toBe("published"); // auto publish mode
-    const brief = JSON.parse(rows.results[0].content);
-    expect(brief.whatHappened).toBe("A new quantum circuit was verified.");
+    expect(rows.results.map((r) => r.type)).toEqual([
+      "audience_explain",
+      "audience_explain",
+      "audience_explain",
+      "learning_material",
+      "learning_material",
+      "learning_material",
+      "story_brief",
+    ]);
+    for (const row of rows.results) {
+      expect(row.input_revision).toBe(1);
+      expect(row.status).toBe("published"); // auto publish mode
+    }
+    const brief = JSON.parse(
+      rows.results.find((r) => r.type === "story_brief")!.content,
+    );
+    expect(brief.whatHappened).toBe("Engine published.");
   });
 
   it("generates Story Brief and three-tier Explain for deep event (score >= deepThreshold)", async () => {
@@ -1319,19 +1360,19 @@ describe("generateEventArtifacts", () => {
       };
     });
 
-    // Run 1: generates
+    // Run 1: Story Brief + 3 Audience Explains + 3 Learning Materials (#104)
     const res1 = await generateEventArtifacts(testEnv, event!.id, 1000, {
       transport,
     });
     expect(res1.status).toBe("generated");
-    expect(callCount).toBe(1);
+    expect(callCount).toBe(7);
 
     // Run 2: skips without model calls
     const res2 = await generateEventArtifacts(testEnv, event!.id, 1000, {
       transport,
     });
     expect(res2.status).toBe("already_up_to_date");
-    expect(callCount).toBe(1);
+    expect(callCount).toBe(7);
   });
 });
 
@@ -3910,14 +3951,22 @@ describe("artifact scheduling (#92)", () => {
     await generateEventArtifacts(testEnv, id, 1000, {
       transport: makeAllValidFakeTransport(),
     });
-    // The generator sees only article A (score 40 < deep threshold 50), so
-    // story_brief is everything this revision can get.
+    // The generator sees only article A (score 40). Reader artifacts carry no
+    // score gate (#104), so it gets story_brief and the six reader artifacts.
     const { results: made } = await env.DB.prepare(
       "SELECT type FROM event_artifacts WHERE event_id = ?1 AND input_revision = 1",
     )
       .bind(id)
       .all<{ type: string }>();
-    expect(made.map((r) => r.type)).toEqual(["story_brief"]);
+    expect(made.map((r) => r.type).sort()).toEqual([
+      "audience_explain",
+      "audience_explain",
+      "audience_explain",
+      "learning_material",
+      "learning_material",
+      "learning_material",
+      "story_brief",
+    ]);
 
     expect(await enqueueDueArtifacts(schedEnv(), 2000)).not.toContain(id);
     expect(await evaluatedRevision(id)).toBe(1);
@@ -4012,7 +4061,12 @@ describe("artifact scheduling (#92)", () => {
       await generateEventArtifacts(testEnv, id, 1000, { models });
       const rejections = warn.mock.calls
         .map((c) => c[0])
-        .filter((o) => o?.warning === "artifact output rejected by parser");
+        .filter(
+          (o) =>
+            o?.warning === "artifact output rejected by parser" &&
+            // The reader artifacts (#104) are rejected too; the assertions below are about the story_brief entry, and `everything` covers all of them.
+            o.type === "story_brief",
+        );
       const everything = JSON.stringify(
         [warn, error, log, info].flatMap((spy) => spy.mock.calls),
       );
