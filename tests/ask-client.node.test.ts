@@ -154,13 +154,13 @@ describe("AskStoryView", () => {
 
   it("renders the answer as text, then verified quotes, then could not verify", () => {
     const html = view({ kind: "done", answer: ANSWER });
-    const label = html.indexOf(
-      "Model answer — check it against the quotes below",
-    );
+    const label = html.indexOf("Model answer · not editor-reviewed");
+    const note = html.indexOf("Check it against the quoted sources below.");
     const verified = html.indexOf("Verified quotes");
     const unverified = html.indexOf("Could not verify");
     expect(label).toBeGreaterThanOrEqual(0);
-    expect(verified).toBeGreaterThan(label);
+    expect(note).toBeGreaterThan(label);
+    expect(verified).toBeGreaterThan(note);
     expect(unverified).toBeGreaterThan(verified);
     // Model text is escaped, never HTML.
     expect(html).toContain("The lab &lt;b&gt;released&lt;/b&gt; a model.");
@@ -179,6 +179,7 @@ describe("AskStoryView", () => {
     });
     expect(html).toContain("We could not answer this from approved sources.");
     expect(html).not.toContain("Model answer");
+    expect(html).not.toContain("Check it against the quoted sources below.");
     expect(html).toContain("Release date");
   });
 
