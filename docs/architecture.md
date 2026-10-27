@@ -473,7 +473,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 
 读者不注册，写下问题、命中条件和关键词，拿到一个私有 RSS 地址（N§2.1、N§2.6、N§7 "Follow a Topic"）。实现：#132。
 
-**数据**：读者 watch 和管理员 watch 在同一张 `watches` 表，共用 #85 的判定与命中规则和 `watch_hits`。新增列都用 `ALTER TABLE ADD COLUMN`，不加 CHECK：
+**数据**：读者 watch 和管理员 watch 在同一张 `watches` 表，共用 `evaluateEventWatches`（`src/pipeline/watch/evaluate.ts`）现有的规则 1–3（1 板块范围；2 只看本 watch 没引用过、且在 watch 创建之后批准的文章；3 至少命中一个关键词）和 `watch_hits`。新增列都用 `ALTER TABLE ADD COLUMN`，不加 CHECK：
 
 | 列 | 类型 | 含义 |
 |---|---|---|
@@ -508,7 +508,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 
 - 三个文字字段共用字符白名单 `/^[\p{L}\p{M}\p{N} .,;:!?'()\-–—\/&%$#+@*]+$/u`。双引号、反引号、`< > { } [ ] = \ | ^ ~ _`、控制字符、零宽字符和双向控制字符都不在白名单里，校验时拒绝。换行和其他空白在规范化时合成一个空格，所以到达提示词的文字里没有换行。
 - 理由：判定提示词 `buildWatchJudgeQuestion` 把问题和条件放在双引号里（`Topic Question: "…"`），这段文字不改。读者的文字里没有双引号和换行，就只能停在引号内，引号就是不可伪造的分隔符；模型对这一问只输出一个概率。
-- 关键词必填：#85 规则 3 对没有关键词的 watch 不调用模型。关键词按 `matchKeyword` 匹配（纯 ASCII 单词按词边界，其他按子串）；`AI` 这类常见词会让一个 watch 匹配大多数事件，兜底是每日判定上限，且管理员 watch 先评估。不从问题里自动抽关键词：用模型抽要在匿名入口上花钱；按词切分会让关键词过滤失去作用。
+- 关键词必填：规则 3 对没有关键词的 watch 不调用模型。关键词按 `matchKeyword` 匹配（纯 ASCII 单词按词边界，其他按子串）；`AI` 这类常见词会让一个 watch 匹配大多数事件，兜底是每日判定上限，且管理员 watch 先评估。不从问题里自动抽关键词：用模型抽要在匿名入口上花钱；按词切分会让关键词过滤失去作用。
 
 **上限**（常量 `READER_WATCH_LIMITS`，`src/server/reader-watch/limits.ts`，改值另开 PR）：
 
@@ -522,7 +522,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 - 建立是一条 `INSERT INTO watches … SELECT … WHERE (同一 creator_hash 的行数) < 3 AND (全站活跃读者 watch 数) < 200`。影响 0 行时再读两个计数，决定返回 429 还是 503。
 - 建立不调用模型，不花钱。
 
-**判定**：`evaluateEventWatches` 在 #85 的规则之上只加下面几条；规则 1–3、去重、revision 标记都不变。
+**判定**：`evaluateEventWatches` 在现有规则之上只加下面几条；规则 1–3、去重、revision 标记都不变。
 
 - `READER_WATCH_ENABLED` 不是 `"true"` 时，读者 watch 不参与评估（在 SQL 里排除），事件照常标记。关闭期间出现的进展，读者 watch 以后不补判。
 - 读者 watch 不评估 Finance 板块的事件（N§4 "no personalized investment advice"；第六轮读者 Ask v1 不含 Finance）。
