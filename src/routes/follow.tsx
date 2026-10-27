@@ -17,11 +17,7 @@ export const Route = createFileRoute("/follow")({
       { name: "robots", content: "noindex" },
     ],
   }),
-  notFoundComponent: () => (
-    <p className="pt-6 font-mono text-sm uppercase tracking-wider">
-      No such page.
-    </p>
-  ),
+  notFoundComponent: () => <p className="pt-6 text-sm">No such page.</p>,
   component: FollowPage,
 });
 
@@ -34,7 +30,7 @@ function FollowPage() {
     >
       <h1
         id="follow-title"
-        className="border-t-[5px] border-foreground pt-1 font-mono text-sm font-black uppercase tracking-[0.18em]"
+        className="border-t-[3px] border-foreground pt-1 text-sm font-semibold"
       >
         Follow your own question
       </h1>

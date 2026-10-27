@@ -36,7 +36,7 @@ export function ThemeSwitcher() {
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span
         id="theme-label"
-        className="font-mono text-[0.68rem] font-bold uppercase tracking-widest text-muted-foreground"
+        className="text-[0.68rem] font-bold text-muted-foreground"
       >
         Theme
       </span>
@@ -57,7 +57,7 @@ export function ThemeSwitcher() {
             }}
             className={cn(
               buttonVariants({ variant: "outline", size: "xs" }),
-              "rounded-sm border-2 font-mono text-[0.68rem] font-bold uppercase tracking-wider",
+              "border text-[0.68rem] font-bold",
               SELECTED_CLASS[t],
               "aria-[pressed=true]:bg-primary aria-[pressed=true]:text-primary-foreground hover:aria-[pressed=true]:bg-primary dark:hover:aria-[pressed=true]:bg-primary",
             )}

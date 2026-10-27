@@ -9,12 +9,10 @@ export function WatchArticleLink({
   // the original URL through safeHttpUrl, so it is http(s) or null.
   return (
     <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-      <span className="font-mono text-muted-foreground">
-        [{art.sourceName}]
-      </span>
+      <span className="text-muted-foreground">[{art.sourceName}]</span>
       <a
         href={`/a/${art.id}`}
-        className="text-sec-ink underline hover:text-primary wrap-anywhere"
+        className="text-foreground underline hover:text-primary wrap-anywhere"
       >
         {art.title}
       </a>
@@ -22,7 +20,7 @@ export function WatchArticleLink({
         <a
           href={art.url}
           rel="noopener noreferrer"
-          className="font-mono font-bold text-sec-ink decoration-sec decoration-2 hover:underline"
+          className="font-bold text-foreground hover:underline"
         >
           {`Read the original at ${art.sourceName} ↗`}
         </a>

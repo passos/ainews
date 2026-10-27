@@ -28,14 +28,14 @@ function Home() {
             aria-labelledby={`sec-${s.slug}`}
             className="mb-6 flex break-inside-avoid flex-col gap-2"
           >
-            <div className="flex items-baseline justify-between gap-3 border-t-[5px] border-sec pt-1">
+            <div className="flex items-baseline justify-between gap-3 border-t-[3px] border-foreground pt-1">
               <h1
                 id={`sec-${s.slug}`}
-                className="font-mono text-sm font-black uppercase tracking-[0.18em] text-sec-ink"
+                className="text-sm font-semibold text-foreground"
               >
                 {s.name}
               </h1>
-              <span className="flex gap-3 font-mono text-xs font-bold uppercase tracking-wider">
+              <span className="flex gap-3 text-sm text-muted-foreground">
                 <Link
                   to="/s/$section"
                   params={{ section: s.slug }}
@@ -51,7 +51,7 @@ function Home() {
             </div>
             {s.disclaimer && <Disclaimer text={s.disclaimer} />}
             {s.articles.length === 0 ? (
-              <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="border border-dashed px-3 py-4 text-xs text-muted-foreground">
                 Nothing approved yet.
               </p>
             ) : (
@@ -66,11 +66,11 @@ function Home() {
             list.length === 0 ? null : (
               <section
                 aria-labelledby="recent-corrections"
-                className="border-t-[5px] border-destructive pt-1"
+                className="border-t-[3px] border-destructive pt-1"
               >
                 <h1
                   id="recent-corrections"
-                  className="font-mono text-sm font-black uppercase tracking-[0.18em] text-destructive"
+                  className="text-sm font-semibold text-destructive"
                 >
                   Recent corrections
                 </h1>
@@ -79,7 +79,7 @@ function Home() {
                     <li key={c.id} className="leading-snug">
                       <time
                         dateTime={new Date(c.createdAt).toISOString()}
-                        className="mr-2 font-mono text-xs text-muted-foreground"
+                        className="mr-2 text-xs text-muted-foreground"
                       >
                         {formatUtc(c.createdAt)}
                       </time>

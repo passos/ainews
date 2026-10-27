@@ -5,9 +5,7 @@ import { Badge } from "./ui/badge";
 function Time({ ms, label }: { ms: number; label: string }) {
   return (
     <span className="whitespace-nowrap">
-      <span className="uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>{" "}
+      <span className="text-muted-foreground">{label}</span>{" "}
       <time dateTime={new Date(ms).toISOString()}>{formatUtc(ms)}</time>
     </span>
   );
@@ -20,18 +18,15 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
   return (
     <article
       data-section={a.sectionSlug}
-      className="border-l-[5px] border-sec bg-card py-2.5 pl-3 pr-3"
+      className="border-b pt-1 pb-4 last:border-b-0"
     >
-      <h2 className="font-serif text-lg font-bold leading-snug sm:text-xl">
-        <a
-          href={`/a/${a.id}`}
-          className="decoration-sec decoration-2 hover:underline"
-        >
+      <h2 className="font-heading text-xl font-semibold leading-tight tracking-tight sm:text-[1.55rem]">
+        <a href={`/a/${a.id}`} className="hover:underline">
           {a.title}
         </a>
       </h2>
-      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[0.72rem] leading-snug">
-        <strong className="uppercase tracking-wider text-sec-ink">
+      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.8125rem] leading-snug text-muted-foreground">
+        <strong className="font-semibold text-foreground">
           {a.sourceName}
         </strong>
         {a.publishedAt !== null && (
@@ -42,7 +37,7 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           <a
             href={href}
             rel="noopener noreferrer"
-            className="font-bold text-sec-ink decoration-sec decoration-2 hover:underline"
+            className="text-foreground underline"
           >
             {`Read the original at ${a.sourceName} ↗`}
           </a>
@@ -57,7 +52,7 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
             <li key={tag}>
               <Badge
                 variant="outline"
-                className="rounded-sm border-2 border-foreground/70 font-mono text-[0.66rem] font-semibold uppercase tracking-wider"
+                className="rounded-none border border-border-strong text-[0.72rem] font-normal text-muted-foreground capitalize"
               >
                 {tag.replaceAll("_", " ")}
               </Badge>
@@ -66,24 +61,21 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
         </ul>
       )}
       {a.summary && (
-        <p className="mt-1.5 line-clamp-6 text-[0.95rem] leading-snug">
+        <p className="mt-1.5 line-clamp-6 max-w-[36em] font-serif text-[1.0625rem] leading-[1.65]">
           {a.summary}
         </p>
       )}
       {a.correction && (
-        <p className="mt-2 border-2 border-destructive px-2 py-1 text-sm leading-snug">
-          <strong className="mr-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-destructive">
+        <p className="mt-2 border border-destructive px-2 py-1 text-sm leading-snug">
+          <strong className="mr-1.5 text-[0.68rem] font-bold text-destructive">
             Correction
           </strong>
           {a.correction}
         </p>
       )}
       {a.eventId !== null && (
-        <p className="mt-2 font-mono text-xs font-bold">
-          <a
-            href={`/e/${a.eventId}`}
-            className="text-sec-ink decoration-sec decoration-2 hover:underline"
-          >
+        <p className="mt-2 text-sm">
+          <a href={`/e/${a.eventId}`} className="text-foreground underline">
             {a.eventReportCount >= 2
               ? `View story · ${a.eventReportCount} reports →`
               : "Story brief & explainers →"}

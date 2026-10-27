@@ -41,14 +41,14 @@ function WatchPage() {
   return (
     <div className="flex flex-col gap-8 pt-4">
       {/* Header */}
-      <header className="flex flex-col gap-4 border-b-2 pb-6">
+      <header className="flex flex-col gap-4 border-b pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="bg-primary/10 text-primary font-mono text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded">
+            <span className="bg-primary/10 text-primary text-xs font-bold px-2 py-0.5">
               Topic Watch
             </span>
             {watch.industryName && (
-              <span className="font-mono text-xs text-muted-foreground uppercase tracking-wider">
+              <span className="text-xs text-muted-foreground">
                 in {watch.industryName}
               </span>
             )}
@@ -56,7 +56,7 @@ function WatchPage() {
           <div className="flex items-center gap-3">
             <a
               href={`/rss/w/${watch.slug}.xml`}
-              className="font-mono text-xs font-bold uppercase tracking-wider underline hover:text-primary"
+              className="text-xs font-bold underline hover:text-primary"
             >
               RSS Feed
             </a>
@@ -64,13 +64,13 @@ function WatchPage() {
           </div>
         </div>
 
-        <h1 className="font-serif text-3xl font-black tracking-tight text-foreground md:text-4xl">
+        <h1 className="font-heading text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
           {watch.question}
         </h1>
 
-        <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 font-mono text-xs text-muted-foreground sm:grid-cols-2">
+        <div className="grid gap-3 border bg-muted/30 p-4 text-xs text-muted-foreground sm:grid-cols-2">
           <div>
-            <span className="font-bold uppercase tracking-wider text-foreground">
+            <span className="font-bold text-foreground">
               Criterion for Update:
             </span>
             <p className="mt-1 font-sans text-sm text-foreground">
@@ -78,14 +78,12 @@ function WatchPage() {
             </p>
           </div>
           <div>
-            <span className="font-bold uppercase tracking-wider text-foreground">
-              Keywords Watched:
-            </span>
+            <span className="font-bold text-foreground">Keywords Watched:</span>
             <div className="mt-1 flex flex-wrap gap-1.5 font-sans">
               {watch.keywords.map((kw, i) => (
                 <span
                   key={i}
-                  className="rounded border bg-background px-2 py-0.5 text-xs text-muted-foreground"
+                  className="border bg-background px-2 py-0.5 text-xs text-muted-foreground"
                 >
                   {kw}
                 </span>
@@ -102,16 +100,16 @@ function WatchPage() {
       {/* Material Developments Timeline */}
       <section className="flex flex-col gap-6">
         <div className="flex items-baseline justify-between border-b pb-2">
-          <h2 className="font-mono text-sm font-black uppercase tracking-wider text-sec-ink">
+          <h2 className="text-sm font-semibold text-muted-foreground">
             Material Developments ({hits.length})
           </h2>
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             Updates triggered only when new material facts emerge
           </span>
         </div>
 
         {hits.length === 0 ? (
-          <div className="rounded-lg border border-dashed py-12 text-center font-mono text-sm text-muted-foreground">
+          <div className="border border-dashed py-12 text-center text-sm text-muted-foreground">
             No material developments recorded yet. Topic is actively monitored
             against incoming reporting.
           </div>
@@ -120,9 +118,9 @@ function WatchPage() {
             {hits.map((hit) => (
               <article
                 key={hit.id}
-                className="flex flex-col gap-3 rounded-lg border p-5 shadow-xs transition-colors hover:border-primary/40"
+                className="flex flex-col gap-3 border p-5 transition-colors hover:border-primary/40"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 text-xs font-mono text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 text-xs text-muted-foreground">
                   <span className="font-semibold text-primary">
                     <time dateTime={new Date(hit.hitAt).toISOString()}>
                       {formatUtc(hit.hitAt)}
@@ -132,25 +130,25 @@ function WatchPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <span className="text-xs font-bold text-muted-foreground">
                     What's New:
                   </span>
-                  <p className="font-serif text-lg font-bold leading-snug text-foreground">
+                  <p className="font-heading text-lg font-semibold leading-snug text-foreground tracking-tight">
                     {hit.summary}
                   </p>
                 </div>
 
                 {hit.disclaimer && <Disclaimer text={hit.disclaimer} />}
 
-                <div className="mt-1 flex flex-col gap-2 rounded bg-muted/40 p-3">
+                <div className="mt-1 flex flex-col gap-2 bg-muted/40 p-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-muted-foreground">
+                    <span className="text-xs font-bold text-muted-foreground">
                       Associated Event:
                     </span>
                     <Link
                       to="/e/$eventId"
                       params={{ eventId: String(hit.eventId) }}
-                      className="font-mono text-xs font-bold text-sec-ink underline"
+                      className="text-xs font-bold text-foreground underline"
                     >
                       View Event Story & Evidence →
                     </Link>
@@ -161,7 +159,7 @@ function WatchPage() {
 
                   {hit.articles.length > 0 && (
                     <div className="mt-2 flex flex-col gap-1 border-t pt-2">
-                      <span className="font-mono text-[11px] font-bold text-muted-foreground uppercase">
+                      <span className="text-[11px] font-bold text-muted-foreground">
                         Reporting Sources:
                       </span>
                       <ul className="flex flex-col gap-1 text-xs">

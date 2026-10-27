@@ -59,14 +59,14 @@ export function LearningMaterialCard({
   return (
     <section
       aria-label="Learning Materials"
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-4 flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          <span className="text-xs font-bold text-muted-foreground">
             ★ News-to-Learning Interactive Materials
           </span>
-          <p className="font-mono text-[0.68rem] text-muted-foreground">
+          <p className="text-[0.68rem] text-muted-foreground">
             Curriculum, quizzes, discussion questions, and activities adapted by
             audience
           </p>
@@ -86,10 +86,10 @@ export function LearningMaterialCard({
                   setSelectedAudience(aud);
                   setSelectedAnswers({});
                 }}
-                className={`rounded border px-2.5 py-1 font-mono text-xs font-bold uppercase tracking-wider transition-colors ${
+                className={`min-h-11 border px-3 py-1 text-sm transition-colors ${
                   isSelected
-                    ? "border-sec-ink bg-sec-ink text-white dark:text-black"
-                    : "border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    ? "border-foreground bg-foreground font-semibold text-background"
+                    : "border-border-strong text-foreground hover:bg-muted"
                 }`}
               >
                 {aud}
@@ -101,7 +101,7 @@ export function LearningMaterialCard({
 
       <div className="flex flex-col gap-5">
         <div>
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          <h4 className="text-xs font-bold text-muted-foreground">
             Concept Explainer
           </h4>
           <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-foreground">
@@ -110,14 +110,14 @@ export function LearningMaterialCard({
         </div>
 
         {current.glossary.length > 0 && (
-          <div className="rounded border border-border/80 bg-muted/20 p-3">
-            <h4 className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          <div className="border border-border/80 bg-muted/20 p-3">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Glossary of Key Terms
             </h4>
             <dl className="mt-2 grid gap-2 sm:grid-cols-2">
               {current.glossary.map((item, idx) => (
                 <div key={idx} className="flex flex-col">
-                  <dt className="font-mono text-xs font-bold text-foreground">
+                  <dt className="text-xs font-bold text-foreground">
                     {item.term}
                   </dt>
                   <dd className="text-xs text-muted-foreground">
@@ -130,8 +130,8 @@ export function LearningMaterialCard({
         )}
 
         {current.quiz.length > 0 && (
-          <div className="rounded border-2 border-sec/40 bg-card p-3 sm:p-4">
-            <h4 className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          <div className="border border-border bg-card p-3 sm:p-4">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Interactive Quiz & Comprehension Check
             </h4>
             <div className="mt-3 flex flex-col gap-4">
@@ -141,7 +141,7 @@ export function LearningMaterialCard({
                 return (
                   <div
                     key={qIdx}
-                    className="flex flex-col gap-2 rounded border border-border/60 bg-muted/10 p-3"
+                    className="flex flex-col gap-2 border border-border/60 bg-muted/10 p-3"
                   >
                     <p className="text-sm font-semibold text-foreground">
                       {qIdx + 1}. {q.question}
@@ -155,13 +155,12 @@ export function LearningMaterialCard({
                         if (hasAnswered) {
                           if (isCorrect) {
                             btnStyle =
-                              "border-green-600 bg-green-500/10 text-green-700 dark:text-green-300 font-semibold";
+                              "border-foreground text-foreground font-semibold";
                           } else if (isChosen && !isCorrect) {
                             btnStyle =
-                              "border-red-600 bg-red-500/10 text-red-700 dark:text-red-300 line-through";
+                              "border-dashed border-destructive text-destructive line-through";
                           } else {
-                            btnStyle =
-                              "border-border/40 opacity-60 text-muted-foreground";
+                            btnStyle = "border-border text-muted-foreground";
                           }
                         }
                         return (
@@ -170,16 +169,16 @@ export function LearningMaterialCard({
                             type="button"
                             disabled={hasAnswered}
                             onClick={() => handleSelectAnswer(qIdx, optIdx)}
-                            className={`flex items-center justify-between rounded border px-3 py-1.5 text-left text-xs transition-colors ${btnStyle}`}
+                            className={`flex items-center justify-between border px-3 py-1.5 text-left text-xs transition-colors ${btnStyle}`}
                           >
                             <span>{opt}</span>
                             {hasAnswered && isCorrect && (
-                              <span className="font-mono text-[0.7rem] font-bold text-green-600 dark:text-green-400">
+                              <span className="text-[0.7rem] font-bold text-foreground">
                                 ✓ Correct
                               </span>
                             )}
                             {hasAnswered && isChosen && !isCorrect && (
-                              <span className="font-mono text-[0.7rem] font-bold text-red-600 dark:text-red-400">
+                              <span className="text-[0.7rem] font-bold text-destructive">
                                 ✗ Incorrect
                               </span>
                             )}
@@ -188,7 +187,7 @@ export function LearningMaterialCard({
                       })}
                     </div>
                     {hasAnswered && (
-                      <p className="mt-1 border-l-2 border-sec pl-2 text-xs leading-relaxed text-muted-foreground">
+                      <p className="mt-1 border-l-2 border-border-strong pl-2 text-xs leading-relaxed text-muted-foreground">
                         <strong className="text-foreground">
                           Explanation:
                         </strong>{" "}
@@ -204,7 +203,7 @@ export function LearningMaterialCard({
 
         {current.discussionQuestions.length > 0 && (
           <div>
-            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Inquiry & Discussion Questions
             </h4>
             <ul className="mt-1 list-disc space-y-1 pl-4 text-sm leading-relaxed text-foreground">
@@ -217,7 +216,7 @@ export function LearningMaterialCard({
 
         {current.activities.length > 0 && (
           <div>
-            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Practical Activities & Exercises
             </h4>
             <ul className="mt-1 list-disc space-y-1 pl-4 text-sm leading-relaxed text-foreground">

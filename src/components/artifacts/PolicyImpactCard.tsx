@@ -4,20 +4,20 @@ export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
   return (
     <section
       aria-label="Policy Impact Explorer"
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+        <span className="text-xs font-bold text-muted-foreground">
           🏛 Policy Impact Explorer
         </span>
-        <span className="font-mono text-[0.68rem] text-muted-foreground">
+        <span className="text-[0.68rem] text-muted-foreground">
           Education Policy Analysis
         </span>
       </header>
 
       <div className="flex flex-col gap-4">
         <div>
-          <h3 className="font-serif text-lg font-bold text-foreground">
+          <h3 className="font-heading text-lg font-semibold text-foreground tracking-tight">
             {policy.policyName}
           </h3>
           <p className="mt-1 text-sm leading-relaxed text-foreground">
@@ -27,16 +27,16 @@ export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
 
         {policy.affectedAudiences.length > 0 && (
           <div>
-            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Who It Affects & Key Consequences
             </h4>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               {policy.affectedAudiences.map((item, idx) => (
                 <div
                   key={idx}
-                  className="rounded border border-border/80 bg-muted/20 p-2.5"
+                  className="border border-border/80 bg-muted/20 p-2.5"
                 >
-                  <span className="font-mono text-xs font-bold text-sec-ink">
+                  <span className="text-xs font-bold text-muted-foreground">
                     {item.group}
                   </span>
                   <p className="mt-1 text-xs leading-relaxed text-foreground">
@@ -50,13 +50,13 @@ export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
 
         {policy.timeline.length > 0 && (
           <div>
-            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Implementation Timeline
             </h4>
-            <div className="mt-2 flex flex-col gap-1.5 border-l-2 border-sec pl-3">
+            <div className="mt-2 flex flex-col gap-1.5 border-l-2 border-border-strong pl-3">
               {policy.timeline.map((item, idx) => (
                 <div key={idx} className="text-xs">
-                  <span className="font-mono font-bold text-foreground">
+                  <span className="font-bold text-foreground">
                     {item.phase}:
                   </span>{" "}
                   <span className="text-muted-foreground">
@@ -69,8 +69,8 @@ export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
         )}
 
         {policy.remainingUncertainties.length > 0 && (
-          <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3">
-            <h4 className="font-mono text-xs font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400">
+          <div className="border border-dashed border-border-strong p-3">
+            <h4 className="text-xs font-bold text-foreground">
               Remaining Uncertainties & Open Questions
             </h4>
             <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs text-foreground">

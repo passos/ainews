@@ -84,11 +84,7 @@ export const Route = createFileRoute("/digest/$section/$date")({
       ],
     };
   },
-  notFoundComponent: () => (
-    <p className="pt-6 font-mono text-sm uppercase tracking-wider">
-      No such digest.
-    </p>
-  ),
+  notFoundComponent: () => <p className="pt-6 text-sm">No such digest.</p>,
   component: DigestPage,
 });
 
@@ -103,21 +99,21 @@ function DigestPage() {
         <Link
           to="/s/$section"
           params={{ section: section.slug }}
-          className="font-mono text-xs font-bold uppercase tracking-wider text-sec-ink hover:underline"
+          className="text-xs font-bold text-foreground hover:underline"
         >
           ← {section.name}
         </Link>
       </nav>
 
-      <div className="flex flex-wrap items-baseline justify-between gap-3 border-t-[5px] border-sec pt-1">
-        <h1 className="font-serif text-2xl font-black uppercase tracking-tight text-sec-ink sm:text-3xl">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 border-t-[3px] border-foreground pt-1">
+        <h1 className="font-heading text-3xl font-semibold tracking-[-0.025em] sm:text-4xl">
           {section.name} {isWeekly ? "Weekly Digest" : "Daily Digest"} ·{" "}
           {isWeekly ? `Week of ${periodStart}` : periodStart}
         </h1>
         <div className="flex items-center gap-3">
           <a
             href={`/rss/digest/${section.slug}.xml`}
-            className="font-mono text-xs font-bold uppercase tracking-wider underline"
+            className="text-xs font-bold underline"
           >
             Digest RSS
           </a>
@@ -129,9 +125,9 @@ function DigestPage() {
       {intro ? (
         <section
           aria-label={isWeekly ? "Weekly synthesis" : "Daily synthesis"}
-          className="border-l-4 border-sec bg-muted/40 p-4 font-sans text-sm leading-relaxed"
+          className="border-l-[3px] border-foreground py-1 pl-5 font-sans text-sm leading-relaxed"
         >
-          <h2 className="mb-1 font-mono text-xs font-bold uppercase tracking-wider text-sec-ink">
+          <h2 className="mb-1 text-xs font-bold text-muted-foreground">
             Executive Summary
           </h2>
           <p className="text-foreground">{intro}</p>
@@ -139,29 +135,26 @@ function DigestPage() {
       ) : null}
 
       <div className="flex flex-col gap-4">
-        <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <h2 className="text-xs font-bold text-muted-foreground">
           Top Developments ({items.length})
         </h2>
 
         {items.length === 0 ? (
-          <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <p className="border border-dashed px-3 py-4 text-xs text-muted-foreground">
             No approved events for this {isWeekly ? "week" : "day"}.
           </p>
         ) : (
           <ol className="flex flex-col gap-3">
             {items.map((item, idx) => (
-              <li
-                key={item.eventId}
-                className="flex flex-col gap-1 rounded-sm border p-4 shadow-xs"
-              >
+              <li key={item.eventId} className="flex flex-col gap-1 border p-4">
                 <div className="flex items-baseline gap-2">
-                  <span className="font-mono text-xs font-bold text-muted-foreground">
+                  <span className="text-xs font-bold text-muted-foreground">
                     #{idx + 1}
                   </span>
                   <Link
                     to="/e/$eventId"
                     params={{ eventId: String(item.eventId) }}
-                    className="font-serif text-lg font-bold text-foreground hover:text-sec-ink hover:underline"
+                    className="font-heading text-lg font-semibold text-foreground hover:text-muted-foreground hover:underline tracking-tight"
                   >
                     {item.title}
                   </Link>
@@ -169,7 +162,7 @@ function DigestPage() {
                 <p className="text-sm text-foreground/90 leading-relaxed">
                   {item.oneLiner}
                 </p>
-                <div className="mt-1 flex items-center gap-2 font-mono text-[0.72rem] text-muted-foreground">
+                <div className="mt-1 flex items-center gap-2 text-[0.72rem] text-muted-foreground">
                   <span>Source: {item.sourceName}</span>
                   <span>·</span>
                   <span>
@@ -184,18 +177,18 @@ function DigestPage() {
       </div>
 
       <aside className="mt-6 border-t pt-4">
-        <h3 className="mb-2 font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <h3 className="mb-2 text-xs font-bold text-muted-foreground">
           Recent {section.name} {isWeekly ? "Weekly" : "Daily"} Digests
         </h3>
         <Suspense fallback={null}>
           <Await promise={recent}>
             {(digests) =>
               digests.length <= 1 ? (
-                <p className="font-mono text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   No other recent digests.
                 </p>
               ) : (
-                <ul className="flex flex-wrap gap-3 font-mono text-xs">
+                <ul className="flex flex-wrap gap-3 text-xs">
                   {digests
                     .filter((d) => d.date !== periodStart)
                     .map((d) => (
@@ -204,7 +197,7 @@ function DigestPage() {
                           to="/digest/$section/$date"
                           params={{ section: section.slug, date: d.date }}
                           search={isWeekly ? { kind: "weekly" } : undefined}
-                          className="underline hover:text-sec-ink"
+                          className="underline hover:text-muted-foreground"
                         >
                           {d.date}
                         </Link>

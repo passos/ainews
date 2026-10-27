@@ -9,9 +9,7 @@ export const AI_SUMMARY_LABEL = "AI summary";
 function Time({ ms, label }: { ms: number; label: string }) {
   return (
     <span className="whitespace-nowrap">
-      <span className="uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>{" "}
+      <span className="text-muted-foreground">{label}</span>{" "}
       <time dateTime={new Date(ms).toISOString()}>{formatUtc(ms)}</time>
     </span>
   );
@@ -38,11 +36,11 @@ function OriginalLink({
   sourceName: string;
 }) {
   return (
-    <p className="font-mono text-xs font-bold">
+    <p className="text-xs font-bold">
       <a
         href={url}
         rel="noopener noreferrer"
-        className="text-sec-ink underline decoration-sec decoration-2"
+        className="text-foreground underline"
       >
         {`Read the original at ${sourceName} ↗`}
       </a>
@@ -54,11 +52,11 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
   const a = page.article;
   return (
     <article data-section={a.sectionSlug} className="flex flex-col gap-3 pt-4">
-      <h1 className="font-serif text-2xl font-black leading-tight sm:text-3xl">
+      <h1 className="max-w-[20em] font-heading text-3xl font-semibold leading-[1.08] tracking-[-0.02em] sm:text-5xl">
         {a.title}
       </h1>
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[0.72rem] leading-snug">
-        <strong className="uppercase tracking-wider text-sec-ink">
+      <p className="flex max-w-[36em] flex-wrap items-center gap-x-3 gap-y-0.5 border-b pb-3 text-sm leading-snug text-muted-foreground">
+        <strong className="font-semibold text-foreground">
           {a.sourceName}
         </strong>
         {a.publishedAt !== null && (
@@ -67,11 +65,8 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
         <Time ms={a.fetchedAt} label="Fetched" />
       </p>
       {a.eventId !== null && (
-        <p className="font-mono text-xs font-bold">
-          <a
-            href={`/e/${a.eventId}`}
-            className="text-sec-ink underline decoration-sec decoration-2"
-          >
+        <p className="text-xs font-bold">
+          <a href={`/e/${a.eventId}`} className="text-foreground underline">
             This story on Daily: brief, explanations, evidence →
           </a>
         </p>
@@ -79,8 +74,8 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
       {a.url && <OriginalLink url={a.url} sourceName={a.sourceName} />}
       {a.sectionDisclaimer && <Disclaimer text={a.sectionDisclaimer} />}
       {a.correction && (
-        <p className="border-2 border-destructive px-2 py-1 text-sm leading-snug">
-          <strong className="mr-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-destructive">
+        <p className="border border-destructive px-2 py-1 text-sm leading-snug">
+          <strong className="mr-1.5 text-[0.68rem] font-bold text-destructive">
             Correction
           </strong>
           {a.correction}
@@ -89,18 +84,20 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
       {a.summary && (
         <section
           aria-label="Summary"
-          className="max-w-[68ch] border-l-[5px] border-sec bg-card py-2 pl-3 pr-3"
+          className="max-w-[36em] border-l-[3px] border-foreground py-1 pl-5"
         >
-          <p className="font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+          <p className="text-[0.8125rem] font-semibold text-muted-foreground">
             {summaryLabel(page)}
           </p>
-          <p className="mt-1 text-[0.98rem] leading-snug">{a.summary}</p>
+          <p className="mt-1 font-serif text-lg leading-[1.6]">{a.summary}</p>
         </section>
       )}
       {page.bodyHtml && page.bodyIsAbstract && (
-        <header className="max-w-[68ch]">
-          <h2 className="font-serif text-lg font-bold">Abstract</h2>
-          <p className="font-mono text-[0.68rem] text-muted-foreground">
+        <header className="max-w-[36em]">
+          <h2 className="font-heading text-2xl font-semibold tracking-tight">
+            Abstract
+          </h2>
+          <p className="text-[0.8125rem] text-muted-foreground">
             {`Original text by the authors, as published by ${a.sourceName}.`}
           </p>
         </header>
@@ -112,11 +109,11 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
         />
       )}
       {page.excerpted && a.url && (
-        <p className="font-mono text-xs font-bold">
+        <p className="text-xs font-bold">
           <a
             href={a.url}
             rel="noopener noreferrer"
-            className="text-sec-ink underline decoration-sec decoration-2"
+            className="text-foreground underline"
           >
             Continue reading the original ↗
           </a>

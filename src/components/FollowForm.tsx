@@ -12,18 +12,17 @@ import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 
 const CONTROL =
-  "w-full rounded-sm border-2 bg-background px-2 py-1.5 text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-dashed";
-const LABEL = "font-mono text-xs font-bold uppercase tracking-wider";
+  "w-full border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-dashed";
+const LABEL = "text-xs font-bold";
 const HINT = "text-xs text-muted-foreground";
-const BUTTON =
-  "rounded-sm border-2 font-mono text-xs font-bold uppercase tracking-wider";
+const BUTTON = "border text-xs font-bold";
 
 function ErrorBox({ id, children }: { id?: string; children: string }) {
   return (
     <p
       id={id}
       role="alert"
-      className="border-2 border-dashed px-2 py-1 text-sm font-bold"
+      className="border border-dashed px-2 py-1 text-sm font-bold"
     >
       {children}
     </p>
@@ -222,7 +221,7 @@ export function FollowSuccess({ feedUrl }: { feedUrl: string }) {
     <div
       role="status"
       aria-live="polite"
-      className="flex flex-col gap-2 border-2 p-3"
+      className="flex flex-col gap-2 border p-3"
     >
       <label htmlFor="follow-feed" className={LABEL}>
         Your private feed address
@@ -235,7 +234,7 @@ export function FollowSuccess({ feedUrl }: { feedUrl: string }) {
           readOnly
           value={feedUrl}
           onFocus={(e) => e.currentTarget.select()}
-          className={cn(CONTROL, "min-w-0 flex-1 font-mono")}
+          className={cn(CONTROL, "min-w-0 flex-1")}
         />
         <CopyButton text={feedUrl} target={input} />
       </div>
@@ -271,7 +270,7 @@ export function RevokeFormView({
           required
           autoComplete="off"
           spellCheck={false}
-          className={cn(CONTROL, "font-mono")}
+          className={cn(CONTROL, "")}
         />
       </Field>
       {error && <ErrorBox>{error}</ErrorBox>}
@@ -375,7 +374,7 @@ export function FollowPanel({
       <section aria-labelledby="follow-stop" className="flex flex-col gap-2">
         <h2
           id="follow-stop"
-          className="border-t-[3px] border-foreground pt-1 font-mono text-xs font-black uppercase tracking-[0.18em]"
+          className="border-t-[3px] border-foreground pt-1 text-xs font-semibold"
         >
           Stop a feed
         </h2>

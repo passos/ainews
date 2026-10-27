@@ -23,7 +23,7 @@ function WatchListPage() {
     >
       <h1
         id="watches-title"
-        className="border-t-[5px] border-foreground pt-1 font-mono text-sm font-black uppercase tracking-[0.18em]"
+        className="border-t-[3px] border-foreground pt-1 text-sm font-semibold"
       >
         Topic Watches
       </h1>
@@ -33,7 +33,7 @@ function WatchListPage() {
       </p>
       {readerWatchEnabled && <FollowOwnLink />}
       {watches.length === 0 ? (
-        <p className="border-2 border-dashed px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+        <p className="border border-dashed px-3 py-4 text-xs text-muted-foreground">
           No topic watches yet.
         </p>
       ) : (
@@ -42,17 +42,17 @@ function WatchListPage() {
             <li
               key={w.id}
               data-watch={w.slug}
-              className="flex flex-col gap-2 border-2 p-3"
+              className="flex flex-col gap-2 border p-3"
             >
               <Link
                 to="/w/$watch"
                 params={{ watch: w.slug }}
                 search={(prev) => ({ audience: prev.audience })}
-                className="font-serif text-lg font-bold"
+                className="font-heading text-lg font-semibold tracking-tight"
               >
                 {w.question}
               </Link>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs uppercase">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 <span>{w.industryName ?? "All sections"}</span>
                 <span aria-hidden="true">·</span>
                 <a href={`/rss/w/${w.slug}.xml`} className="underline">
