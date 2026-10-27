@@ -328,6 +328,24 @@ describe("getStoryAnswerCore", () => {
     }
   });
 
+  it("drops a citation of an approved article from another event", async () => {
+    const otherEvent = await seedEvent(tech.industryId, "Other story");
+    const other = await seedArticle({
+      ...tech,
+      title: "Other story article",
+      url: "https://technology.example/other",
+    });
+    await seedEventArticle(otherEvent, other);
+    await seedReview(other, "approved");
+    const { questionId, token } = await ask();
+    await complete(questionId, {
+      citations: [citation(other, true, "quote from another event")],
+    });
+    const out = await read(questionId, token);
+    expect(out.status).toBe("completed");
+    expect(out.citations).toEqual([]);
+  });
+
   it("returns no url for an article link that is not http/https", async () => {
     const bad = await seedArticle({
       ...tech,
