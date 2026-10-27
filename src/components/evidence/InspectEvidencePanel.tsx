@@ -4,6 +4,7 @@ import type {
   ClaimView,
   EventEvidenceView,
 } from "../../lib/evidence/types";
+import { stripMarkdownLinks } from "../../lib/quote-display";
 import {
   originalFragmentHref,
   textFragmentHref,
@@ -81,11 +82,11 @@ function ClaimRow({
 
   const consensusBadge = {
     verified: {
-      text: "Verified",
+      text: "Supported · model assessment",
       classes: "border-foreground text-foreground font-semibold",
     },
     disputed: {
-      text: "Disputed",
+      text: "Disputed · model assessment",
       classes: "border-destructive text-destructive font-bold",
     },
     unverified: {
@@ -121,17 +122,17 @@ function ClaimRow({
             )}
             {claim.realityCheck === "vendor_only" && (
               <span className="border border-dashed border-border-strong px-1.5 py-0.5 text-[0.65rem] font-semibold text-muted-foreground">
-                Vendor Claim (Unverified)
+                Model assessment: vendor claim only
               </span>
             )}
             {claim.realityCheck === "independent_verified" && (
               <span className="border border-border-strong px-1.5 py-0.5 text-[0.65rem] font-semibold text-foreground">
-                Independent Benchmark Confirmed
+                Model assessment: independent support
               </span>
             )}
             {claim.realityCheck === "independent_disputed" && (
               <span className="border border-destructive px-1.5 py-0.5 text-[0.65rem] font-semibold text-destructive">
-                Disputed by Independent Benchmark
+                Model assessment: disputed by independent source
               </span>
             )}
             <span className="text-[0.65rem] text-muted-foreground">
@@ -188,7 +189,9 @@ function ClaimRow({
                             : "border-border-strong text-foreground"
                         }`}
                       >
-                        {cit.sourceRole === "vendor" ? "Vendor" : "Independent"}
+                        {cit.sourceRole === "vendor"
+                          ? "Vendor · model assessment"
+                          : "Independent · model assessment"}
                       </span>
                       <span className="text-[0.68rem] text-muted-foreground">
                         {cit.sourceName} ({cit.sourceDomain})
@@ -208,7 +211,7 @@ function ClaimRow({
                   </div>
 
                   <blockquote className="border-l-2 border-primary/40 pl-2.5 italic text-foreground/90">
-                    "{cit.quote}"
+                    "{stripMarkdownLinks(cit.quote)}"
                   </blockquote>
                   <QuoteLink cit={cit} />
                 </div>
