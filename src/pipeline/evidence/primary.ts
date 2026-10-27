@@ -14,21 +14,6 @@ import { isEnabled } from "../../lib/flags";
 import { effectivePublishMode } from "../analyze/analyze";
 import { toMarkdown } from "../../providers/tomarkdown";
 
-/**
- * Looser than APPROVED_ARTICLE_SQL (server/publication/articles.ts): true when
- * ANY body version of article `a` has an approved review, not only the
- * current one. Only the recovery path in trackEventPrimarySources uses it:
- * that path has just written a review for `existing.body_sha || sha256(canonical)`,
- * which can differ from `a.body_sha`. This is not the definition of
- * "approved" and must not decide what readers see. Moving that path to
- * APPROVED_ARTICLE_SQL is a behavior change and an owner decision (#84).
- * The article table must be aliased `a`.
- */
-export const ANY_BODY_APPROVED_SQL = `EXISTS (
-  SELECT 1 FROM reviews r
-  WHERE r.article_id = a.id AND r.decision = 'approved'
-)`;
-
 export interface PrimaryTrackerDeps {
   db: D1Database;
   bodies?: R2Bucket;
@@ -364,6 +349,7 @@ export async function trackEventPrimarySources(
       // If existing article was created by primary tracker but its approval batch failed,
       // recover and complete the approval + event linking on retry, BUT NEVER overwrite
       // an administrator rejection or existing review:
+      // Needs the article's current body_sha: an approval must name a body version (APPROVED_ARTICLE_SQL). Without one, nothing is written; the article waits for a body and a human review (#103).
       if (!isApproved && !assigned && existing.stage === "grouped") {
         const existingReview = await deps.db
           .prepare(`SELECT decision FROM reviews WHERE article_id = ?1`)
@@ -374,8 +360,8 @@ export async function trackEventPrimarySources(
           continue;
         }
 
-        if (autoApprove && !existingReview) {
-          const bodySha = existing.body_sha || (await sha256Hex(canonical));
+        if (autoApprove && !existingReview && existing.body_sha) {
+          const bodySha = existing.body_sha;
           const batchRes = await deps.db.batch([
             deps.db
               .prepare(
@@ -402,7 +388,7 @@ export async function trackEventPrimarySources(
                    SELECT 1 FROM articles a
                    JOIN events e ON e.id = ?1
                    WHERE a.id = ?2 AND a.industry_id = e.industry_id
-                     AND ${ANY_BODY_APPROVED_SQL}
+                     AND ${APPROVED_ARTICLE_SQL}
                  )`,
               )
               .bind(eventId, existing.id, now),
