@@ -18,6 +18,8 @@ import {
   skillsCareerTrendsSchema,
   storyBriefSchema,
   supplyChainRippleMapSchema,
+  launchRealityCheckSchema,
+  technologyEvolutionTimelineSchema,
 } from "../../lib/artifacts/types";
 import type { EventEvidenceView } from "../../lib/evidence/types";
 import {
@@ -115,6 +117,8 @@ export async function getEvent(
     industryImpact: null,
     supplyChainRipple: null,
     earningsDecoder: null,
+    launchRealityCheck: null,
+    evolutionTimeline: null,
   };
 
   for (const row of artifactRows) {
@@ -169,6 +173,12 @@ export async function getEvent(
       } else if (row.type === "earnings_decoder") {
         const res = earningsDecoderSchema.safeParse(parsedJson);
         if (res.success) artifacts.earningsDecoder = res.data;
+      } else if (row.type === "launch_reality_check") {
+        const res = launchRealityCheckSchema.safeParse(parsedJson);
+        if (res.success) artifacts.launchRealityCheck = res.data;
+      } else if (row.type === "technology_evolution_timeline") {
+        const res = technologyEvolutionTimelineSchema.safeParse(parsedJson);
+        if (res.success) artifacts.evolutionTimeline = res.data;
       }
     } catch {
       // ignore invalid json in publication layer

@@ -16,6 +16,8 @@ export const ARTIFACT_TYPES = [
   "industry_impact_report",
   "supply_chain_ripple_map",
   "earnings_decoder",
+  "launch_reality_check",
+  "technology_evolution_timeline",
 ] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
@@ -456,6 +458,69 @@ export const earningsDecoderSchema = z.strictObject({
 export type EarningsDecoder = z.infer<typeof earningsDecoderSchema>;
 
 // -----------------------------------------------------------------------------
+// Technology products: Launch Reality Check, Technology Evolution Timeline (N§3)
+// -----------------------------------------------------------------------------
+
+export const NOT_STATED_IN_SOURCES = "Not stated in sources";
+
+/** A passage copied from one approved source article of the event. */
+export const sourceQuoteSchema = z.strictObject({
+  articleId: z.number().int().positive(),
+  quote: z.string().min(20).max(300),
+});
+export type SourceQuote = z.infer<typeof sourceQuoteSchema>;
+
+export const LAUNCH_VERDICTS = [
+  "independent_support",
+  "independent_dispute",
+  "no_independent_evidence",
+] as const;
+export type LaunchVerdict = (typeof LAUNCH_VERDICTS)[number];
+
+export const launchClaimSchema = z.strictObject({
+  claim: z.string().min(1).max(300),
+  claimQuote: sourceQuoteSchema,
+  verdict: z.enum(LAUNCH_VERDICTS),
+  independentEvidence: z.array(sourceQuoteSchema).max(2),
+});
+export type LaunchClaim = z.infer<typeof launchClaimSchema>;
+
+export const launchRealityCheckSchema = z.strictObject({
+  subject: z.string().min(1).max(120),
+  claimant: z.string().min(1).max(120),
+  claims: z.array(launchClaimSchema).min(1).max(5),
+});
+export type LaunchRealityCheck = z.infer<typeof launchRealityCheckSchema>;
+
+export const TIMELINE_KINDS = [
+  "release",
+  "evaluation",
+  "correction",
+  "adoption",
+] as const;
+export type TimelineKind = (typeof TIMELINE_KINDS)[number];
+export const TIMELINE_DATE_SOURCES = [
+  "stated_in_text",
+  "report_published",
+] as const;
+
+export const timelineEntrySchema = z.strictObject({
+  date: z.string().min(1).max(40),
+  dateSource: z.enum(TIMELINE_DATE_SOURCES),
+  kind: z.enum(TIMELINE_KINDS),
+  description: z.string().min(1).max(300),
+  source: sourceQuoteSchema,
+});
+export type TimelineEntry = z.infer<typeof timelineEntrySchema>;
+
+export const technologyEvolutionTimelineSchema = z.strictObject({
+  entries: z.array(timelineEntrySchema).min(2).max(8),
+});
+export type TechnologyEvolutionTimeline = z.infer<
+  typeof technologyEvolutionTimelineSchema
+>;
+
+// -----------------------------------------------------------------------------
 // Aggregate view of published event artifacts
 // -----------------------------------------------------------------------------
 
@@ -475,4 +540,6 @@ export interface EventArtifactsView {
   industryImpact?: IndustryImpactReport | null;
   supplyChainRipple?: SupplyChainRippleMap | null;
   earningsDecoder?: EarningsDecoder | null;
+  launchRealityCheck?: LaunchRealityCheck | null;
+  evolutionTimeline?: TechnologyEvolutionTimeline | null;
 }

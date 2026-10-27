@@ -15,6 +15,8 @@ import { StoryBriefCard } from "../../components/artifacts/StoryBriefCard";
 import { IndustryImpactCard } from "../../components/artifacts/IndustryImpactCard";
 import { SupplyChainRippleCard } from "../../components/artifacts/SupplyChainRippleCard";
 import { EarningsDecoderCard } from "../../components/artifacts/EarningsDecoderCard";
+import { LaunchRealityCheckCard } from "../../components/artifacts/LaunchRealityCheckCard";
+import { EvolutionTimelineCard } from "../../components/artifacts/EvolutionTimelineCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import {
@@ -138,6 +140,20 @@ function EventPage() {
       )}
 
       {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}
+
+      {artifacts?.launchRealityCheck && (
+        <LaunchRealityCheckCard
+          check={artifacts.launchRealityCheck}
+          sources={artifactSources}
+        />
+      )}
+
+      {artifacts?.evolutionTimeline && (
+        <EvolutionTimelineCard
+          timeline={artifacts.evolutionTimeline}
+          sources={artifactSources}
+        />
+      )}
 
       {artifacts?.learningMaterials &&
         Object.keys(artifacts.learningMaterials).length > 0 && (
