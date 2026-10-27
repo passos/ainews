@@ -10,6 +10,10 @@ import type { GenerateMessage, PipelineEnv } from "../../src/pipeline/messages";
 import type { ModelTransport } from "../../src/providers/transport";
 import migration0022 from "../../drizzle/migrations/0022_parched_grim_reaper.sql?raw";
 import {
+  EVOLUTION_TIMELINE_PROMPT_VERSION,
+  LAUNCH_REALITY_CHECK_PROMPT_VERSION,
+} from "../../src/pipeline/artifacts/prompts";
+import {
   BudgetExceededError,
   CallFailedError,
   type ModelClient,
@@ -4327,5 +4331,189 @@ describe("artifact scheduling (#92)", () => {
       true,
     );
     expect(await evaluatedRevision(id)).toBe(1);
+  });
+});
+
+describe("Technology products (#131)", () => {
+  it("generates both Technology products for a two-article product_launch event (#131)", async () => {
+    await ensureBudget();
+    const BODY_A =
+      "Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite. In March 2026 Acme shipped Orion-1.";
+    const BODY_B =
+      "An independent evaluation by the Open Eval Lab found that Orion-2 scored 81 percent on CodeBench, below the vendor figure.";
+    const config = JSON.stringify({
+      analysis: {
+        prefilter: { relevant: "r", off_topic: "o", noise: "n" },
+        categories: { cat: "desc" },
+        contentTypes: {
+          product_launch: {
+            description: "d",
+            weights: { sig: 1, nov: 1, cred: 1, reson: 1, act: 1 },
+          },
+        },
+        dimensions: {
+          sig: ["s1", "s2", "s3", "s4", "s5"],
+          nov: ["n1", "n2", "n3", "n4", "n5"],
+        },
+        labels: ["safety"],
+        thresholds: { prefilterMinRelevant: 0.3, select: 60 },
+        summaryGuidance: "g",
+        guardrails: [],
+      },
+    });
+    // Reuse the technology row when an earlier test created it.
+    const ind = await env.DB.prepare(
+      `INSERT INTO industries (slug, name, publish_mode, config, created_at)
+       VALUES ('technology', 'Technology', 'review', ?1, 1000)
+       ON CONFLICT (slug) DO UPDATE SET config = ?1, publish_mode = 'review'
+       RETURNING id`,
+    )
+      .bind(config)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech131.test/feed', 'tech131.test', 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Orion-2 launch', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+
+    const articleIds: number[] = [];
+    for (const [name, contentType, body] of [
+      ["a", "product_launch", BODY_A],
+      ["b", "opinion_analysis", BODY_B],
+    ] as const) {
+      const sha = `sha-tech131-${name}`;
+      const url = `https://tech131.test/${name}`;
+      const art = await env.DB.prepare(
+        `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, published_at, fetched_at, stage, stage_updated_at)
+         VALUES (?1, ?2, ?3, ?3, 'Orion-2 report', 'Summary', ?4, ?5, 1000, 'grouped', 1000)
+         RETURNING id`,
+      )
+        .bind(src!.id, ind!.id, url, sha, Date.UTC(2026, 9, 20))
+        .first<{ id: number }>();
+      await env.DB.prepare(
+        "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'auto', 1000)",
+      )
+        .bind(art!.id, sha)
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO analyses (article_id, prompt_version, scores, content_type, evidence_tags, total_score, prefilter_relevant, prefilter_pass, category, noise_kind, selected, created_at)
+         VALUES (?1, 'pv1', '{}', ?2, '[]', 65, 0.9, 1, 'cat', 'none', 1, 1000)`,
+      )
+        .bind(art!.id, contentType)
+        .run();
+      await env.DB.prepare(
+        "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+      )
+        .bind(event!.id, art!.id)
+        .run();
+      await env.BODIES.put(`bodies/${art!.id}/${sha}.md`, body);
+      articleIds.push(art!.id);
+    }
+    const [idA, idB] = articleIds;
+
+    const transport = makeFakeTransport((_model, input) => {
+      const s = JSON.stringify(input);
+      if (s.includes("fact-checking editor")) {
+        return {
+          subject: "Orion-2",
+          claimant: "Acme",
+          claims: [
+            {
+              claim: "Orion-2 scores 92 percent on CodeBench.",
+              claimQuote: {
+                articleId: idA,
+                quote: "scores 92 percent on the CodeBench suite",
+              },
+              verdict: "independent_dispute",
+              independentEvidence: [
+                {
+                  articleId: idB,
+                  quote: "Orion-2 scored 81 percent on CodeBench",
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (s.includes("technology history editor")) {
+        return {
+          entries: [
+            {
+              date: "March 2026",
+              dateSource: "stated_in_text",
+              kind: "release",
+              description: "Acme shipped Orion-1.",
+              source: {
+                articleId: idA,
+                quote: "In March 2026 Acme shipped Orion-1",
+              },
+            },
+            {
+              date: "today",
+              dateSource: "report_published",
+              kind: "evaluation",
+              description: "The Open Eval Lab measured Orion-2.",
+              source: {
+                articleId: idB,
+                quote: "Orion-2 scored 81 percent on CodeBench",
+              },
+            },
+          ],
+        };
+      }
+      return {
+        whatHappened: "Acme released Orion-2.",
+        whatIsNew: "A new model.",
+        whatEvidenceExists: "One outside test.",
+        whatToWatchNext: "More tests.",
+      };
+    });
+
+    await generateEventArtifacts(testEnv, event!.id, 1000, { transport });
+
+    const rows = await env.DB.prepare(
+      "SELECT type, status, prompt_version FROM event_artifacts WHERE event_id = ?1 AND type IN ('launch_reality_check', 'technology_evolution_timeline') ORDER BY type",
+    )
+      .bind(event!.id)
+      .all<{ type: string; status: string; prompt_version: string }>();
+    expect(rows.results).toEqual([
+      {
+        type: "launch_reality_check",
+        status: "pending_review",
+        prompt_version: LAUNCH_REALITY_CHECK_PROMPT_VERSION,
+      },
+      {
+        type: "technology_evolution_timeline",
+        status: "pending_review",
+        prompt_version: EVOLUTION_TIMELINE_PROMPT_VERSION,
+      },
+    ]);
+    expect(LAUNCH_REALITY_CHECK_PROMPT_VERSION).toBe("launch-reality-check-v1");
+    expect(EVOLUTION_TIMELINE_PROMPT_VERSION).toBe("evolution-timeline-v1");
+
+    const calls = await env.DB.prepare(
+      // D1 rejects LIKE patterns longer than 50 bytes: compare prefixes.
+      "SELECT logical_key, tier FROM llm_calls WHERE substr(logical_key, 1, length(?1)) = ?1 OR substr(logical_key, 1, length(?2)) = ?2 ORDER BY logical_key",
+    )
+      .bind(
+        `artifact:${event!.id}:launch_reality_check:default:`,
+        `artifact:${event!.id}:technology_evolution_timeline:default:`,
+      )
+      .all<{ logical_key: string; tier: number }>();
+    expect(calls.results).toHaveLength(2);
+    expect(calls.results[0].logical_key).toMatch(
+      new RegExp(`^artifact:${event!.id}:launch_reality_check:default:`),
+    );
+    expect(calls.results[1].logical_key).toMatch(
+      new RegExp(
+        `^artifact:${event!.id}:technology_evolution_timeline:default:`,
+      ),
+    );
+    expect(calls.results.map((c) => c.tier)).toEqual([4, 4]);
   });
 });

@@ -30,6 +30,8 @@ import type {
   SkillsCareerTrends,
   StoryBrief,
   SupplyChainRippleMap,
+  LaunchRealityCheck,
+  TechnologyEvolutionTimeline,
 } from "../src/lib/artifacts/types";
 import { quizQuestionSchema } from "../src/lib/artifacts/types";
 import { ArtifactSources } from "../src/components/artifacts/ArtifactSources";
@@ -725,6 +727,120 @@ describe("artifact sources (#115)", () => {
           materials: { student: material },
           sources: [],
         }),
+      ),
+    ).toBe("");
+  });
+});
+
+// #131: the cards are imported inside the tests so that, before they exist,
+// only these tests fail and the rest of the file still runs.
+describe("Technology product cards (#131)", () => {
+  const check: LaunchRealityCheck = {
+    subject: "Orion-2",
+    claimant: "Acme",
+    claims: [
+      {
+        claim: "Orion-2 scores 92 percent on CodeBench.",
+        claimQuote: {
+          articleId: 1,
+          quote: "scores 92 percent on the CodeBench suite",
+        },
+        verdict: "independent_dispute",
+        independentEvidence: [
+          { articleId: 2, quote: "Orion-2 scored 81 percent on CodeBench" },
+        ],
+      },
+    ],
+  };
+  const timeline: TechnologyEvolutionTimeline = {
+    entries: [
+      {
+        date: "2026-10-20",
+        dateSource: "report_published",
+        kind: "release",
+        description: "Acme released Orion-2.",
+        source: { articleId: 1, quote: "Acme today released Orion-2, a model" },
+      },
+      {
+        date: "March 2026",
+        dateSource: "stated_in_text",
+        kind: "evaluation",
+        description: "The Open Eval Lab measured Orion-2.",
+        source: {
+          articleId: 2,
+          quote: "Orion-2 scored 81 percent on CodeBench",
+        },
+      },
+    ],
+  };
+
+  it("LaunchRealityCheckCard shows claims, verdicts, quotes and the three source fields", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const html = renderToStaticMarkup(
+      createElement(LaunchRealityCheckCard, { check, sources: SOURCES }),
+    );
+    expect(html).toContain("Launch Reality Check");
+    expect(html).toContain("Orion-2 · Claims by Acme");
+    expect(html).toContain(
+      "1 of 1 claim has independent evidence in these sources.",
+    );
+    expect(html).toContain("Independent evidence disputes this claim");
+    expect(html).toContain("scores 92 percent on the CodeBench suite");
+    expect(html).toContain("Orion-2 scored 81 percent on CodeBench");
+    expect(html).toContain('href="/a/1"');
+    expect(html).toContain('href="/a/2"');
+    expectSourceInfo(html);
+    // 375px guards of the card itself, not only of ArtifactSources.
+    expect(html).toMatch(
+      /^<section aria-label="Launch Reality Check" class="min-w-0 /,
+    );
+    expect(html).toContain('<li class="min-w-0 ');
+    expect(html).toContain('<blockquote class="wrap-anywhere ');
+    expect(html).toContain('<p class="wrap-anywhere text-sm font-bold">');
+    expect(html).toContain("flex-wrap");
+    // ArtifactSources is the last child of the section.
+    expect(html).toMatch(/<\/footer><\/section>$/);
+  });
+
+  it("EvolutionTimelineCard shows dates, kinds, quotes and the three source fields", async () => {
+    const { EvolutionTimelineCard } =
+      await import("../src/components/artifacts/EvolutionTimelineCard");
+    const html = renderToStaticMarkup(
+      createElement(EvolutionTimelineCard, { timeline, sources: SOURCES }),
+    );
+    expect(html).toContain("Technology Evolution Timeline");
+    expect(html).toContain("2026-10-20");
+    expect(html).toContain("Date of report");
+    expect(html.match(/Date of report/g)).toHaveLength(1);
+    expect(html).toContain("Release");
+    expect(html).toContain("Evaluation");
+    expect(html).toContain("Acme today released Orion-2, a model");
+    expect(html).toContain('href="/a/1"');
+    expect(html).toContain('href="/a/2"');
+    expectSourceInfo(html);
+    expect(html).toMatch(
+      /^<section aria-label="Technology Evolution Timeline" class="min-w-0 /,
+    );
+    expect(html).toContain('<li class="min-w-0 ');
+    expect(html).toContain('<p class="flex flex-wrap ');
+    expect(html).toContain('<blockquote class="wrap-anywhere ');
+    expect(html).toMatch(/<\/footer><\/section>$/);
+  });
+
+  it("Technology product cards render nothing without sources", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const { EvolutionTimelineCard } =
+      await import("../src/components/artifacts/EvolutionTimelineCard");
+    expect(
+      renderToStaticMarkup(
+        createElement(LaunchRealityCheckCard, { check, sources: [] }),
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        createElement(EvolutionTimelineCard, { timeline, sources: [] }),
       ),
     ).toBe("");
   });

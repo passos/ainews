@@ -11,6 +11,11 @@ import { ARTIFACT_REGISTRY } from "../../src/pipeline/artifacts/registry";
 const EXPECTED_REQUEST_SHA256 =
   "c4a27a9b82babc256b9ef69a53f6064f206de8e74c2578c4ffabe4437e558f42";
 
+// #131: the two Technology product request sites, pinned separately so the
+// 18 older sites keep EXPECTED_REQUEST_SHA256.
+const EXPECTED_TECH_REQUEST_SHA256 =
+  "219ddc0b8cdae6d6322899d682e5b82aa871aa9dffccb00c75e91045f099af04";
+
 const MATERIAL: ArtifactEventMaterial = {
   eventId: 126,
   eventTitle: "Fixture event",
@@ -82,15 +87,22 @@ const MATERIAL: ArtifactEventMaterial = {
 
 describe("artifact request bytes (#126)", () => {
   it("every request site serialises to the pinned bytes", async () => {
-    const sites = Object.values(ARTIFACT_REGISTRY).flatMap((def) =>
-      def.audiences.map((aud) => ({
-        type: def.type,
-        audience: aud,
-        slot: def.slot ?? "write",
-        promptVersion: def.promptVersion,
-        request: def.buildRequest(MATERIAL, aud),
-      })),
-    );
+    // #131 adds two types; the 18 older sites must keep their bytes.
+    const sites = Object.values(ARTIFACT_REGISTRY)
+      .filter(
+        (def) =>
+          def.type !== "launch_reality_check" &&
+          def.type !== "technology_evolution_timeline",
+      )
+      .flatMap((def) =>
+        def.audiences.map((aud) => ({
+          type: def.type,
+          audience: aud,
+          slot: def.slot ?? "write",
+          promptVersion: def.promptVersion,
+          request: def.buildRequest(MATERIAL, aud),
+        })),
+      );
     expect(sites).toHaveLength(18);
     const digest = await crypto.subtle.digest(
       "SHA-256",
@@ -100,6 +112,34 @@ describe("artifact request bytes (#126)", () => {
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
     expect(hex).toBe(EXPECTED_REQUEST_SHA256);
+  });
+
+  it("the #131 request sites serialise to the bytes pinned from the issue text", async () => {
+    // Computed from the prompt text in issue #131, not from src.
+    const sites = Object.values(ARTIFACT_REGISTRY)
+      .filter(
+        (def) =>
+          def.type === "launch_reality_check" ||
+          def.type === "technology_evolution_timeline",
+      )
+      .flatMap((def) =>
+        def.audiences.map((aud) => ({
+          type: def.type,
+          audience: aud,
+          slot: def.slot ?? "write",
+          promptVersion: def.promptVersion,
+          request: def.buildRequest(MATERIAL, aud),
+        })),
+      );
+    expect(sites).toHaveLength(2);
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(JSON.stringify(sites)),
+    );
+    const hex = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    expect(hex).toBe(EXPECTED_TECH_REQUEST_SHA256);
   });
 
   it("the learning_material prompt version is unchanged", () => {
