@@ -11,6 +11,7 @@ import {
 } from "../../lib/markdown";
 import { safeHttpUrl } from "../../lib/url";
 import type { getDb } from "../db/client";
+import { adminWatchWhere } from "./watches";
 
 export type Db = ReturnType<typeof getDb>;
 
@@ -305,7 +306,7 @@ export async function getHome(
   }
 
   const watchRows = await db.all<HomeWatchItem>(sql`
-    SELECT slug, question FROM watches WHERE status = 'active' ORDER BY created_at DESC
+    SELECT slug, question FROM watches WHERE status = 'active' AND ${adminWatchWhere} ORDER BY created_at DESC
   `);
 
   return { sections, watches: watchRows };

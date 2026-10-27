@@ -74,6 +74,7 @@ export type PipelineEnv = Pick<Env, "DB" | "BODIES" | "Q_INGEST"> & {
   EMAIL_ENABLED?: string;
   THIRD_PARTY_READER_ENABLED?: string;
   DISCOVERY_ENABLED?: string;
+  READER_WATCH_ENABLED?: string;
   /** Secret (wrangler secret), not a var. */
   JINA_API_KEY?: string;
   EMAIL?: SendEmail;

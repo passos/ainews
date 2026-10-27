@@ -4,6 +4,7 @@ export const SAFETY_FLAGS = [
   "EMAIL_ENABLED",
   "THIRD_PARTY_READER_ENABLED",
   "DISCOVERY_ENABLED",
+  "READER_WATCH_ENABLED",
 ] as const;
 
 export type SafetyFlag = (typeof SAFETY_FLAGS)[number];

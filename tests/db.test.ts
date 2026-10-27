@@ -111,6 +111,7 @@ it("migrations create the core tables", async () => {
     "industries",
     "llm_calls",
     "questions",
+    "reader_watch_admissions",
     "reviews",
     "settings",
     "source_candidates",
