@@ -6,25 +6,16 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router";
-import { z } from "zod";
 import { Beacon } from "../components/Beacon";
-import { PrefsSync } from "../components/PrefsSync";
 import { SectionNav, WatchesNavLink } from "../components/SectionNav";
 import { ThemeSwitcher } from "../components/ThemeSwitcher";
-import { AUDIENCES } from "../lib/reader-prefs";
 import { showWatchesNav } from "../lib/follow";
 import { THEME_INIT_SCRIPT } from "../lib/theme";
 import { getSiteShell } from "../server/publication/site";
 import appCss from "../styles.css?url";
 import { SITE_NAME } from "../lib/site";
 
-// Child routes inherit this. An unknown audience becomes "not set".
-const searchSchema = z.object({
-  audience: z.enum(AUDIENCES).optional().catch(undefined),
-});
-
 export const Route = createRootRoute({
-  validateSearch: searchSchema,
   loader: () => getSiteShell(),
   head: () => ({
     meta: [
@@ -83,7 +74,6 @@ export function SiteHeader({
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b-[3px] border-foreground pb-3">
         <Link
           to="/"
-          search={(prev) => ({ audience: prev.audience })}
           className="font-heading text-4xl font-semibold leading-none tracking-[-0.03em] no-underline sm:text-5xl"
         >
           {name}
@@ -110,10 +100,8 @@ export function SiteHeader({
 function RootLayout() {
   const { name, sections, hasWatches, readerWatchEnabled } =
     Route.useLoaderData();
-  const { audience } = Route.useSearch();
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-5">
-      <PrefsSync audience={audience} />
       <SiteHeader
         name={name}
         sections={sections}

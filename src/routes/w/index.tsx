@@ -47,7 +47,6 @@ function WatchListPage() {
               <Link
                 to="/w/$watch"
                 params={{ watch: w.slug }}
-                search={(prev) => ({ audience: prev.audience })}
                 className="font-heading text-lg font-semibold tracking-tight"
               >
                 {w.question}

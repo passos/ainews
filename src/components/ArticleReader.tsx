@@ -51,11 +51,14 @@ function OriginalLink({
 export function ArticleReader({ page }: { page: ArticlePage }) {
   const a = page.article;
   return (
-    <article data-section={a.sectionSlug} className="flex flex-col gap-3 pt-4">
-      <h1 className="max-w-[20em] font-heading text-3xl font-semibold leading-[1.08] tracking-[-0.02em] sm:text-5xl">
+    <article
+      data-section={a.sectionSlug}
+      className="mx-auto flex w-full max-w-[40rem] flex-col gap-3 pt-4"
+    >
+      <h1 className="font-heading text-3xl font-semibold leading-[1.08] tracking-[-0.02em] sm:text-[2.75rem]">
         {a.title}
       </h1>
-      <p className="flex max-w-[36em] flex-wrap items-center gap-x-3 gap-y-0.5 border-b pb-3 text-sm leading-snug text-muted-foreground">
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b pb-3 text-sm leading-snug text-muted-foreground">
         <strong className="font-semibold text-foreground">
           {a.sourceName}
         </strong>
@@ -65,11 +68,15 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
         <Time ms={a.fetchedAt} label="Fetched" />
       </p>
       {a.eventId !== null && (
-        <p className="text-xs font-bold">
-          <a href={`/e/${a.eventId}`} className="text-foreground underline">
-            This story on Daily: brief, explanations, evidence →
-          </a>
-        </p>
+        <a
+          href={`/e/${a.eventId}`}
+          className="group block border-y py-3 text-foreground no-underline"
+        >
+          <span className="block text-xs text-muted-foreground">On Daily</span>
+          <span className="block font-heading text-lg font-semibold group-hover:underline">
+            Story brief, explanations and evidence →
+          </span>
+        </a>
       )}
       {a.url && <OriginalLink url={a.url} sourceName={a.sourceName} />}
       {a.sectionDisclaimer && <Disclaimer text={a.sectionDisclaimer} />}
@@ -84,7 +91,7 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
       {a.summary && (
         <section
           aria-label="Summary"
-          className="max-w-[36em] border-l-[3px] border-foreground py-1 pl-5"
+          className="border-l-[3px] border-foreground py-1 pl-5"
         >
           <p className="text-[0.8125rem] font-semibold text-muted-foreground">
             {summaryLabel(page)}
@@ -93,7 +100,7 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
         </section>
       )}
       {page.bodyHtml && page.bodyIsAbstract && (
-        <header className="max-w-[36em]">
+        <header>
           <h2 className="font-heading text-2xl font-semibold tracking-tight">
             Abstract
           </h2>

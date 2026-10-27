@@ -7,6 +7,7 @@ import { FollowButton } from "../../components/FollowButton";
 import { buttonVariants } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { getSection, getSectionSources } from "../../server/publication/api";
+import type { SectionInfo } from "../../server/publication/articles";
 import { SITE_NAME } from "../../lib/site";
 
 const searchSchema = z.object({
@@ -56,51 +57,58 @@ const pagerClass = cn(
   "border text-xs font-bold",
 );
 
+/** Title row of a section page: a thin rule below, nothing above. */
+export function SectionHeader({ section }: { section: SectionInfo }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b pb-2">
+      <h1 className="font-heading text-4xl font-semibold tracking-[-0.025em] sm:text-5xl">
+        {section.name}
+      </h1>
+      <div className="flex items-center gap-3">
+        {section.latestDigestDate && (
+          <Link
+            to="/digest/$section/$date"
+            params={{
+              section: section.slug,
+              date: section.latestDigestDate,
+            }}
+            className="text-xs font-bold underline hover:text-muted-foreground"
+          >
+            Daily Digest
+          </Link>
+        )}
+        {section.latestWeeklyDigestDate && (
+          <Link
+            to="/digest/$section/$date"
+            params={{
+              section: section.slug,
+              date: section.latestWeeklyDigestDate,
+            }}
+            search={{ kind: "weekly" }}
+            className="text-xs font-bold underline hover:text-muted-foreground"
+          >
+            Weekly Digest
+          </Link>
+        )}
+        <a
+          href={`/rss/${section.slug}.xml`}
+          className="text-xs font-bold underline"
+        >
+          RSS
+        </a>
+        <FollowButton slug={section.slug} />
+      </div>
+    </div>
+  );
+}
+
 function SectionPage() {
   const { data, sources } = Route.useLoaderData();
   const page = Route.useSearch().page ?? 1;
   const { section, articles, hasMore } = data;
   return (
     <div data-section={section.slug} className="flex flex-col gap-3 pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t-[3px] border-foreground pt-1">
-        <h1 className="font-heading text-4xl font-semibold tracking-[-0.025em] sm:text-5xl">
-          {section.name}
-        </h1>
-        <div className="flex items-center gap-3">
-          {section.latestDigestDate && (
-            <Link
-              to="/digest/$section/$date"
-              params={{
-                section: section.slug,
-                date: section.latestDigestDate,
-              }}
-              className="text-xs font-bold underline hover:text-muted-foreground"
-            >
-              Daily Digest
-            </Link>
-          )}
-          {section.latestWeeklyDigestDate && (
-            <Link
-              to="/digest/$section/$date"
-              params={{
-                section: section.slug,
-                date: section.latestWeeklyDigestDate,
-              }}
-              search={{ kind: "weekly" }}
-              className="text-xs font-bold underline hover:text-muted-foreground"
-            >
-              Weekly Digest
-            </Link>
-          )}
-          <a
-            href={`/rss/${section.slug}.xml`}
-            className="text-xs font-bold underline"
-          >
-            RSS
-          </a>
-          <FollowButton slug={section.slug} />
-        </div>
-      </div>
+      <SectionHeader section={section} />
       {section.disclaimer && <Disclaimer text={section.disclaimer} />}
       <Suspense fallback={null}>
         <Await promise={sources}>
@@ -148,11 +156,7 @@ function SectionPage() {
           className="flex items-center justify-between gap-2 border-t pt-3"
         >
           {page > 1 ? (
-            <Link
-              to="."
-              search={(prev) => ({ ...prev, page: page - 1 })}
-              className={pagerClass}
-            >
+            <Link to="." search={{ page: page - 1 }} className={pagerClass}>
               ← Newer
             </Link>
           ) : (
@@ -160,11 +164,7 @@ function SectionPage() {
           )}
           <span className="text-xs text-muted-foreground">Page {page}</span>
           {hasMore ? (
-            <Link
-              to="."
-              search={(prev) => ({ ...prev, page: page + 1 })}
-              className={pagerClass}
-            >
+            <Link to="." search={{ page: page + 1 }} className={pagerClass}>
               Older →
             </Link>
           ) : (

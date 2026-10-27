@@ -28,7 +28,7 @@ export function EvolutionTimelineCard({
   return (
     <section
       aria-label="Technology Evolution Timeline"
-      className="min-w-0 border border-border bg-card p-4 sm:p-5"
+      className="min-w-0 border-t border-border pt-6"
     >
       <header className="mb-3 border-b border-border pb-2">
         <h3 className="text-xs font-bold text-muted-foreground">

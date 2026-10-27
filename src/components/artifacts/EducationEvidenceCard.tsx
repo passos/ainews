@@ -8,7 +8,7 @@ export function EducationEvidenceCard({
   return (
     <section
       aria-label="Education Evidence Checker"
-      className="border border-border bg-card p-4 sm:p-5"
+      className="border-t border-border pt-6"
     >
       <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
         <span className="text-xs font-bold text-muted-foreground">

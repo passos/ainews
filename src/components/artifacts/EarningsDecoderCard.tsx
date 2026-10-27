@@ -32,7 +32,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
   }));
 
   return (
-    <div className="border border-border bg-card p-6 space-y-6">
+    <div className="space-y-6 border-t border-border pt-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4">
         <div>

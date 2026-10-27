@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import {
   Await,
   Link,
@@ -37,7 +37,7 @@ import type {
   EventView,
 } from "../../server/publication/events";
 import { askAboutStory, getStoryAnswer } from "../../server/reader-ask/api";
-import type { Audience } from "../../lib/reader-prefs";
+import { ARTIFACT_AUDIENCES } from "../../lib/artifacts/types";
 import { FINANCE_SLUG } from "../../lib/sections";
 import { SITE_NAME } from "../../lib/site";
 
@@ -96,7 +96,6 @@ export const Route = createFileRoute("/e/$eventId")({
 
 function EventPage() {
   const { data, artifactSources, sources } = Route.useLoaderData();
-  const { audience } = Route.useSearch();
   // The switch comes from the root loader (loadSiteShell), so the card is in
   // the server HTML or absent: no flash.
   const { askPublicEnabled } = rootRoute.useLoaderData();
@@ -105,23 +104,30 @@ function EventPage() {
       data={data}
       artifactSources={artifactSources}
       sources={sources}
-      audience={audience}
       ask={askPublicEnabled ? ASK_FNS : null}
     />
   );
 }
 
+interface PagePart {
+  id: string;
+  label: string;
+  show: boolean;
+  render: () => ReactNode;
+}
+
+// The story timeline always renders, after the sources line.
+const TIMELINE_PART = { id: "timeline", label: "Timeline", show: true };
+
 export function EventPageView({
   data,
   artifactSources,
   sources,
-  audience,
   ask = null,
 }: {
   data: EventView;
   artifactSources: ArtifactSourceView[];
   sources: Promise<EventSourceView[]>;
-  audience: Audience | undefined;
   /** Set only while ASK_PUBLIC_ENABLED is "true". */
   ask?: AskStoryFns | null;
 }) {
@@ -135,11 +141,191 @@ export function EventPageView({
     timelineRevisions,
   } = data;
 
-  const hasExplanations =
-    artifacts?.explanations && Object.keys(artifacts.explanations).length > 0;
   const verifiedClaims = evidence?.claims
     ?.filter((c) => c.consensusStatus === "verified")
     .map((c) => c.claimText);
+
+  // Cards that render nothing without artifact sources or a usable tier.
+  // `show` mirrors each card's own empty check, so the anchor nav never
+  // links to a section that is not on the page.
+  const hasSources = artifactSources.length > 0;
+  const hasTier = (byTier: Partial<Record<string, unknown>> | undefined) =>
+    ARTIFACT_AUDIENCES.some((tier) => !!byTier?.[tier]);
+
+  // In page order. Each part sits in its own anchor target.
+  const parts: PagePart[] = [
+    {
+      id: "brief",
+      label: "Brief",
+      show: !!artifacts?.brief && hasSources,
+      render: () =>
+        artifacts?.brief && (
+          <StoryBriefCard
+            brief={artifacts.brief}
+            verifiedClaims={verifiedClaims}
+            sources={artifactSources}
+          />
+        ),
+    },
+    {
+      id: "ask",
+      label: "Ask",
+      // v1 has no Ask for Finance (#133).
+      show: !!ask && section.slug !== FINANCE_SLUG,
+      render: () => ask && <AskStoryCard eventId={data.id} {...ask} />,
+    },
+    {
+      id: "evidence",
+      label: "Evidence",
+      show: !!evidence && evidence.claims.length > 0,
+      render: () => evidence && <InspectEvidencePanel evidence={evidence} />,
+    },
+    {
+      id: "explain",
+      label: "Explain",
+      show: hasTier(artifacts?.explanations) && hasSources,
+      render: () =>
+        artifacts && (
+          <AudienceExplainCard
+            explanations={artifacts.explanations}
+            sources={artifactSources}
+          />
+        ),
+    },
+    {
+      id: "paper-decoder",
+      label: "Paper decoder",
+      show: !!artifacts?.decoder,
+      render: () =>
+        artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />,
+    },
+    {
+      id: "launch-check",
+      label: "Launch check",
+      show: !!artifacts?.launchRealityCheck && hasSources,
+      render: () =>
+        artifacts?.launchRealityCheck && (
+          <LaunchRealityCheckCard
+            check={artifacts.launchRealityCheck}
+            sources={artifactSources}
+          />
+        ),
+    },
+    {
+      id: "evolution",
+      label: "Evolution timeline",
+      show: !!artifacts?.evolutionTimeline && hasSources,
+      render: () =>
+        artifacts?.evolutionTimeline && (
+          <EvolutionTimelineCard
+            timeline={artifacts.evolutionTimeline}
+            sources={artifactSources}
+          />
+        ),
+    },
+    {
+      id: "learn",
+      label: "Learn",
+      show: hasTier(artifacts?.learningMaterials) && hasSources,
+      render: () =>
+        artifacts?.learningMaterials && (
+          <LearningMaterialCard
+            materials={artifacts.learningMaterials}
+            sources={artifactSources}
+          />
+        ),
+    },
+    {
+      id: "policy-impact",
+      label: "Policy impact",
+      show: !!artifacts?.policyImpact,
+      render: () =>
+        artifacts?.policyImpact && (
+          <PolicyImpactCard policy={artifacts.policyImpact} />
+        ),
+    },
+    {
+      id: "classroom",
+      label: "Classroom discussion",
+      show: !!artifacts?.classroomDiscussion,
+      render: () =>
+        artifacts?.classroomDiscussion && (
+          <ClassroomDiscussionCard guide={artifacts.classroomDiscussion} />
+        ),
+    },
+    {
+      id: "education-evidence",
+      label: "Education evidence",
+      show: !!artifacts?.educationEvidence,
+      render: () =>
+        artifacts?.educationEvidence && (
+          <EducationEvidenceCard evidence={artifacts.educationEvidence} />
+        ),
+    },
+    {
+      id: "finance-check",
+      label: "Finance reality check",
+      show: !!artifacts?.financeRealityCheck,
+      render: () =>
+        artifacts?.financeRealityCheck && (
+          <FinanceRealityCheckCard check={artifacts.financeRealityCheck} />
+        ),
+    },
+    {
+      id: "regulation-watch",
+      label: "Regulation watch",
+      show: !!artifacts?.regulationWatch,
+      render: () =>
+        artifacts?.regulationWatch && (
+          <RegulationWatchCard watch={artifacts.regulationWatch} />
+        ),
+    },
+    {
+      id: "finance-concept",
+      label: "Finance concepts",
+      show: !!artifacts?.financeConcept,
+      render: () =>
+        artifacts?.financeConcept && (
+          <FinanceConceptCard concept={artifacts.financeConcept} />
+        ),
+    },
+    {
+      id: "skills",
+      label: "Skills and careers",
+      show: !!artifacts?.skillsCareerTrends,
+      render: () =>
+        artifacts?.skillsCareerTrends && (
+          <SkillsCareerTrendsCard trends={artifacts.skillsCareerTrends} />
+        ),
+    },
+    {
+      id: "industry-impact",
+      label: "Industry impact",
+      show: !!artifacts?.industryImpact,
+      render: () =>
+        artifacts?.industryImpact && (
+          <IndustryImpactCard report={artifacts.industryImpact} />
+        ),
+    },
+    {
+      id: "supply-chain",
+      label: "Supply chain",
+      show: !!artifacts?.supplyChainRipple,
+      render: () =>
+        artifacts?.supplyChainRipple && (
+          <SupplyChainRippleCard ripple={artifacts.supplyChainRipple} />
+        ),
+    },
+    {
+      id: "earnings",
+      label: "Earnings decoder",
+      show: !!artifacts?.earningsDecoder,
+      render: () =>
+        artifacts?.earningsDecoder && (
+          <EarningsDecoderCard decoder={artifacts.earningsDecoder} />
+        ),
+    },
+  ];
 
   return (
     <div data-section={section.slug} className="flex flex-col gap-4 pt-4">
@@ -163,97 +349,33 @@ export function EventPageView({
         </p>
       </header>
 
+      <nav
+        aria-label="On this page"
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b bg-background py-2 text-sm sm:sticky sm:top-0 sm:z-10"
+      >
+        <span className="text-muted-foreground">On this page</span>
+        {[...parts, TIMELINE_PART]
+          .filter((part) => part.show)
+          .map((part) => (
+            <a
+              key={part.id}
+              href={`#${part.id}`}
+              className="text-foreground underline"
+            >
+              {part.label}
+            </a>
+          ))}
+      </nav>
+
       {section.disclaimer && <Disclaimer text={section.disclaimer} />}
 
-      {artifacts?.brief && (
-        <StoryBriefCard
-          brief={artifacts.brief}
-          verifiedClaims={verifiedClaims}
-          sources={artifactSources}
-        />
-      )}
-
-      {/* v1 has no Ask for Finance (#133). */}
-      {ask && section.slug !== FINANCE_SLUG && (
-        <AskStoryCard eventId={data.id} {...ask} />
-      )}
-
-      {evidence && evidence.claims.length > 0 && (
-        <InspectEvidencePanel evidence={evidence} />
-      )}
-
-      {hasExplanations && (
-        <AudienceExplainCard
-          explanations={artifacts.explanations}
-          initialAudience={audience}
-          sources={artifactSources}
-        />
-      )}
-
-      {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}
-
-      {artifacts?.launchRealityCheck && (
-        <LaunchRealityCheckCard
-          check={artifacts.launchRealityCheck}
-          sources={artifactSources}
-        />
-      )}
-
-      {artifacts?.evolutionTimeline && (
-        <EvolutionTimelineCard
-          timeline={artifacts.evolutionTimeline}
-          sources={artifactSources}
-        />
-      )}
-
-      {artifacts?.learningMaterials &&
-        Object.keys(artifacts.learningMaterials).length > 0 && (
-          <LearningMaterialCard
-            materials={artifacts.learningMaterials}
-            initialAudience={audience}
-            sources={artifactSources}
-          />
-        )}
-
-      {artifacts?.policyImpact && (
-        <PolicyImpactCard policy={artifacts.policyImpact} />
-      )}
-
-      {artifacts?.classroomDiscussion && (
-        <ClassroomDiscussionCard guide={artifacts.classroomDiscussion} />
-      )}
-
-      {artifacts?.educationEvidence && (
-        <EducationEvidenceCard evidence={artifacts.educationEvidence} />
-      )}
-
-      {artifacts?.financeRealityCheck && (
-        <FinanceRealityCheckCard check={artifacts.financeRealityCheck} />
-      )}
-
-      {artifacts?.regulationWatch && (
-        <RegulationWatchCard watch={artifacts.regulationWatch} />
-      )}
-
-      {artifacts?.financeConcept && (
-        <FinanceConceptCard concept={artifacts.financeConcept} />
-      )}
-
-      {artifacts?.skillsCareerTrends && (
-        <SkillsCareerTrendsCard trends={artifacts.skillsCareerTrends} />
-      )}
-
-      {artifacts?.industryImpact && (
-        <IndustryImpactCard report={artifacts.industryImpact} />
-      )}
-
-      {artifacts?.supplyChainRipple && (
-        <SupplyChainRippleCard ripple={artifacts.supplyChainRipple} />
-      )}
-
-      {artifacts?.earningsDecoder && (
-        <EarningsDecoderCard decoder={artifacts.earningsDecoder} />
-      )}
+      {parts
+        .filter((part) => part.show)
+        .map((part) => (
+          <div key={part.id} id={part.id} className="min-w-0 scroll-mt-14">
+            {part.render()}
+          </div>
+        ))}
 
       {corrections.length > 0 && (
         <div className="border border-destructive p-3">
@@ -290,7 +412,11 @@ export function EventPageView({
         </Await>
       </Suspense>
 
-      <section aria-label="Story timeline" className="flex flex-col gap-4">
+      <section
+        id={TIMELINE_PART.id}
+        aria-label="Story timeline"
+        className="flex scroll-mt-14 flex-col gap-4 border-t border-border pt-6"
+      >
         <h2 className="text-xs font-bold text-muted-foreground">Timeline</h2>
         <div className="flex flex-col gap-5">
           {timelineRevisions && timelineRevisions.length > 0

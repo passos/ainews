@@ -564,7 +564,7 @@ async function main() {
 
   // Invalid search params: TanStack redirects (307) to the canonical URL
   // without them. The redirect target serves page 1.
-  const oddPath = "/s/technology?audience=bogus&page=-3";
+  const oddPath = "/s/technology?page=-3";
   const oddRes = await fetch(`${BASE}${oddPath}`, {
     redirect: "manual",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -586,6 +586,49 @@ async function main() {
   ) {
     fail("GET /s/technology after the redirect is not page 1");
   }
+
+  // The audience parameter is gone (#87 A2): a URL that still carries it is
+  // ignored. The page answers 200 with no redirect, and no link on it carries
+  // the parameter.
+  for (const path of [
+    "/?audience=professional",
+    "/s/technology?audience=professional",
+    "/e/1?audience=professional",
+    `/a/${finId}?audience=professional`,
+  ]) {
+    const res = await fetch(`${BASE}${path}`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    const text = (await res.text()).replace(
+      /<script\b[\s\S]*?<\/script>/gi,
+      "",
+    );
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    if (/href="[^"]*audience=/.test(text)) {
+      fail(`GET ${path} has a link that carries audience=`);
+    }
+  }
+  console.log(
+    "ok: ?audience= is ignored (200, no redirect, no audience links)",
+  );
+
+  // Event page anchor nav: every link points at an id on the page.
+  const navHtml =
+    /<nav\b[^>]*aria-label="On this page"[^>]*>[\s\S]*?<\/nav>/.exec(
+      eventHtml,
+    )?.[0];
+  if (!navHtml) fail("GET /e/1 has no On this page nav");
+  const navIds = [...(navHtml ?? "").matchAll(/href="#([^"]+)"/g)].map(
+    (m) => m[1],
+  );
+  if (navIds.length === 0) fail("GET /e/1 anchor nav has no links");
+  for (const id of navIds) {
+    if (!eventHtml.includes(`id="${id}"`)) {
+      fail(`GET /e/1 anchor nav links to #${id}, which is not on the page`);
+    }
+  }
+  console.log(`ok: GET /e/1 anchor nav links ${navIds.length} sections`);
 
   // The built worker has CF_BEACON_TOKEN (set above): the beacon script is in
   // the HTML, outside of the serialized loader data.
