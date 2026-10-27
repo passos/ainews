@@ -17,13 +17,22 @@ async function requestMethod(): Promise<string> {
   return getRequest().method;
 }
 
-// A ReaderAskError becomes a JSON error response with its status.
-function toResponse(error: unknown): unknown {
-  if (!(error instanceof ReaderAskError)) return error;
-  return new Response(JSON.stringify({ error: error.code }), {
-    status: error.status,
+function jsonError(code: string, status: number): Response {
+  return new Response(JSON.stringify({ error: code }), {
+    status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// A ReaderAskError becomes a JSON error response with its status. Any other
+// error (D1, queue) becomes a plain 500: its message can carry SQL or table
+// names. Only the error is logged, never the question, token or hashes.
+export function toResponse(error: unknown): Response {
+  if (error instanceof ReaderAskError) {
+    return jsonError(error.code, error.status);
+  }
+  console.error("reader-ask internal error", error);
+  return jsonError("internal", 500);
 }
 
 function validate<T>(parse: (raw: unknown) => T) {
