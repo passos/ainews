@@ -33,6 +33,16 @@ const article: ArticleView = {
   inputRevision: 1,
 };
 
+function explain(audience: "student" | "educator", overview: string) {
+  return {
+    audience,
+    overview,
+    keyPoints: ["k"],
+    implications: ["i"],
+    glossary: [],
+  };
+}
+
 function eventView(withExplanations: boolean): EventView {
   return {
     id: 7,
@@ -45,13 +55,8 @@ function eventView(withExplanations: boolean): EventView {
       brief: null,
       explanations: withExplanations
         ? {
-            student: {
-              audience: "student",
-              overview: "STUDENT-OVERVIEW",
-              keyPoints: ["k"],
-              implications: ["i"],
-              glossary: [],
-            },
+            student: explain("student", "STUDENT-OVERVIEW"),
+            educator: explain("educator", "EDUCATOR-OVERVIEW"),
           }
         : {},
       decoder: null,
@@ -73,31 +78,39 @@ const renderEvent = (withExplanations: boolean, audience?: "educator") =>
     audience ? `/?audience=${audience}` : "/",
   );
 
-describe("Explain for selector placement", () => {
-  it("event page: the selector sits directly above the explanations", async () => {
+describe("Explain for control", () => {
+  it("event page: the explanation card carries the labelled tier control", async () => {
     const html = await renderEvent(true);
-    const sel = html.indexOf("Explain for");
-    const card = html.indexOf('aria-label="Audience Explanations"');
-    expect(sel).toBeGreaterThanOrEqual(0);
-    expect(card).toBeGreaterThanOrEqual(0);
-    expect(sel).toBeLessThan(card);
-    // Nothing else of the page sits between the two.
-    expect(html.slice(sel, card)).not.toContain("<h1");
-    expect(html).toContain("STUDENT-OVERVIEW");
+    expect(html).toContain('<nav aria-label="Explain for"');
+    const label = html.indexOf(">Explain for<");
+    expect(label).toBeGreaterThanOrEqual(0);
+    // The visible label comes before the tier buttons, inside the card.
+    expect(label).toBeGreaterThan(
+      html.indexOf('aria-label="Audience Explanations"'),
+    );
+    expect(label).toBeLessThan(html.indexOf(">student</button>"));
+    expect(html).not.toContain("Audience tiers");
   });
 
-  it("event page: no explanations means no selector", async () => {
+  it("event page: only one Explain for control (no page-level selector)", async () => {
+    const html = await renderEvent(true);
+    expect(html.match(/Explain for/g)?.length).toBe(2); // label + nav aria-label
+    expect(html).not.toContain('id="audience-label"');
+    expect(html).not.toContain("/?audience=professional");
+  });
+
+  it("event page: no explanations means no Explain for control", async () => {
     const html = await renderEvent(false);
     expect(html).not.toContain("Explain for");
   });
 
-  it("event page: the selector marks the current audience", async () => {
+  it("event page: ?audience=educator opens on the Educator explanation", async () => {
     const html = await renderEvent(true, "educator");
-    // The router sets aria-current="page" on the active link and overrides
-    // the component's own value, so the highlight must key on "page".
-    const educator = html.match(/<a [^>]*>Educator<\/a>/)?.[0] ?? "";
-    expect(educator).toContain('aria-current="page"');
-    expect(educator).toContain("aria-[current=page]:bg-primary");
+    expect(html).toContain("EDUCATOR-OVERVIEW");
+    expect(html).not.toContain("STUDENT-OVERVIEW");
+    const none = await renderEvent(true);
+    expect(none).toContain("STUDENT-OVERVIEW");
+    expect(none).not.toContain("EDUCATOR-OVERVIEW");
   });
 
   it("header: no selector, nav links still carry the audience", async () => {
