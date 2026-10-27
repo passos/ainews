@@ -105,4 +105,18 @@ describe("learning_material activities tolerate object elements (#126)", () => {
       ).toEqual([{ path: ["activities", 0], code: "invalid_type" }]);
     }
   });
+
+  it("rejects String objects and class instances without a JSON round trip", () => {
+    class Activity {
+      title = "Debate";
+      description = "Split into two teams.";
+    }
+    for (const bad of [new String("AB"), new Activity()]) {
+      const res = learningMaterialSchema.safeParse({
+        ...base,
+        activities: [bad],
+      });
+      expect(res.success, Object.prototype.toString.call(bad)).toBe(false);
+    }
+  });
 });

@@ -113,12 +113,16 @@ export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 
 /**
  * The model often writes an activity as an object ({title, description},
- * {title, instructions}, ...) instead of a string. A plain object whose values
- * are all strings is joined into one string (non-empty values, key order,
- * ": "). Every other shape is passed on unchanged and z.string() rejects it.
+ * {title, instructions}, ...) instead of a string. A plain object (prototype
+ * Object.prototype or null) whose values are all strings is joined into one
+ * string (non-empty values, key order, ": "). Every other shape, including
+ * String objects and class instances, is passed on unchanged and z.string()
+ * rejects it.
  */
 const activitySchema = z.preprocess((v) => {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return v;
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return v;
   const values = Object.values(v);
   if (!values.every((x) => typeof x === "string")) return v;
   return values.filter((x) => x.length > 0).join(": ");
