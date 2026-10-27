@@ -119,4 +119,23 @@ describe("ArticleReader", () => {
       "Correction",
     );
   });
+
+  it("links the story page when the article belongs to an event", () => {
+    const html = render({}, { eventId: 42 });
+    expect(html).toContain('href="/e/42"');
+    expect(html).toContain(
+      "This story on Daily: brief, explanations, evidence →",
+    );
+    // Near the top: after the title, before the summary and the body.
+    const link = html.indexOf('href="/e/42"');
+    expect(link).toBeGreaterThan(html.indexOf("A title"));
+    expect(link).toBeLessThan(html.indexOf("AI summary"));
+    expect(link).toBeLessThan(html.indexOf("article-body"));
+  });
+
+  it("shows no story link without an event", () => {
+    const html = render({}, { eventId: null });
+    expect(html).not.toContain('href="/e/');
+    expect(html).not.toContain("This story on Daily");
+  });
 });
