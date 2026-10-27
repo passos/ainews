@@ -1,71 +1,69 @@
-import { useEffect, useState } from "react";
-import { THEMES, readPrefs, withTheme, writePrefs } from "../lib/reader-prefs";
-import type { Theme } from "../lib/reader-prefs";
+import { readPrefs, withTheme, writePrefs } from "../lib/reader-prefs";
 import { applyTheme } from "../lib/theme";
-import { cn } from "../lib/utils";
-import { buttonVariants } from "./ui/button";
 
-const LABELS: Record<Theme, string> = { light: "Light", dark: "Dark" };
+const ICON = {
+  width: 18,
+  height: 18,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.75,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
 
-// Before mount the selected look comes from CSS (`dark:` and `not-dark:`
-// follow `data-theme` on <html>), so server and client HTML match. After
-// mount `aria-pressed` takes over. The button variant's hover rules
-// (`hover:bg-muted`, `dark:hover:bg-input/50`) are as specific as a plain
-// aria rule, so the hovered-and-pressed rules are one attribute more specific.
-// Literal class names: Tailwind finds them by scanning the source.
-const SELECTED_CLASS: Record<Theme, string> = {
-  light: "not-dark:bg-primary not-dark:text-primary-foreground",
-  dark: "dark:bg-primary dark:text-primary-foreground",
-};
+const TITLE = {
+  light: "Switch to dark theme",
+  dark: "Switch to light theme",
+} as const;
+
+// The tooltip cannot be picked by CSS, so it follows <html> after mount. The
+// server markup is unchanged, so hydration does not see a difference.
+function syncTitle(el: HTMLButtonElement | null) {
+  if (el) {
+    el.title =
+      TITLE[
+        document.documentElement.dataset.theme === "dark" ? "dark" : "light"
+      ];
+  }
+}
 
 /**
- * Light / Dark choice, stored in this browser only. The server always renders
+ * Light / Dark toggle, stored in this browser only. The server always renders
  * light; the head script applies a stored dark choice before first paint.
- * Without JavaScript the buttons do nothing.
+ * Both icons and both labels are in the markup and CSS picks one (`dark:`
+ * follows `data-theme` on <html>), so server and client HTML match and the
+ * accessible name is right before mount. The click reads the current theme
+ * from <html>, so there is no mount state. Without JavaScript it does nothing.
+ * Literal class names: Tailwind finds them by scanning the source.
  */
 export function ThemeSwitcher() {
-  // Unknown until mounted: SSR output must not depend on the reader.
-  const [theme, setTheme] = useState<Theme | undefined>(undefined);
-  useEffect(() => {
-    setTheme(
-      document.documentElement.dataset.theme === "dark" ? "dark" : "light",
-    );
-  }, []);
-
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span
-        id="theme-label"
-        className="text-[0.68rem] font-bold text-muted-foreground"
-      >
-        Theme
-      </span>
-      <div
-        role="group"
-        aria-labelledby="theme-label"
-        className="flex flex-wrap gap-1"
-      >
-        {THEMES.map((t) => (
-          <button
-            key={t}
-            type="button"
-            aria-pressed={theme === undefined ? undefined : theme === t}
-            onClick={() => {
-              applyTheme(t);
-              writePrefs(withTheme(readPrefs(), t));
-              setTheme(t);
-            }}
-            className={cn(
-              buttonVariants({ variant: "outline", size: "xs" }),
-              "border text-[0.68rem] font-bold",
-              SELECTED_CLASS[t],
-              "aria-[pressed=true]:bg-primary aria-[pressed=true]:text-primary-foreground hover:aria-[pressed=true]:bg-primary dark:hover:aria-[pressed=true]:bg-primary",
-            )}
-          >
-            {LABELS[t]}
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      type="button"
+      ref={syncTitle}
+      title={TITLE.light}
+      onClick={(e) => {
+        const next =
+          document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+        applyTheme(next);
+        writePrefs(withTheme(readPrefs(), next));
+        syncTitle(e.currentTarget);
+      }}
+      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {/* Moon: shown in light, click goes dark. */}
+      <svg {...ICON} className="dark:hidden">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+      </svg>
+      {/* Sun: shown in dark, click goes light. */}
+      <svg {...ICON} className="hidden dark:block">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+      </svg>
+      <span className="sr-only dark:hidden">Switch to dark theme</span>
+      <span className="sr-only hidden dark:inline">Switch to light theme</span>
+    </button>
   );
 }
