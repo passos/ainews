@@ -40,14 +40,14 @@ describe("source content_display", () => {
     expect(await displayOf(tech.sourceId)).toBe("full");
   });
 
-  it("createSource defaults to excerpt", async () => {
+  it("createSource defaults to full", async () => {
     const id = await createSource(env.DB, {
       industryId: tech.industryId,
       name: "New",
       feedUrl: "https://new.example/feed",
       kind: "rss",
     });
-    expect(await displayOf(id!)).toBe("excerpt");
+    expect(await displayOf(id!)).toBe("full");
   });
 
   it("createSource stores a given value; listSources returns it", async () => {
@@ -56,11 +56,11 @@ describe("source content_display", () => {
       name: "Gov",
       feedUrl: "https://gov.example/feed",
       kind: "rss",
-      contentDisplay: "full",
+      contentDisplay: "summary",
     });
-    expect(await displayOf(id!)).toBe("full");
+    expect(await displayOf(id!)).toBe("summary");
     const rows = await listSources(env.DB);
-    expect(rows.find((r) => r.id === id)?.contentDisplay).toBe("full");
+    expect(rows.find((r) => r.id === id)?.contentDisplay).toBe("summary");
   });
 
   it("the write schema rejects an unknown value", () => {
