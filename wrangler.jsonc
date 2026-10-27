@@ -78,7 +78,7 @@
     "THIRD_PARTY_READER_ENABLED": "false",
     "DISCOVERY_ENABLED": "false",
     "READER_WATCH_ENABLED": "true",
-    "ASK_PUBLIC_ENABLED": "false",
+    "ASK_PUBLIC_ENABLED": "true",
   },
   "env": {
     // Local tests only (vitest, test:ssr). AI, Vectorize and send_email are
