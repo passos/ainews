@@ -1,67 +1,108 @@
 # Daily
 
-A news site that finds hot topics and writes daily reports by itself. One
-admin, several sections (Technology, Education, Industry, Finance). It is a
-TanStack Start app on one Cloudflare Worker (`ainews-app`), served at
-<https://news.ioenv.com>.
+Daily is an agentic news site. It collects news from approved sources, groups
+reports about the same story, and explains each story with evidence that
+links back to the exact source text. A human editor approves everything that
+goes public.
 
-**Coding agents: read [`AGENTS.md`](AGENTS.md) first.** It has the current
-state, the remaining work, the rules a PR must not break, and the process.
+- Live site: <https://news.ioenv.com>
+- Product plan: [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)
+- 3-minute demo script: [`docs/demo.md`](docs/demo.md)
+- Architecture overview: [`docs/architecture-overview.md`](docs/architecture-overview.md)
 
-## Documents
+It runs as one TanStack Start app on one Cloudflare Worker (`ainews-app`).
 
-| File                                                      | What it is                                                  |
-| --------------------------------------------------------- | ----------------------------------------------------------- |
-| [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)            | Product requirements. They must be met.                     |
-| [`docs/design/decisions.md`](docs/design/decisions.md)    | Scope and technical decisions the owner confirmed           |
-| [`docs/architecture.md`](docs/architecture.md)            | Architecture contract. Every issue follows it.              |
-| [`AGENTS.md`](AGENTS.md)                                  | Handover guide for coding agents                            |
-| Epic [#26](https://github.com/githonllc/ainews/issues/26) | Milestones M0–M4 and their gates; every task is a sub-issue |
+## The reader loop
+
+The plan asks for three features first: Story Brief with Ask, News-to-Learning,
+and Follow a Topic. Together they make one loop:
+
+```
+ discover ──────► understand ──────────► investigate ──────────► follow up
+ section pages    Story Brief            Evidence: claims with   Watches: saved
+ and daily        Explain for student,   verbatim quotes         questions that fire
+ briefings        educator, professional Ask about this story    only on material
+                  section products       (answers cite sources)  developments
+```
+
+## Features
+
+| Feature                                                                                                                                                                  | Where                                            | Plan     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ | -------- |
+| Four sections: Technology, Education, Industry, Finance                                                                                                                  | `/s/<section>`                                   | N§3      |
+| Article page with source, publication and retrieval times                                                                                                                | `/a/<id>`                                        | N§6      |
+| Story page: one event built from several reports                                                                                                                         | `/e/<id>`                                        | N§2.2    |
+| AI Story Brief: what happened, what is new, evidence, what to watch                                                                                                      | `/e/<id>`                                        | N§2.2    |
+| Explain for student, educator and professional; glossary; learning material                                                                                              | `/e/<id>`                                        | N§2.3    |
+| Evidence: claims linked to verbatim quotes, with labels                                                                                                                  | `/e/<id>`                                        | N§2.5    |
+| Ask about this story: answers grounded in approved sources, quotes checked                                                                                               | `/e/<id>`                                        | N§2.1    |
+| Timeline: the reports behind a story, in the order they arrived                                                                                                          | `/e/<id>`                                        | N§2.2    |
+| Section products: Research Paper Decoder, Education Evidence Checker, Classroom Discussion, Supply-Chain Ripple Map, Industry Impact, Regulation Watch, Finance concepts | `/e/<id>`                                        | N§3, N§4 |
+| Follow a Topic: public watches and private reader watches with RSS                                                                                                       | `/w`, `/follow`                                  | N§2.6    |
+| Daily briefings and RSS per section                                                                                                                                      | `/digest/<section>/<date>`, `/rss/<section>.xml` | N§3      |
+| Editor console: review queue, published articles, sources, ledger, Ask, watches                                                                                          | `/admin`                                         | N§6      |
+
+## Trust and safety
+
+- **Human approval.** Each section is in `review` or `auto` mode. Finance is
+  always reviewed, and every Finance page says it is not investment advice.
+- **Provenance.** Every item shows its source, publication time and retrieval
+  time. Evidence quotes are checked in code against the stored body.
+- **Labels.** Model judgements are labelled "model assessment". Public Ask
+  answers are labelled "Model answer · not editor-reviewed".
+- **Separation.** Public pages cannot import model code; a test enforces it.
+- **Cost control.** Every model call goes through one client with a ledger
+  and a daily budget cap, checked before the call is sent.
 
 ## How it works
 
 ```
-cron (every 10 min) ─► Q_INGEST: collect ─► body ─► analyze ─► (review) ─► public site, RSS
-                                   │          │         │
-                                RSS/HTML   fetch      Jev: prefilter, scores, labels
-                                dedupe     ladder     Gemini: title and summary
+cron (every 10 min)
+  └► Q_INGEST : collect ─► body ─► analyze         (Jev scores, Gemini summary)
+  └► Q_GROUP  : group into events                   (Vectorize + Jev)
+  └► Q_GENERATE: brief, explanations, products, claims, watches, digests, Ask
+                         │
+                         ▼
+                 editor review ─► public site, RSS
 ```
 
 - One Worker exports `fetch` (site and `/admin`), `scheduled` (cron) and
   `queue` (pipeline consumers).
-- Data: D1 through Drizzle. Article bodies are in R2 as versions
-  (`bodies/{article_id}/{sha256}.md`) that are never overwritten.
-- Every model call goes through one client with a call ledger (`llm_calls`)
-  and a daily budget per channel, in integer micro-USD.
-- Fixed steps are deterministic code. Fast judgements use Jev; writing uses
-  Gemini 3.8 Flash; reasoning uses Gemini 3.8 Flash.
-- The public site shows only approved articles. Every section starts in review
-  mode; Finance is always reviewed.
+- Data: D1 through Drizzle. Article bodies are in R2, one file per version
+  (`bodies/{article_id}/{sha256}.md`), never overwritten.
+- Fixed steps are code. Fast judgements use Jev; writing and reasoning use
+  Gemini 3.8 Flash; embeddings use `@cf/baai/bge-m3`.
 
-## Status
-
-Code at baseline `cab0433` includes admin review, events, daily/weekly digests,
-watch and EDGAR earnings features. Funding (#23) and metrics/feedback (#24)
-are pending dependencies at this baseline. Code existence does not establish
-online readiness: use the dated evidence package and the
-[#26 gates](https://github.com/githonllc/ainews/issues/26), with missing evidence
-marked unknown. See [deployment](docs/deploy.md) and
-[source proposals awaiting research and owner approval](docs/source-onboarding.md).
+Details: [`docs/architecture-overview.md`](docs/architecture-overview.md). The
+binding implementation contract is [`docs/architecture.md`](docs/architecture.md).
 
 ## Safety switches
 
-Five vars in `wrangler.jsonc`. Only the string `"true"` turns one on.
+Vars in `wrangler.jsonc`. Only the string `"true"` turns one on. In the `test`
+env all of them are `"false"`.
 
-| Var                          | Turns on                                                                                                                                           |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `COLLECT_ENABLED`            | Collection and body fetch                                                                                                                          |
-| `MODEL_CALLS_ENABLED`        | Every model call (paid)                                                                                                                            |
-| `THIRD_PARTY_READER_ENABLED` | Jina Reader (rung 3). It also needs `jina_enabled = 1` on the source, `JINA_API_KEY`, `MODEL_CALLS_ENABLED`, and a `jina` budget above 0 (now $0). |
-| `EMAIL_ENABLED`              | Admin email                                                                                                                                        |
-| `DISCOVERY_ENABLED`          | AI source discovery                                                                                                                                |
+| Var                          | Turns on                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `COLLECT_ENABLED`            | Collection and body fetch                                                              |
+| `MODEL_CALLS_ENABLED`        | Every model call (paid)                                                                |
+| `THIRD_PARTY_READER_ENABLED` | Jina Reader (rung 3); also needs a per-source flag, `JINA_API_KEY` and a `jina` budget |
+| `EMAIL_ENABLED`              | Admin email                                                                            |
+| `DISCOVERY_ENABLED`          | AI source discovery                                                                    |
+| `READER_WATCH_ENABLED`       | Readers can create private watches on `/follow`                                        |
+| `ASK_PUBLIC_ENABLED`         | The "Ask about this story" card on event pages                                         |
 
-A switch changes only in its own PR, with the owner's consent. In `env.test`
-all five stay `"false"`.
+## Documents
+
+| File                                                             | What it is                                            |
+| ---------------------------------------------------------------- | ----------------------------------------------------- |
+| [`docs/Newsren_Plan.md`](docs/Newsren_Plan.md)                   | Product requirements                                  |
+| [`docs/demo.md`](docs/demo.md)                                   | 3-minute demo script                                  |
+| [`docs/architecture-overview.md`](docs/architecture-overview.md) | How the system works                                  |
+| [`docs/architecture.md`](docs/architecture.md)                   | Architecture contract (Chinese)                       |
+| [`docs/design/decisions.md`](docs/design/decisions.md)           | Scope and technical decisions the owner confirmed     |
+| [`docs/deploy.md`](docs/deploy.md)                               | Deployment runbook                                    |
+| [`AGENTS.md`](AGENTS.md)                                         | Rules and process for coding agents                   |
+| Epic [#26](https://github.com/githonllc/ainews/issues/26)        | Milestones and their gates; every task is a sub-issue |
 
 ## Requirements
 
@@ -69,13 +110,13 @@ all five stay `"false"`.
 - For provision and manual deploy: a Cloudflare login (`npx wrangler login`)
   on the account in `wrangler.jsonc`, or `CLOUDFLARE_API_TOKEN` in the
   environment (CI uses the token)
-- For repository setup: `gh` with admin rights on `githonllc/ainews`
 
 ## Local development
 
 ```sh
 npm install
 npm run db:migrate:local   # apply D1 migrations to the local database
+npm run seed:local         # sections and sources
 npm run dev                # http://localhost:5173
 ```
 
@@ -93,30 +134,12 @@ npm run typecheck
 npm run lint
 npm test          # vitest: `workers` and `node` projects
 npm run build
-npm run test:ssr  # builds with the `test` env, then smoke-tests SSR with vite preview
+npm run test:ssr  # builds with the `test` env, then smoke-tests SSR
 ```
 
-Tests and `test:ssr` use the `test` env in `wrangler.jsonc`. It has no AI,
-Vectorize or `send_email` binding, so these commands need no Cloudflare
-credentials and never call real services.
-
-The separate HTTP smoke defaults to zero-network planning; exit 0 in a dry run
-only confirms a valid plan. Replace `/ABS/WORKTREE` with your absolute worktree:
-
-```sh
-node /ABS/WORKTREE/scripts/smoke.ts --base-url https://news.ioenv.com --mode routes --dry-run
-```
-
-Every online read-only check must name, in its approval record, who authorized it and on which date (GET requests still have cost). Flag changes, paid model/Jina calls, production writes, source lists/thresholds and public UI screenshots keep their existing explicit approvals. Run routes or launch:
-
-```sh
-npm --prefix /ABS/WORKTREE run smoke -- --base-url https://news.ioenv.com --mode routes --online
-npm --prefix /ABS/WORKTREE run smoke -- --base-url https://news.ioenv.com --mode launch --manifest /ABS/EVIDENCE/public-smoke-manifest.json --online
-```
-
-Supply `--access-origin` if Access redirects anonymous requests. Routes leaves
-content readiness unchecked. Launch needs a complete owner manifest and four
-nonempty sections; it cannot sign off M1–M4. See [limits and evidence](docs/deploy.md).
+Tests use the `test` env in `wrangler.jsonc`. It has no AI, Vectorize or
+`send_email` binding, so these commands need no Cloudflare credentials and
+never call real services.
 
 ## Database
 
@@ -126,66 +149,20 @@ npm run db:migrate:local   # apply migrations locally
 npx wrangler d1 migrations apply DB --remote   # apply to production
 ```
 
-Migrations live in `drizzle/migrations/` and run through wrangler, not Drizzle.
+Migrations live in `drizzle/migrations/` and run through wrangler. They only
+add columns or indexes; tables that other tables reference are never rebuilt.
 
-### Seed
+`npm run seed:remote` seeds production. Every statement is
+`INSERT … ON CONFLICT DO NOTHING`, so it never overwrites admin changes and
+turns on no switch.
 
-```sh
-npm run seed:local    # local D1
-npm run seed:remote   # production D1
-```
-
-Inserts the four sections (Technology, Education, Industry, Finance with
-their criteria, thresholds and `primary_domains`) and the two Technology
-sources. Every statement is `INSERT … ON CONFLICT DO NOTHING`, so the seed can
-run again and never overwrites what the admin changed. It does not turn on any
-switch (`COLLECT_ENABLED` and the others stay as they are). It is not part of
-the deploy: a deleted seed source would come back with every deploy.
-
-Production was seeded once on 2026-10-23. The script writes
-`.seed.sql` (git-ignored) and runs it with `wrangler d1 execute`. It runs
-Node with `scripts/ts-resolve.mjs`, a preload that lets Node load the
-`src/` files that import each other without a file extension.
-
-`scripts/try-analysis.ts` runs the analysis (Jev only, no database, no ledger)
-on the articles in `tests/fixtures/analysis/real/` and prints a table. It
-calls the real model and needs `.env.prod`, so it runs only on the owner's
-machine. `--dry-run` builds and checks the requests without any call.
-
-`scripts/probe-write.ts` sends a few real requests to the `write` slot and
-prints `finishReason` and the thinking token count. Use it before you change
-the thinking setting or the output limit of a writing call.
-
-## Provision Cloudflare resources
+## Provision and deploy
 
 ```sh
-bash scripts/provision.sh
+bash scripts/provision.sh     # D1, R2, queues, Vectorize; safe to run again
+bash scripts/github-setup.sh  # squash merge only, `main` ruleset with required `ci`
 ```
 
-Creates the D1 database, R2 bucket, queues and Vectorize indexes when they do
-not exist. Safe to run again. Put the printed `database_id` into
-the top-level `d1_databases` entry of `wrangler.jsonc`. The `test` env keeps
-its placeholder id; it only runs locally.
-
-## Deploy
-
-The existing `.github/workflows/ci.yml` deploy job applies remote migrations
-and runs `npm run deploy` after main CI passes. It needs the repository secret
-`CLOUDFLARE_API_TOKEN`; provision and seed are separate owner operations.
-Follow [the deployment runbook](docs/deploy.md) for local rehearsal, authorized
-remote audits, manual fallback, rollback and individual secret rotation.
-Remote D1 and metadata commands pass an explicit root `--config`; the Vite
-deploy uses a fresh production build whose generated config is verified first.
-It defines approval boundaries, stop conditions and independent verification;
-a successful deploy alone does not establish launch readiness.
-
-## Repository setup
-
-```sh
-bash scripts/github-setup.sh
-```
-
-Allows squash merge only, turns on auto-merge and branch deletion after merge,
-and creates or updates the `main` ruleset (`scripts/github/ruleset-main.json`):
-the `ci` check must pass, and direct pushes, force pushes and deletion are
-blocked. Run it after `ci` has reported on a PR at least once.
+A merge to `main` runs CI, applies remote migrations and runs
+`npm run deploy`. It needs the repository secret `CLOUDFLARE_API_TOKEN`. See
+[the deployment runbook](docs/deploy.md) for manual deploy and rollback.
