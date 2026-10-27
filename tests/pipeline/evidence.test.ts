@@ -354,6 +354,23 @@ describe("Evidence Chunks & Quote Verification", () => {
     );
   });
 
+  it.each([
+    ["\\r", "\r"],
+    ["\\r\\n", "\r\n"],
+    ["\\n", "\n"],
+  ])(
+    "verifyQuoteInBody returns exact offsets for bodies using %s line breaks",
+    (_label, eol) => {
+      const body = `First line.${eol}${eol}First line has the quote here.${eol}${eol}Third.`;
+      const quote = "line has the quote here";
+      const res = verifyQuoteInBody(body, quote);
+      expect(res.verified).toBe(true);
+      const start = body.indexOf(quote);
+      expect(res.startOffset).toBe(start);
+      expect(res.endOffset).toBe(start + quote.length);
+    },
+  );
+
   it("verifyQuoteInBody correctly slices quotes ending in decimal or named HTML entities without truncation", () => {
     const body =
       "Revenue increased by 1&#48;&#48; in the latest fiscal quarter.";
