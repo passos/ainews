@@ -82,11 +82,11 @@ function ClaimRow({
 
   const consensusBadge = {
     verified: {
-      text: "Verified",
+      text: "Supported · model assessment",
       classes: "border-foreground text-foreground font-semibold",
     },
     disputed: {
-      text: "Disputed",
+      text: "Disputed · model assessment",
       classes: "border-destructive text-destructive font-bold",
     },
     unverified: {
