@@ -50,6 +50,8 @@ export const ARTIFACT_TIERS = {
   industry_impact_report: 4,
   supply_chain_ripple_map: 4,
   earnings_decoder: 4,
+  launch_reality_check: 4,
+  technology_evolution_timeline: 4,
 } as const satisfies Record<Exclude<ArtifactType, "revision_diff">, Tier>;
 
 export const TIER_LABELS: Record<Tier, string> = {

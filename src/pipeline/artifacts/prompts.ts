@@ -15,6 +15,9 @@ import {
   type SupplyChainRippleMap,
   type EarningsDecoder,
   type EarningsMetric,
+  type LaunchRealityCheck,
+  type SourceQuote,
+  type TechnologyEvolutionTimeline,
   audienceExplainSchema,
   classroomDiscussionBuilderSchema,
   educationEvidenceCheckerSchema,
@@ -29,9 +32,18 @@ import {
   skillsCareerTrendsSchema,
   storyBriefSchema,
   supplyChainRippleMapSchema,
+  launchRealityCheckSchema,
+  technologyEvolutionTimelineSchema,
+  NOT_STATED_IN_SOURCES,
 } from "../../lib/artifacts/types";
 import type { TextRequest } from "../../providers/adapters";
 import { WRITE_THINKING } from "../analyze/prompts";
+import { localDate } from "../../lib/time";
+import {
+  groundedSentences,
+  normalizeSourceText,
+  sourceTextContains,
+} from "../../lib/artifacts/grounding";
 
 export const STORY_BRIEF_PROMPT_VERSION = "brief-v1";
 export const AUDIENCE_EXPLAIN_PROMPT_VERSION = "explain-v1";
@@ -53,6 +65,10 @@ export const EXPLAIN_MAX_OUTPUT_TOKENS = 2000;
 export const DECODER_MAX_OUTPUT_TOKENS = 2500;
 export const LEARNING_MATERIAL_MAX_OUTPUT_TOKENS = 2500;
 export const VERTICAL_PRODUCT_MAX_OUTPUT_TOKENS = 2000;
+export const LAUNCH_REALITY_CHECK_PROMPT_VERSION = "launch-reality-check-v1";
+export const EVOLUTION_TIMELINE_PROMPT_VERSION = "evolution-timeline-v1";
+/** Worst case about 1,900 output tokens plus 500 for thinking, times 1.25 (#131 D4). */
+export const TECH_PRODUCT_MAX_OUTPUT_TOKENS = 3000;
 
 export interface ArtifactArticleMaterial {
   id: number;
@@ -62,6 +78,17 @@ export interface ArtifactArticleMaterial {
   publishedAt: number | null;
   summary: string | null;
   bodyText?: string | null;
+  /**
+   * The stored source body only, or null when R2 has none. `bodyText` falls
+   * back to the summary; quotes are checked against this field instead.
+   * Prompts do not read it, so request bytes do not depend on it.
+   */
+  sourceBodyText: string | null;
+  /**
+   * articles.canonical_url. Its host decides whether two articles come from
+   * the same outlet. Prompts and inputSha do not read it.
+   */
+  canonicalUrl: string;
 }
 
 export interface ArtifactVerifiedClaim {
@@ -1284,4 +1311,246 @@ export function parseEarningsDecoderOutput(
   } catch {
     return null;
   }
+}
+
+// -----------------------------------------------------------------------------
+// Technology products: Launch Reality Check, Technology Evolution Timeline (N§3)
+// -----------------------------------------------------------------------------
+
+/**
+ * The quote as stored: every sentence of the cited article's source body
+ * that the model's quote touches. Null when the model's quote is not copied
+ * from that article of this material.
+ */
+function groundedQuote(
+  material: ArtifactEventMaterial,
+  q: SourceQuote,
+): SourceQuote | null {
+  // The schema's 20-character minimum applies to the text, not to padding.
+  if (normalizeSourceText(q.quote).length < 20) return null;
+  const article = material.articles.find((a) => a.id === q.articleId);
+  const quote = groundedSentences(article?.sourceBodyText, q.quote);
+  return quote === null ? null : { articleId: q.articleId, quote };
+}
+
+/**
+ * The domain key of an article, from the host of its canonical URL, not
+ * from the source's site domain. The URL parser
+ * drops a port, lowercases, turns an IDN into punycode and writes IP
+ * addresses in one form ("0x7f.1" -> "127.0.0.1", "[0:0::1]" -> "[::1]").
+ * Trailing dots are removed. An IP literal is its own key; for a name, a
+ * leading "www." is removed and the last two labels kept
+ * ("blog.vendor.com" -> "vendor.com").
+ * There is no public-suffix list, so multi-part suffixes collapse:
+ * "x.co.uk" and "y.co.uk" both give "co.uk". That errs toward dropping
+ * evidence, which is the safe direction. "" when the article is missing or
+ * its URL does not parse or has no host name ("mailto:x@y.com").
+ */
+function articleDomain(
+  material: ArtifactEventMaterial,
+  articleId: number,
+): string {
+  const raw =
+    material.articles.find((a) => a.id === articleId)?.canonicalUrl ?? "";
+  let host: string;
+  try {
+    host = new URL(raw).hostname.replace(/\.+$/, "");
+  } catch {
+    return "";
+  }
+  if (host.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
+  if (host.startsWith("www.")) host = host.slice(4);
+  return host.split(".").slice(-2).join(".");
+}
+
+function groundedName(material: ArtifactEventMaterial, value: string): string {
+  if (value === NOT_STATED_IN_SOURCES) return value;
+  return material.articles.some((a) =>
+    sourceTextContains(a.sourceBodyText, value),
+  )
+    ? value
+    : NOT_STATED_IN_SOURCES;
+}
+
+export function buildLaunchRealityCheckRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a technology fact-checking editor for Daily (${material.industryName}).`,
+    "Compare what a company claims about its AI model or product with independent evaluations reported in the source articles below.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "subject": "The model or product name, as written in the articles. If the articles do not name it, write "Not stated in sources".",
+  "claimant": "The company or organization that makes the claims, as written in the articles. If not named, write "Not stated in sources".",
+  "claims": [
+    {
+      "claim": "One capability claim by the claimant, in one plain sentence.",
+      "claimQuote": { "articleId": 123, "quote": "Exact words copied from that article that state the claim." },
+      "verdict": "independent_support" or "independent_dispute" or "no_independent_evidence",
+      "independentEvidence": [
+        { "articleId": 456, "quote": "Exact words copied from that article that report an independent benchmark, test or evaluation of this claim." }
+      ]
+    }
+  ]
+}`,
+    "Rules:",
+    "- Use only the articles below. Do not add benchmarks, numbers or names that are not in them.",
+    "- Give 1 to 5 claims and at most 2 evidence quotes per claim. Each quote is 20 to 300 characters, copied character for character from the article with that ID.",
+    "- Independent evidence comes from a party other than the claimant, such as a third-party benchmark, an outside test, a regulator or an unaffiliated researcher.",
+    '- If the articles report no independent evaluation of a claim, use "no_independent_evidence" and an empty independentEvidence array. Do not guess.',
+    "- Output valid raw JSON only, without markdown code fences or commentary.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nSource Articles:",
+    formatArticlesContext(material.articles),
+    "\nVerified Claims (context only; quote the articles, not this list):",
+    formatVerifiedClaimsContext(material.verifiedClaims),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: TECH_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+/**
+ * Keeps only claims and evidence whose quotes are copied from an article of
+ * `material`; makes the verdict agree with the evidence that is left.
+ * Without `material` nothing can be checked, so the result is null.
+ */
+export function parseLaunchRealityCheckOutput(
+  rawText: string,
+  material?: ArtifactEventMaterial,
+): LaunchRealityCheck | null {
+  if (!material) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonText(rawText));
+  } catch {
+    return null;
+  }
+  const raw = launchRealityCheckSchema.safeParse(parsed);
+  if (!raw.success) return null;
+
+  const claims = raw.data.claims.flatMap((c) => {
+    const claimQuote = groundedQuote(material, c.claimQuote);
+    if (!claimQuote) return [];
+    const claimText = normalizeSourceText(c.claimQuote.quote);
+    const claimDomain = articleDomain(material, c.claimQuote.articleId);
+    // Evidence is independent only when it comes from another article on
+    // another domain: the claimant's own pages cannot confirm the claim.
+    // An empty domain key on either side cannot be compared, so it drops.
+    const evidence =
+      c.verdict === "no_independent_evidence"
+        ? []
+        : c.independentEvidence.flatMap((e) => {
+            const evidenceDomain = articleDomain(material, e.articleId);
+            const quote = groundedQuote(material, e);
+            return quote &&
+              e.articleId !== c.claimQuote.articleId &&
+              claimDomain !== "" &&
+              evidenceDomain !== "" &&
+              evidenceDomain !== claimDomain &&
+              normalizeSourceText(e.quote) !== claimText &&
+              quote.quote !== claimQuote.quote
+              ? [quote]
+              : [];
+          });
+    const verdict =
+      evidence.length === 0 ? ("no_independent_evidence" as const) : c.verdict;
+    return [{ ...c, claimQuote, verdict, independentEvidence: evidence }];
+  });
+
+  const out = launchRealityCheckSchema.safeParse({
+    subject: groundedName(material, raw.data.subject),
+    claimant: groundedName(material, raw.data.claimant),
+    claims,
+  });
+  return out.success ? out.data : null;
+}
+
+export function buildEvolutionTimelineRequest(
+  material: ArtifactEventMaterial,
+): TextRequest {
+  const system = [
+    `You are a technology history editor for Daily (${material.industryName}).`,
+    "Build a Technology Evolution Timeline for this story: the releases, evaluations, corrections and adoption milestones that the source articles below report.",
+    material.disclaimer ? `Editorial constraint: ${material.disclaimer}` : "",
+    `Produce a JSON object matching this schema:
+{
+  "entries": [
+    {
+      "date": "The date as the article states it, for example "March 2026" or "2026-03-14". If the article gives no date, write "Not stated in sources".",
+      "dateSource": "stated_in_text" or "report_published",
+      "kind": "release" or "evaluation" or "correction" or "adoption",
+      "description": "What happened, in one plain sentence.",
+      "source": { "articleId": 123, "quote": "Exact words copied from that article that report this milestone." }
+    }
+  ]
+}`,
+    "Rules:",
+    "- Use only the articles below. Do not add events, dates or names that are not in them.",
+    '- Give 2 to 8 entries, earliest first. Entries dated "Not stated in sources" go last.',
+    '- Use "report_published" when the milestone is the news that the article itself reports and the text gives no date. The date is then the publication date listed for that article.',
+    "- Each quote is 20 to 300 characters, copied character for character from the article with that ID.",
+    "- Output valid raw JSON only, without markdown code fences or commentary.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const prompt = [
+    `Event: ${material.eventTitle}`,
+    "\nPublication dates (UTC):",
+    material.articles
+      .map(
+        (a) =>
+          `- Article ID ${a.id}: ${a.publishedAt === null ? "not stated" : localDate(a.publishedAt, "UTC")}`,
+      )
+      .join("\n"),
+    "\nSource Articles:",
+    formatArticlesContext(material.articles),
+  ].join("\n");
+
+  return {
+    system,
+    prompt,
+    maxOutputTokens: TECH_PRODUCT_MAX_OUTPUT_TOKENS,
+    thinkingConfig: WRITE_THINKING,
+  };
+}
+
+/**
+ * Keeps only entries whose quotes are copied from an article of `material`,
+ * each quote stored as its whole sentences. The model's date fields are kept
+ * as written and never shown: the card shows and sorts by the cited
+ * article's publish date.
+ */
+export function parseEvolutionTimelineOutput(
+  rawText: string,
+  material?: ArtifactEventMaterial,
+): TechnologyEvolutionTimeline | null {
+  if (!material) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonText(rawText));
+  } catch {
+    return null;
+  }
+  const raw = technologyEvolutionTimelineSchema.safeParse(parsed);
+  if (!raw.success) return null;
+
+  const entries = raw.data.entries.flatMap((e) => {
+    const source = groundedQuote(material, e.source);
+    return source ? [{ ...e, source }] : [];
+  });
+
+  const out = technologyEvolutionTimelineSchema.safeParse({ entries });
+  return out.success ? out.data : null;
 }

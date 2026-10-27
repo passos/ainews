@@ -16,6 +16,8 @@ import {
   skillsCareerTrendsSchema,
   industryImpactReportSchema,
   supplyChainRippleMapSchema,
+  launchRealityCheckSchema,
+  technologyEvolutionTimelineSchema,
 } from "../../lib/artifacts/types";
 import { FINANCE_SLUG } from "../analyze/analyze";
 import type { TextRequest } from "../../providers/adapters";
@@ -34,6 +36,8 @@ import {
   STORY_BRIEF_PROMPT_VERSION,
   SUPPLY_CHAIN_RIPPLE_PROMPT_VERSION,
   EARNINGS_DECODER_PROMPT_VERSION,
+  LAUNCH_REALITY_CHECK_PROMPT_VERSION,
+  EVOLUTION_TIMELINE_PROMPT_VERSION,
   buildAudienceExplainRequest,
   buildClassroomDiscussionBuilderRequest,
   buildEducationEvidenceCheckerRequest,
@@ -48,6 +52,8 @@ import {
   buildStoryBriefRequest,
   buildSupplyChainRippleMapRequest,
   buildEarningsDecoderRequest,
+  buildLaunchRealityCheckRequest,
+  buildEvolutionTimelineRequest,
   parseAudienceExplainOutput,
   parseClassroomDiscussionBuilderOutput,
   parseEducationEvidenceCheckerOutput,
@@ -62,6 +68,8 @@ import {
   parseStoryBriefOutput,
   parseSupplyChainRippleMapOutput,
   parseEarningsDecoderOutput,
+  parseLaunchRealityCheckOutput,
+  parseEvolutionTimelineOutput,
   type ArtifactEventMaterial,
 } from "./prompts";
 
@@ -364,5 +372,39 @@ export const ARTIFACT_REGISTRY: Record<
     parseOutput: (rawText, _aud, material) =>
       parseEarningsDecoderOutput(rawText, material),
     diagnosisSchema: null,
+  },
+
+  launch_reality_check: {
+    type: "launch_reality_check",
+    audiences: [""],
+    promptVersion: LAUNCH_REALITY_CHECK_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      // N§3 Technology: a company's claimed capabilities vs independent benchmarks
+      if (ctx.industrySlug !== "technology") return false;
+      return ctx.articles.some(
+        (a) =>
+          a.contentType === "model_release" ||
+          a.contentType === "product_launch",
+      );
+    },
+    buildRequest: (material) => buildLaunchRealityCheckRequest(material),
+    parseOutput: (rawText, _aud, material) =>
+      parseLaunchRealityCheckOutput(rawText, material),
+    diagnosisSchema: launchRealityCheckSchema,
+  },
+
+  technology_evolution_timeline: {
+    type: "technology_evolution_timeline",
+    audiences: [""],
+    promptVersion: EVOLUTION_TIMELINE_PROMPT_VERSION,
+    isEligible: (ctx) => {
+      // N§3 Technology: connect milestones across the reports of one story
+      if (ctx.industrySlug !== "technology") return false;
+      return ctx.articles.length >= 2;
+    },
+    buildRequest: (material) => buildEvolutionTimelineRequest(material),
+    parseOutput: (rawText, _aud, material) =>
+      parseEvolutionTimelineOutput(rawText, material),
+    diagnosisSchema: technologyEvolutionTimelineSchema,
   },
 };

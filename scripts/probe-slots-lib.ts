@@ -96,6 +96,8 @@ export const ARTIFACT_SCHEMAS: Record<string, ZodType> = {
   skills_career_trends: T.skillsCareerTrendsSchema,
   industry_impact_report: T.industryImpactReportSchema,
   supply_chain_ripple_map: T.supplyChainRippleMapSchema,
+  launch_reality_check: T.launchRealityCheckSchema,
+  technology_evolution_timeline: T.technologyEvolutionTimelineSchema,
 };
 
 const NO_SCHEMA = {
@@ -243,6 +245,8 @@ function artifactMaterial(
         publishedAt: Date.parse(fixture.published_at),
         summary: fixture.summary,
         bodyText: body(fixture),
+        sourceBodyText: body(fixture),
+        canonicalUrl: fixture.url,
       },
     ],
     verifiedClaims: [
