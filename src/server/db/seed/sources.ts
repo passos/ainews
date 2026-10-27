@@ -1,6 +1,6 @@
-// Seed sources (#8). Only Technology has any: the owner decides which sources
-// the other sections watch (AGENTS.md). The `exclude` rules are drafts that
-// wait for the owner's answers to gate questions (b) and (c).
+// Seed sources (#8, #90). Every section has at least one; the owner decides
+// which sources a section watches (AGENTS.md). The `exclude` rules are drafts
+// that wait for the owner's answers to gate questions (b) and (c).
 import type { ContentDisplay } from "../../../lib/content-display";
 import type { SourceConfig } from "../../../pipeline/collect/config";
 
@@ -44,5 +44,62 @@ export const SEED_SOURCES: SeedSource[] = [
     siteDomain: "technologyreview.com",
     contentDisplay: "excerpt",
     config: { exclude: [{ field: "category", values: ["sponsored"] }] },
+  },
+  {
+    industry: "education",
+    name: "The Hechinger Report",
+    kind: "rss",
+    feedUrl: "https://hechingerreport.org/feed/",
+    siteDomain: "hechingerreport.org",
+    contentDisplay: "excerpt",
+    config: {},
+  },
+  {
+    industry: "education",
+    name: "EdSurge",
+    kind: "rss",
+    feedUrl: "https://www.edsurge.com/articles_rss",
+    siteDomain: "edsurge.com",
+    contentDisplay: "excerpt",
+    config: {},
+  },
+  {
+    industry: "industry",
+    name: "Semiconductor Engineering",
+    kind: "rss",
+    feedUrl: "https://semiengineering.com/feed/",
+    siteDomain: "semiengineering.com",
+    contentDisplay: "excerpt",
+    config: {},
+  },
+  {
+    industry: "industry",
+    name: "Supply Chain Dive",
+    kind: "rss",
+    feedUrl: "https://www.supplychaindive.com/feeds/news/",
+    siteDomain: "supplychaindive.com",
+    // robots.txt asks for Crawl-delay 5.
+    contentDisplay: "excerpt",
+    config: {},
+  },
+  {
+    industry: "finance",
+    name: "SEC press releases",
+    kind: "rss",
+    feedUrl: "https://www.sec.gov/news/pressreleases.rss",
+    siteDomain: "sec.gov",
+    // US government work: public domain.
+    contentDisplay: "full",
+    config: {},
+  },
+  {
+    industry: "finance",
+    name: "Banking Dive",
+    kind: "rss",
+    feedUrl: "https://www.bankingdive.com/feeds/news/",
+    siteDomain: "bankingdive.com",
+    // robots.txt asks for Crawl-delay 5.
+    contentDisplay: "excerpt",
+    config: {},
   },
 ];
