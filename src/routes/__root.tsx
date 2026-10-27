@@ -32,7 +32,19 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: SITE_NAME },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      // Preload the body font only: it sets most of the text on every page.
+      {
+        rel: "preload",
+        href: "/fonts/literata-latin-400-normal.woff2",
+        as: "font",
+        type: "font/woff2",
+        crossOrigin: "anonymous",
+      },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
+    ],
   }),
   shellComponent: RootDocument,
   component: RootLayout,
@@ -67,24 +79,24 @@ export function SiteHeader({
   readerWatchEnabled: boolean;
 }) {
   return (
-    <header className="border-t-[6px] border-foreground pt-2 pb-3">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
+    <header className="pt-5 pb-3">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b-[3px] border-foreground pb-3">
         <Link
           to="/"
           search={(prev) => ({ audience: prev.audience })}
-          className="font-serif text-3xl font-black uppercase leading-none tracking-tight sm:text-5xl"
+          className="font-heading text-4xl font-semibold leading-none tracking-[-0.03em] no-underline sm:text-5xl"
         >
           {name}
         </Link>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <p className="font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Approved stories · every one traced to its source
           </p>
           <ThemeSwitcher />
         </div>
       </div>
-      <div className="mt-3 flex flex-col gap-2 border-y-2 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-col gap-2 border-b sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-x-5">
           <SectionNav sections={sections} />
           {showWatchesNav({ hasWatches, readerWatchEnabled }) && (
             <WatchesNavLink />
@@ -111,7 +123,7 @@ function RootLayout() {
       <main className="flex-1 pb-8">
         <Outlet />
       </main>
-      <footer className="border-t-2 py-3 font-mono text-[0.68rem] uppercase tracking-widest text-muted-foreground">
+      <footer className="border-t py-5 text-sm text-muted-foreground">
         Every story links to its original source.
       </footer>
     </div>

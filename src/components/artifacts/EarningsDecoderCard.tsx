@@ -32,15 +32,15 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
   }));
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-6">
+    <div className="border border-border bg-card p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+            <span className="border border-border-strong px-2 py-0.5 text-xs font-semibold text-foreground">
               SEC EDGAR {filing.form}
             </span>
-            <span className="font-mono text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               CIK: {company.cik}
             </span>
           </div>
@@ -59,7 +59,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
               href={filingHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 border transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 border transition-colors"
             >
               <span>View Official SEC Filing</span>
               <span aria-hidden="true">&rarr;</span>
@@ -70,10 +70,10 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
 
       {/* Metrics Comparison Table */}
       <div className="space-y-2">
-        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+        <h4 className="text-sm font-semibold text-muted-foreground">
           Financial Facts & Period Comparisons
         </h4>
-        <div className="overflow-x-auto border rounded-lg">
+        <div className="overflow-x-auto border">
           <table className="w-full text-xs text-left">
             <thead className="bg-muted text-muted-foreground font-semibold">
               <tr>
@@ -90,7 +90,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                 <tr key={idx} className="hover:bg-muted/40">
                   <td className="px-3 py-2.5 font-medium">
                     {m.metricName}
-                    <div className="font-mono text-[10px] text-muted-foreground">
+                    <div className="text-[10px] text-muted-foreground">
                       {m.concept}
                     </div>
                   </td>
@@ -130,15 +130,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                           </a>
                         )}
                         {m.deltaQoQPercent && (
-                          <span
-                            className={`ml-1.5 font-mono text-[11px] ${
-                              m.deltaQoQPercent.startsWith("+")
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : m.deltaQoQPercent.startsWith("-")
-                                  ? "text-rose-600 dark:text-rose-400"
-                                  : ""
-                            }`}
-                          >
+                          <span className="ml-1.5 text-[11px] tabular-nums">
                             ({m.deltaQoQPercent})
                           </span>
                         )}
@@ -165,15 +157,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                           </a>
                         )}
                         {m.deltaYoYPercent && (
-                          <span
-                            className={`ml-1.5 font-mono text-[11px] ${
-                              m.deltaYoYPercent.startsWith("+")
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : m.deltaYoYPercent.startsWith("-")
-                                  ? "text-rose-600 dark:text-rose-400"
-                                  : ""
-                            }`}
-                          >
+                          <span className="ml-1.5 text-[11px] tabular-nums">
                             ({m.deltaYoYPercent})
                           </span>
                         )}
@@ -184,17 +168,17 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                   </td>
                   <td className="px-3 py-2.5">
                     {m.guidanceComparison === "above" && (
-                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      <span className="inline-block border border-foreground px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
                         Above Guidance
                       </span>
                     )}
                     {m.guidanceComparison === "within" && (
-                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                      <span className="inline-block border border-border-strong px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
                         Within Range
                       </span>
                     )}
                     {m.guidanceComparison === "below" && (
-                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                      <span className="inline-block border border-dashed border-border-strong px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
                         Below Guidance
                       </span>
                     )}
@@ -204,7 +188,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-right font-mono text-[11px]">
+                  <td className="px-3 py-2.5 text-right text-[11px]">
                     {href.reported ? (
                       <a
                         href={href.reported}
@@ -228,7 +212,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
 
       {/* Executive Summary */}
       <div className="space-y-2">
-        <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+        <h4 className="text-sm font-semibold text-muted-foreground">
           Executive Financial Summary
         </h4>
         <div className="prose prose-sm dark:prose-invert max-w-none text-foreground text-sm leading-relaxed whitespace-pre-line">
@@ -239,7 +223,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
       {/* Key Drivers */}
       {keyDrivers && keyDrivers.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <h4 className="text-sm font-semibold text-muted-foreground">
             Key Business Drivers
           </h4>
           <ul className="list-disc list-inside space-y-1 text-sm text-foreground">
@@ -253,7 +237,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
       {/* Forward Guidance */}
       {forwardGuidance && forwardGuidance.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          <h4 className="text-sm font-semibold text-muted-foreground">
             Management Outlook & Forward Commentary
           </h4>
           <ul className="list-disc list-inside space-y-1 text-sm text-foreground">
@@ -265,7 +249,7 @@ export function EarningsDecoderCard({ decoder }: EarningsDecoderCardProps) {
       )}
 
       {/* Newsren §4 Finance Guardrail Notice */}
-      <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-900 dark:text-amber-200">
+      <div className="border border-dashed border-border-strong p-3 text-xs text-foreground">
         <p className="font-semibold mb-0.5">⚠️ Regulatory disclosure</p>
         <p>{disclaimer}</p>
       </div>

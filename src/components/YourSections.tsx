@@ -27,7 +27,7 @@ export function YourSections({
   if (mineSections.length === 0 && mineWatches.length === 0) return null;
 
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b-2 pb-2 font-mono text-xs uppercase tracking-wider">
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b pb-2 text-xs">
       <span className="font-bold text-muted-foreground">Your follows</span>
       {mineSections.map((s) => (
         <Link
@@ -36,7 +36,7 @@ export function YourSections({
           params={{ section: s.slug }}
           search={(prev) => ({ audience: prev.audience })}
           data-section={s.slug}
-          className="font-bold text-sec-ink underline"
+          className="font-bold text-foreground underline"
         >
           {s.name}
         </Link>
@@ -48,7 +48,7 @@ export function YourSections({
           params={{ watch: w.slug }}
           search={(prev) => ({ audience: prev.audience })}
           data-watch={w.slug}
-          className="font-bold text-sec-ink underline"
+          className="font-bold text-foreground underline"
         >
           [Watch] {w.question.slice(0, 30)}...
         </Link>

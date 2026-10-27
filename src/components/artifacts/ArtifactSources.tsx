@@ -10,11 +10,9 @@ export function ArtifactSources({
   return (
     <footer
       aria-label="Artifact sources"
-      className="mt-4 border-t border-border pt-2 font-mono text-[0.72rem] leading-snug"
+      className="mt-4 border-t border-border pt-2 text-[0.72rem] leading-snug"
     >
-      <h4 className="font-bold uppercase tracking-widest text-muted-foreground">
-        Source articles
-      </h4>
+      <h4 className="font-bold text-muted-foreground">Source articles</h4>
       <ul className="mt-1 flex flex-col gap-1.5">
         {sources.map((s) => (
           <li key={s.id} className="min-w-0">

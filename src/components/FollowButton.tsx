@@ -41,7 +41,7 @@ export function FollowButton({
         setFollowing(list?.includes(slug) ?? false);
       }}
       className={cn(
-        "rounded-sm border-2 font-mono text-xs font-bold uppercase tracking-wider",
+        "border text-xs font-bold",
         "aria-pressed:bg-primary aria-pressed:text-primary-foreground",
       )}
     >

@@ -8,24 +8,22 @@ export function SupplyChainRippleCard({
   return (
     <section
       aria-label="Supply-Chain Ripple Map"
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-3 flex items-center justify-between border-b border-border pb-2">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          <span className="text-xs font-bold text-muted-foreground">
             ⛓️ Supply-Chain Ripple Map
           </span>
-          <span className="font-mono text-[0.68rem] text-muted-foreground">
+          <span className="text-[0.68rem] text-muted-foreground">
             Upstream & Downstream Ramification Modeling
           </span>
         </div>
       </header>
 
       {/* Prominent Hypothesis Banner (Newsren §3 mandate) */}
-      <div className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
-        <span className="font-mono font-bold uppercase tracking-wider">
-          ⚠️ Working hypothesis:
-        </span>{" "}
+      <div className="mb-4 border border-dashed border-border-strong p-2.5 text-xs text-foreground">
+        <span className="font-bold">⚠️ Working hypothesis:</span>{" "}
         <span className="leading-relaxed">
           Upstream and downstream ripple effects in the supply chain come from
           an inferred model and transmission hypotheses, not from audited facts.
@@ -34,38 +32,38 @@ export function SupplyChainRippleCard({
 
       <div className="flex flex-col gap-4">
         <div>
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          <h4 className="text-xs font-bold text-muted-foreground">
             Focal Transition Node
           </h4>
-          <p className="mt-1 font-mono text-sm font-semibold text-foreground">
+          <p className="mt-1 text-sm font-semibold text-foreground">
             {ripple.focalNode}
           </p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
           {/* Upstream Ripples */}
-          <div className="rounded border border-border/80 bg-muted/15 p-3 text-xs">
-            <h5 className="font-mono font-bold uppercase tracking-wider text-sec-ink">
+          <div className="border border-border/80 bg-muted/15 p-3 text-xs">
+            <h5 className="font-bold text-muted-foreground">
               ⬆️ Upstream Dependencies & Suppliers
             </h5>
             <div className="mt-2 space-y-2.5">
               {ripple.upstreamRipples.map((item, idx) => (
                 <div
                   key={idx}
-                  className="rounded border border-border/60 bg-background/50 p-2.5"
+                  className="border border-border/60 bg-background/50 p-2.5"
                 >
                   <div className="flex items-center justify-between gap-1.5">
-                    <span className="font-mono font-semibold text-foreground">
+                    <span className="font-semibold text-foreground">
                       {item.target}
                     </span>
-                    <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.2 font-mono text-[0.62rem] font-bold text-amber-700 dark:text-amber-400">
+                    <span className="inline-flex items-center border border-dashed border-border-strong px-1 py-0.2 text-[0.62rem] font-bold text-muted-foreground">
                       Hypothesis ({item.confidence})
                     </span>
                   </div>
                   <p className="mt-1 leading-relaxed text-foreground">
                     {item.effect}
                   </p>
-                  <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground">
+                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
                     <span className="font-semibold text-foreground/80">
                       Channel:{" "}
                     </span>
@@ -77,28 +75,28 @@ export function SupplyChainRippleCard({
           </div>
 
           {/* Downstream Ripples */}
-          <div className="rounded border border-border/80 bg-muted/15 p-3 text-xs">
-            <h5 className="font-mono font-bold uppercase tracking-wider text-sec-ink">
+          <div className="border border-border/80 bg-muted/15 p-3 text-xs">
+            <h5 className="font-bold text-muted-foreground">
               ⬇️ Downstream Integrators & End-Markets
             </h5>
             <div className="mt-2 space-y-2.5">
               {ripple.downstreamRipples.map((item, idx) => (
                 <div
                   key={idx}
-                  className="rounded border border-border/60 bg-background/50 p-2.5"
+                  className="border border-border/60 bg-background/50 p-2.5"
                 >
                   <div className="flex items-center justify-between gap-1.5">
-                    <span className="font-mono font-semibold text-foreground">
+                    <span className="font-semibold text-foreground">
                       {item.target}
                     </span>
-                    <span className="inline-flex items-center rounded bg-amber-500/15 px-1 py-0.2 font-mono text-[0.62rem] font-bold text-amber-700 dark:text-amber-400">
+                    <span className="inline-flex items-center border border-dashed border-border-strong px-1 py-0.2 text-[0.62rem] font-bold text-muted-foreground">
                       Hypothesis ({item.confidence})
                     </span>
                   </div>
                   <p className="mt-1 leading-relaxed text-foreground">
                     {item.effect}
                   </p>
-                  <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground">
+                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
                     <span className="font-semibold text-foreground/80">
                       Channel:{" "}
                     </span>
@@ -112,7 +110,7 @@ export function SupplyChainRippleCard({
 
         {ripple.keyHypotheses.length > 0 && (
           <div className="border-l-2 border-border pl-3 text-xs leading-relaxed">
-            <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            <h4 className="text-xs font-bold text-muted-foreground">
               Key Hypotheses & Modeling Assumptions
             </h4>
             <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">

@@ -28,10 +28,10 @@ export function EvolutionTimelineCard({
   return (
     <section
       aria-label="Technology Evolution Timeline"
-      className="min-w-0 border-2 border-border bg-card p-4 sm:p-5"
+      className="min-w-0 border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-3 border-b border-border pb-2">
-        <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+        <h3 className="text-xs font-bold text-muted-foreground">
           Technology Evolution Timeline
         </h3>
         <p className="text-sm text-muted-foreground">
@@ -43,7 +43,7 @@ export function EvolutionTimelineCard({
         {entries.map(({ e, day }, i) => (
           <li key={i} className="min-w-0 border-l-2 border-border pl-3">
             {/* The model's kind, date and dateSource are not shown. */}
-            <p className="flex flex-wrap gap-x-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <p className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
               <span>
                 {day === null ? "Date not stated" : `Reported ${day}`}
               </span>
@@ -53,7 +53,7 @@ export function EvolutionTimelineCard({
               &quot;{e.source.quote}&quot;{" "}
               <a
                 href={`/a/${e.source.articleId}`}
-                className="font-mono text-xs hover:underline"
+                className="text-xs hover:underline"
               >
                 Source
               </a>

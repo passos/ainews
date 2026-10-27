@@ -385,6 +385,28 @@ async function main() {
   if (homePage.text.includes("Summaries only")) {
     fail("GET / still says 'Summaries only'");
   }
+  // Favicon and self-hosted fonts (#87): declared in <head>, served from
+  // the same origin, never a 404.
+  const homeHead = /<head>[\s\S]*?<\/head>/i.exec(homePage.text)?.[0] ?? "";
+  for (const href of ["/favicon.svg", "/favicon.ico"]) {
+    if (!new RegExp(`<link[^>]*rel="icon"[^>]*href="${href}"`).test(homeHead)) {
+      fail(`GET / <head> has no icon link to ${href}`);
+    }
+  }
+  for (const [path, type] of [
+    ["/favicon.ico", "image/"],
+    ["/favicon.svg", "image/svg+xml"],
+    ["/fonts/literata-latin-400-normal.woff2", "font/woff2"],
+    ["/fonts/newsreader-latin-600-normal.woff2", "font/woff2"],
+  ]) {
+    const res = await fetch(`${BASE}${path}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    await res.arrayBuffer();
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    const got = res.headers.get("content-type") ?? "";
+    if (!got.startsWith(type)) fail(`GET ${path} content-type is "${got}"`);
+  }
   if (!homePage.text.includes("lg:columns-2")) {
     fail("GET / lacks 'lg:columns-2' multi-column flow layout");
   }

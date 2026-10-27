@@ -29,11 +29,7 @@ export const Route = createFileRoute("/a/$articleId")({
       ? [{ rel: "canonical", href: loaderData.page.article.url }]
       : [],
   }),
-  notFoundComponent: () => (
-    <p className="pt-6 font-mono text-sm uppercase tracking-wider">
-      No such article.
-    </p>
-  ),
+  notFoundComponent: () => <p className="pt-6 text-sm">No such article.</p>,
   component: ArticlePageView,
 });
 

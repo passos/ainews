@@ -31,21 +31,21 @@ export function InspectEvidencePanel({
   return (
     <section
       aria-label="Inspect evidence"
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+          <span className="text-xs font-bold text-muted-foreground">
             🔍 Inspect Evidence
           </span>
-          <span className="font-mono text-[0.68rem] text-muted-foreground">
+          <span className="text-[0.68rem] text-muted-foreground">
             {evidence.claims.length}{" "}
             {evidence.claims.length === 1
               ? "claim inspected"
               : "claims inspected"}
           </span>
         </div>
-        <p className="font-mono text-[0.65rem] text-muted-foreground">
+        <p className="text-[0.65rem] text-muted-foreground">
           Every statement traced directly to verbatim source excerpts
         </p>
       </header>
@@ -74,32 +74,28 @@ function ClaimRow({
   onToggle: () => void;
 }) {
   const typeBadgeColors = {
-    fact: "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300",
-    interpretation:
-      "border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300",
-    prediction:
-      "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    fact: "border-border-strong text-foreground",
+    interpretation: "border-border-strong text-muted-foreground",
+    prediction: "border-dashed border-border-strong text-muted-foreground",
   }[claim.claimType];
 
   const consensusBadge = {
     verified: {
       text: "Verified",
-      classes:
-        "border-emerald-600/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold",
+      classes: "border-foreground text-foreground font-semibold",
     },
     disputed: {
       text: "Disputed",
-      classes:
-        "border-rose-600/40 bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold",
+      classes: "border-destructive text-destructive font-bold",
     },
     unverified: {
       text: "Unverified",
-      classes: "border-border bg-muted/60 text-muted-foreground",
+      classes: "border-dashed border-border-strong text-muted-foreground",
     },
   }[claim.consensusStatus];
 
   return (
-    <div className="rounded border border-border/80 bg-background/50 transition-colors">
+    <div className="border border-border/80 bg-background/50 transition-colors">
       <button
         type="button"
         onClick={onToggle}
@@ -109,36 +105,36 @@ function ClaimRow({
         <div className="flex flex-1 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`rounded border px-1.5 py-0.5 font-mono text-[0.65rem] uppercase tracking-wider ${typeBadgeColors}`}
+              className={`border px-1.5 py-0.5 text-[0.65rem] capitalize ${typeBadgeColors}`}
             >
               {claim.claimType}
             </span>
             <span
-              className={`rounded border px-1.5 py-0.5 font-mono text-[0.65rem] uppercase tracking-wider ${consensusBadge.classes}`}
+              className={`border px-1.5 py-0.5 text-[0.65rem] ${consensusBadge.classes}`}
             >
               {consensusBadge.text}
             </span>
             {claim.primarySourcePreferred && (
-              <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-primary">
+              <span className="border border-foreground px-1.5 py-0.5 text-[0.65rem] font-semibold text-foreground">
                 Primary source cited
               </span>
             )}
             {claim.realityCheck === "vendor_only" && (
-              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-amber-600 dark:text-amber-400">
+              <span className="border border-dashed border-border-strong px-1.5 py-0.5 text-[0.65rem] font-semibold text-muted-foreground">
                 Vendor Claim (Unverified)
               </span>
             )}
             {claim.realityCheck === "independent_verified" && (
-              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="border border-border-strong px-1.5 py-0.5 text-[0.65rem] font-semibold text-foreground">
                 Independent Benchmark Confirmed
               </span>
             )}
             {claim.realityCheck === "independent_disputed" && (
-              <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold text-red-600 dark:text-red-400">
+              <span className="border border-destructive px-1.5 py-0.5 text-[0.65rem] font-semibold text-destructive">
                 Disputed by Independent Benchmark
               </span>
             )}
-            <span className="font-mono text-[0.65rem] text-muted-foreground">
+            <span className="text-[0.65rem] text-muted-foreground">
               {claim.evidence.length}{" "}
               {claim.evidence.length === 1
                 ? "source citation"
@@ -146,15 +142,12 @@ function ClaimRow({
             </span>
           </div>
 
-          <p className="font-serif text-sm font-semibold leading-snug text-foreground">
+          <p className="font-heading text-sm font-semibold leading-snug text-foreground tracking-tight">
             {claim.claimText}
           </p>
         </div>
 
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          aria-hidden="true"
-        >
+        <span className="text-xs text-muted-foreground" aria-hidden="true">
           {isOpen ? "▲" : "▼"}
         </span>
       </button>
@@ -162,7 +155,7 @@ function ClaimRow({
       {isOpen && (
         <div className="border-t border-border/60 bg-muted/20 p-3 pt-2">
           {claim.evidence.length === 0 ? (
-            <p className="font-mono text-xs italic text-muted-foreground">
+            <p className="text-xs italic text-muted-foreground">
               No verified source excerpts available for this claim.
             </p>
           ) : (
@@ -170,34 +163,34 @@ function ClaimRow({
               {claim.evidence.map((cit) => (
                 <div
                   key={cit.id}
-                  className="rounded border border-border/60 bg-card p-2.5 text-xs shadow-xs"
+                  className="border border-border/60 bg-card p-2.5 text-xs"
                 >
                   <div className="mb-1 flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-1">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`rounded px-1.5 py-0.2 font-mono text-[0.62rem] font-bold uppercase tracking-wider ${
+                        className={`border px-1.5 py-0.2 text-[0.62rem] font-bold ${
                           cit.stance === "support"
-                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                            : "bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                            ? "border-foreground text-foreground"
+                            : "border-destructive text-destructive"
                         }`}
                       >
                         {cit.stance === "support" ? "Supports" : "Disputes"}
                       </span>
                       {cit.isPrimarySource && (
-                        <span className="rounded bg-sec/20 px-1.5 py-0.2 font-mono text-[0.62rem] font-bold uppercase tracking-wider text-sec-ink">
+                        <span className="border border-border-strong px-1.5 py-0.2 text-[0.62rem] font-bold text-muted-foreground">
                           ★ Original source
                         </span>
                       )}
                       <span
-                        className={`rounded border px-1.5 py-0.2 font-mono text-[0.62rem] font-semibold uppercase tracking-wider ${
+                        className={`border px-1.5 py-0.2 text-[0.62rem] font-semibold ${
                           cit.sourceRole === "vendor"
-                            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                            : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                            ? "border-dashed border-border-strong text-muted-foreground"
+                            : "border-border-strong text-foreground"
                         }`}
                       >
                         {cit.sourceRole === "vendor" ? "Vendor" : "Independent"}
                       </span>
-                      <span className="font-mono text-[0.68rem] text-muted-foreground">
+                      <span className="text-[0.68rem] text-muted-foreground">
                         {cit.sourceName} ({cit.sourceDomain})
                       </span>
                     </div>
@@ -207,7 +200,7 @@ function ClaimRow({
                         href={safeHttpUrl(cit.articleUrl)!}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="font-mono text-[0.68rem] font-semibold text-primary underline hover:opacity-80"
+                        className="text-[0.68rem] font-semibold text-primary underline hover:opacity-80"
                       >
                         {cit.articleTitle} ↗
                       </a>
@@ -235,10 +228,10 @@ function QuoteLink({ cit }: { cit: ClaimEvidenceView }) {
   const original = safeHttpUrl(cit.articleUrl);
   if (cit.inArticle) {
     return (
-      <p className="mt-1.5 font-mono text-[0.68rem]">
+      <p className="mt-1.5 text-[0.68rem]">
         <a
           href={textFragmentHref(cit.articleId, cit.quote)}
-          className="font-semibold text-sec-ink underline"
+          className="font-semibold text-foreground underline"
         >
           Highlight in article →
         </a>
@@ -247,12 +240,12 @@ function QuoteLink({ cit }: { cit: ClaimEvidenceView }) {
   }
   if (!original) return null;
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.68rem]">
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.68rem]">
       <a
         href={originalFragmentHref(original, cit.quote)}
         target="_blank"
         rel="noopener noreferrer"
-        className="font-semibold text-sec-ink underline"
+        className="font-semibold text-foreground underline"
       >
         Highlight in original ↗
       </a>

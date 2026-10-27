@@ -8,20 +8,20 @@ export function PaperDecoderCard({
   return (
     <section
       aria-label="Research Paper Decoder"
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border border-border bg-card p-4 sm:p-5"
     >
       <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+        <span className="text-xs font-bold text-muted-foreground">
           🔬 Research Paper Decoder
         </span>
-        <span className="font-mono text-[0.68rem] text-muted-foreground">
+        <span className="text-[0.68rem] text-muted-foreground">
           Hypothesis · Method · Findings · Limitations · Applications
         </span>
       </header>
 
       <div className="flex flex-col gap-3.5">
-        <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">
+          <h4 className="text-xs font-bold text-muted-foreground">
             1. Hypothesis & Problem
           </h4>
           <p className="text-sm leading-relaxed text-foreground">
@@ -29,8 +29,8 @@ export function PaperDecoderCard({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">
+          <h4 className="text-xs font-bold text-muted-foreground">
             2. Methodology & Architecture
           </h4>
           <p className="text-sm leading-relaxed text-foreground">
@@ -38,8 +38,8 @@ export function PaperDecoderCard({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">
+          <h4 className="text-xs font-bold text-muted-foreground">
             3. Empirical Findings & Benchmarks
           </h4>
           <p className="text-sm leading-relaxed text-foreground">
@@ -47,8 +47,8 @@ export function PaperDecoderCard({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">
+          <h4 className="text-xs font-bold text-muted-foreground">
             4. Caveats & Limitations
           </h4>
           <p className="text-sm leading-relaxed text-foreground">
@@ -56,8 +56,8 @@ export function PaperDecoderCard({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1 border-l-2 border-sec pl-3">
-          <h4 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">
+          <h4 className="text-xs font-bold text-muted-foreground">
             5. Downstream Applications
           </h4>
           <p className="text-sm leading-relaxed text-foreground">

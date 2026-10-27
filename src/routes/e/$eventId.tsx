@@ -74,11 +74,7 @@ export const Route = createFileRoute("/e/$eventId")({
       },
     ],
   }),
-  notFoundComponent: () => (
-    <p className="pt-6 font-mono text-sm uppercase tracking-wider">
-      No such event.
-    </p>
-  ),
+  notFoundComponent: () => <p className="pt-6 text-sm">No such event.</p>,
   component: EventPage,
 });
 
@@ -128,17 +124,17 @@ export function EventPageView({
         <Link
           to="/s/$section"
           params={{ section: section.slug }}
-          className="font-mono text-xs font-bold uppercase tracking-wider text-sec-ink hover:underline"
+          className="text-xs font-bold text-foreground hover:underline"
         >
           ← {section.name}
         </Link>
       </nav>
 
-      <header className="border-t-[5px] border-sec pt-2">
-        <h1 className="font-serif text-2xl font-black leading-tight sm:text-3xl">
+      <header className="border-t-[3px] border-foreground pt-2">
+        <h1 className="font-heading text-2xl font-semibold leading-tight sm:text-3xl tracking-tight">
           {title}
         </h1>
-        <p className="mt-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           {articles.length} {articles.length === 1 ? "report" : "reports"} on
           this story
         </p>
@@ -232,10 +228,8 @@ export function EventPageView({
       )}
 
       {corrections.length > 0 && (
-        <div className="border-2 border-destructive p-3">
-          <h2 className="font-mono text-xs font-bold uppercase tracking-widest text-destructive">
-            Correction
-          </h2>
+        <div className="border border-destructive p-3">
+          <h2 className="text-xs font-bold text-destructive">Correction</h2>
           <div className="mt-1 space-y-1">
             {corrections.map((corr, idx) => (
               <p key={idx} className="text-sm leading-snug">
@@ -250,8 +244,8 @@ export function EventPageView({
         <Await promise={sources}>
           {(list) =>
             list.length === 0 ? null : (
-              <aside className="border-y py-2 font-mono text-[0.72rem] leading-relaxed">
-                <span className="mr-2 font-bold uppercase tracking-widest text-muted-foreground">
+              <aside className="border-y py-2 text-[0.72rem] leading-relaxed">
+                <span className="mr-2 font-bold text-muted-foreground">
                   Sources
                 </span>
                 {list.map((s, i) => (
@@ -269,23 +263,21 @@ export function EventPageView({
       </Suspense>
 
       <section aria-label="Story timeline" className="flex flex-col gap-4">
-        <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground">
-          Timeline
-        </h2>
+        <h2 className="text-xs font-bold text-muted-foreground">Timeline</h2>
         <div className="flex flex-col gap-5">
           {timelineRevisions && timelineRevisions.length > 0
             ? timelineRevisions.map((revBlock, revIdx) => (
                 <div
                   key={revBlock.revision}
-                  className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card/30 p-3 sm:p-4"
+                  className="flex flex-col gap-3 border border-border/70 bg-card/30 p-3 sm:p-4"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2">
                     <div className="flex items-center gap-2">
-                      <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-xs font-bold text-primary">
+                      <span className="bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
                         Revision {revBlock.revision}
                       </span>
                       {revIdx === 0 && (
-                        <span className="flex items-center gap-1 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                        <span className="flex items-center gap-1 text-[0.68rem] font-bold text-muted-foreground">
                           ★ First seen
                         </span>
                       )}
@@ -293,9 +285,9 @@ export function EventPageView({
                   </div>
 
                   {revBlock.diff && revBlock.diff.summary && (
-                    <div className="flex flex-col gap-1.5 rounded bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
+                    <div className="flex flex-col gap-1.5 bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
                       <div>
-                        <span className="font-mono font-bold text-sec-ink mr-1">
+                        <span className="font-bold text-muted-foreground mr-1">
                           ★ What&apos;s new in this revision:
                         </span>
                         <span>{revBlock.diff.summary}</span>
@@ -303,7 +295,7 @@ export function EventPageView({
                       {revBlock.diff.changedClaims &&
                         revBlock.diff.changedClaims.length > 0 && (
                           <div className="mt-1 flex flex-col gap-1 border-t border-border/30 pt-1.5">
-                            <span className="font-mono text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                            <span className="text-[0.7rem] font-semibold text-muted-foreground">
                               Status updates on existing claims:
                             </span>
                             <ul className="list-inside list-disc space-y-0.5 text-[0.75rem] text-foreground/80">
@@ -324,7 +316,7 @@ export function EventPageView({
                         {a.evidence &&
                           (a.evidence.includes("preprint") ||
                             a.evidence.includes("primary_source")) && (
-                            <div className="flex items-center gap-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                            <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
                               <span>★ Original source</span>
                             </div>
                           )}
@@ -337,7 +329,7 @@ export function EventPageView({
             : articles.map((a, idx) => (
                 <div key={a.id} className="flex flex-col gap-1">
                   {idx === 0 && (
-                    <div className="flex items-center gap-1.5 font-mono text-[0.68rem] font-bold uppercase tracking-widest text-sec-ink">
+                    <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
                       <span>★ First seen</span>
                     </div>
                   )}
