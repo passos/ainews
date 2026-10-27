@@ -1743,6 +1743,7 @@ export async function listWatches(
         (SELECT COUNT(*) FROM watch_hits wh WHERE wh.watch_id = w.id) AS hit_count
       FROM watches w
       LEFT JOIN industries i ON i.id = w.industry_id
+      WHERE w.owner_kind = 'admin'
       ORDER BY w.created_at DESC`,
     )
     .all<{
@@ -1873,7 +1874,9 @@ export async function updateWatch(
   }
 
   await database
-    .prepare(`UPDATE watches SET ${updates.join(", ")} WHERE id = ?1`)
+    .prepare(
+      `UPDATE watches SET ${updates.join(", ")} WHERE id = ?1 AND owner_kind = 'admin'`,
+    )
     .bind(...values)
     .run();
 }

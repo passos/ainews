@@ -183,6 +183,13 @@
       "when": 1793055979978,
       "tag": "0025_easy_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793071532770,
+      "tag": "0026_lame_radioactive_man",
+      "breakpoints": true
     }
   ]
 }

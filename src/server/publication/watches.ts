@@ -1,4 +1,5 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { escapeXml } from "../../lib/xml";
 import { safeHttpUrl } from "../../lib/url";
 import { industries } from "../db/schema/industries";
@@ -11,6 +12,17 @@ import {
   type SourceColumnsRow,
 } from "./articles";
 import { SITE_NAME } from "../../lib/site";
+
+/**
+ * The only definition of a public watch (#132): owner_kind is exactly
+ * 'admin'. A reader watch, or any other owner kind, is never public. Every
+ * public read of `watches` uses it, and public queries do not alias
+ * `watches` (tests/public-watch-filter.node.test.ts).
+ */
+export const ADMIN_WATCH_SQL = "watches.owner_kind = 'admin'";
+
+/** ADMIN_WATCH_SQL as a drizzle fragment, for public reads. */
+export const adminWatchWhere: SQL = sql.raw(ADMIN_WATCH_SQL);
 
 export interface WatchHitItem {
   id: number;
@@ -68,7 +80,7 @@ export async function getWatchView(
     })
     .from(watches)
     .leftJoin(industries, eq(watches.industryId, industries.id))
-    .where(eq(watches.slug, slug))
+    .where(and(eq(watches.slug, slug), adminWatchWhere))
     .get();
 
   if (!watchRow) {
@@ -257,7 +269,7 @@ export async function getActiveWatchesView(db: Db): Promise<ActiveWatchItem[]> {
     })
     .from(watches)
     .leftJoin(industries, eq(watches.industryId, industries.id))
-    .where(eq(watches.status, "active"))
+    .where(and(eq(watches.status, "active"), adminWatchWhere))
     .orderBy(desc(watches.createdAt))
     .all();
 
@@ -269,7 +281,7 @@ export async function hasActiveWatches(db: Db): Promise<boolean> {
   const row = await db
     .select({ id: watches.id })
     .from(watches)
-    .where(eq(watches.status, "active"))
+    .where(and(eq(watches.status, "active"), adminWatchWhere))
     .limit(1)
     .get();
   return row !== undefined;

@@ -17,6 +17,7 @@ export * from "./financial-facts";
 export * from "./industries";
 export * from "./llm-calls";
 export * from "./questions";
+export * from "./reader-watch-admissions";
 export * from "./reviews";
 export * from "./settings";
 export * from "./sources";

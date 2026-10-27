@@ -282,7 +282,7 @@ export async function evaluateEventWatches(
     .prepare(
       `SELECT id, slug, question, criteria, keywords, industry_id, status, created_at
        FROM watches
-       WHERE status = 'active'`,
+       WHERE status = 'active' AND owner_kind = 'admin'`,
     )
     .all<WatchRow>();
 
