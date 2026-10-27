@@ -11,7 +11,14 @@ function Time({ ms, label }: { ms: number; label: string }) {
   );
 }
 
-export function ArticleCard({ article: a }: { article: ArticleView }) {
+export function ArticleCard({
+  article: a,
+  hideEventLink = false,
+}: {
+  article: ArticleView;
+  // Set inside /e/$id, where the story link would point at the page itself.
+  hideEventLink?: boolean;
+}) {
   // The read layer returns null for anything but an http(s) URL. The title
   // links the reader page (#86), which always exists for a listed article.
   const href = a.url;
@@ -64,12 +71,12 @@ export function ArticleCard({ article: a }: { article: ArticleView }) {
           {a.correction}
         </p>
       )}
-      {(a.eventId !== null || href) && (
+      {((!hideEventLink && a.eventId !== null) || href) && (
         <div
           data-entry-row
           className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm"
         >
-          {a.eventId !== null && (
+          {!hideEventLink && a.eventId !== null && (
             <a
               href={`/e/${a.eventId}`}
               className="font-heading text-[1.0625rem] font-semibold text-foreground underline"
