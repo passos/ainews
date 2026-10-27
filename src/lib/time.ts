@@ -210,6 +210,16 @@ export function formatUtc(ms: number): string {
   return `${UTC_FORMAT.format(ms).replace(/\p{Zs}/gu, " ")} UTC`;
 }
 
+const UTC_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC",
+  dateStyle: "medium",
+});
+
+/** "Oct 26, 2026" for epoch milliseconds: date only, UTC, no suffix. */
+export function formatUtcDate(ms: number): string {
+  return UTC_DATE_FORMAT.format(ms).replace(/\p{Zs}/gu, " ");
+}
+
 /**
  * Returns "YYYY-MM-DD" for epoch milliseconds in the given time zone.
  * Falls back to "UTC" if the time zone name is not recognized.
