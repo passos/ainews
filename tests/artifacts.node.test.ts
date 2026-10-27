@@ -737,9 +737,26 @@ describe("artifact sources (#115)", () => {
 describe("Technology product cards (#131)", () => {
   const PROVENANCE_NOTE =
     "Quotes are checked against the source text; whether a benchmark is independent is not verified.";
+  // Sources for articles 1 and 2 of the fixtures below, after SOURCES.
+  const TECH_SOURCES: ArtifactSourceView[] = [
+    ...SOURCES,
+    {
+      id: 1,
+      title: "Acme releases Orion-2",
+      publishedAt: Date.UTC(2026, 9, 20, 23, 30),
+      fetchedAt: FETCHED_AT,
+    },
+    {
+      id: 2,
+      title: "Lab tests Orion-2",
+      publishedAt: null,
+      fetchedAt: FETCHED_AT,
+    },
+  ];
+  const KIND_LABEL = />(Release|Evaluation|Correction|Adoption)</;
   const check: LaunchRealityCheck = {
     subject: "Orion-2",
-    claimant: "Acme",
+    claimant: "Acme Holdings",
     claims: [
       {
         claim: "Orion-2 scores 92 percent on CodeBench.",
@@ -780,14 +797,19 @@ describe("Technology product cards (#131)", () => {
     const { LaunchRealityCheckCard } =
       await import("../src/components/artifacts/LaunchRealityCheckCard");
     const html = renderToStaticMarkup(
-      createElement(LaunchRealityCheckCard, { check, sources: SOURCES }),
+      createElement(LaunchRealityCheckCard, { check, sources: TECH_SOURCES }),
     );
     expect(html).toContain("Launch Reality Check");
-    expect(html).toContain("Orion-2 · Claims by Acme");
+    // The subject is a grounded name; the claimant is not shown (#144 round 3).
+    expect(html).toContain('<p class="wrap-anywhere text-sm">Orion-2</p>');
+    expect(html).not.toContain("Claims by");
+    expect(html).not.toContain("Acme Holdings");
     expect(html).toContain(
       "1 of 1 claim has evidence from other outlets in these sources.",
     );
-    expect(html).toContain("Other outlets report contrary evidence");
+    expect(html).toContain(
+      "Model assessment: Other outlets report contrary evidence",
+    );
     expect(html).not.toContain("Independent evidence disputes this claim");
     expect(html).toContain(PROVENANCE_NOTE);
     expect(html).toContain("scores 92 percent on the CodeBench suite");
@@ -802,23 +824,28 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain('<li class="min-w-0 ');
     expect(html).toContain('<blockquote class="wrap-anywhere ');
     expect(html).toContain('<p class="wrap-anywhere text-sm font-bold">');
+    // The claim's source is named by its article title from the database.
+    expect(html).toContain(
+      "&quot;scores 92 percent on the CodeBench suite&quot; \u2014 quoted in Acme releases Orion-2",
+    );
     expect(html).toContain("flex-wrap");
     // ArtifactSources is the last child of the section.
     expect(html).toMatch(/<\/footer><\/section>$/);
   });
 
-  it("EvolutionTimelineCard shows dates, kinds, quotes and the three source fields", async () => {
+  it("EvolutionTimelineCard shows dates and quotes, not kinds, and the three source fields", async () => {
     const { EvolutionTimelineCard } =
       await import("../src/components/artifacts/EvolutionTimelineCard");
     const html = renderToStaticMarkup(
-      createElement(EvolutionTimelineCard, { timeline, sources: SOURCES }),
+      createElement(EvolutionTimelineCard, { timeline, sources: TECH_SOURCES }),
     );
     expect(html).toContain("Technology Evolution Timeline");
-    expect(html).toContain("2026-10-20");
-    expect(html).toContain("Date of report");
-    expect(html.match(/Date of report/g)).toHaveLength(1);
-    expect(html).toContain("Release");
-    expect(html).toContain("Evaluation");
+    // Neither model date is in its quote: the article's publish date is shown.
+    expect(html).toContain("Reported 2026-10-20");
+    expect(html).toContain("Date not stated");
+    expect(html).not.toContain("March 2026");
+    expect(html).not.toContain("Date of report");
+    expect(html).not.toMatch(KIND_LABEL);
     expect(html).toContain("Acme today released Orion-2, a model");
     expect(html).toContain('href="/a/1"');
     expect(html).toContain('href="/a/2"');
@@ -854,9 +881,15 @@ describe("Technology product cards (#131)", () => {
         sources: SOURCES,
       }),
     );
-    expect(html).toContain("Other outlets report supporting evidence");
-    expect(html).toContain("Other outlets report contrary evidence");
-    expect(html).toContain("No other outlet reports evidence");
+    expect(html).toContain(
+      "Model assessment: Other outlets report supporting evidence",
+    );
+    expect(html).toContain(
+      "Model assessment: Other outlets report contrary evidence",
+    );
+    expect(html).toContain(
+      "Model assessment: No other outlet reports evidence",
+    );
     expect(html).not.toContain("Independent evidence supports this claim");
     expect(html).not.toContain("No independent evidence in these sources");
     expect(html.match(new RegExp(PROVENANCE_NOTE, "g"))).toHaveLength(1);
@@ -906,7 +939,65 @@ describe("Technology product cards (#131)", () => {
     );
     expect(evolution).toContain("50 mW");
     expect(evolution).not.toContain("50 MW");
-    expect(evolution).toContain("2026-10-20");
+    expect(evolution).toContain('href="/a/1"');
+  });
+
+  it("LaunchRealityCheckCard omits the quoted-in title when the article is not a source", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const html = renderToStaticMarkup(
+      createElement(LaunchRealityCheckCard, { check, sources: SOURCES }),
+    );
+    expect(html).toContain("scores 92 percent on the CodeBench suite");
+    expect(html).not.toContain("quoted in");
+  });
+
+  it("EvolutionTimelineCard shows a model date only when its quote states it in a date form", async () => {
+    const { EvolutionTimelineCard } =
+      await import("../src/components/artifacts/EvolutionTimelineCard");
+    const base = timeline.entries[0];
+    const at = (articleId: number, quote: string) => ({ articleId, quote });
+    const dates: [string, { articleId: number; quote: string }][] = [
+      ["March 2026", at(1, "In March 2026 Acme shipped Orion-1")],
+      ["October 3, 2026", at(1, "On October 3, 2026 Acme shipped Orion-2")],
+      ["2026-03", at(1, "The 2026-03 build of Orion-1 shipped")],
+      // Date form, but not in the quote.
+      ["2025", at(1, "Acme today released Orion-2, a model")],
+      // In the quote, but not a date form.
+      ["RivalCo", at(1, "RivalCo shipped a rival model to Orion-2")],
+      // In the quote only inside a longer number.
+      ["2026", at(1, "The 12026 build of Orion-1 shipped")],
+      ["Not stated in sources", at(1, "Acme today released Orion-2, a model")],
+      // The article has no publish date; then it is not a source at all.
+      ["2025", at(2, "Orion-2 scored 81 percent on CodeBench")],
+    ];
+    const html = renderToStaticMarkup(
+      createElement(EvolutionTimelineCard, {
+        timeline: {
+          entries: [
+            ...dates.map(([date, source]) => ({ ...base, date, source })),
+            { ...base, date: "2025", source: at(99, base.source.quote) },
+          ],
+        },
+        sources: TECH_SOURCES,
+      }),
+    );
+    // Entries only: the Source articles list after </ol> has its own <li>.
+    const items = html.slice(0, html.indexOf("</ol>")).split("<li ").slice(1);
+    expect(items).toHaveLength(9);
+    const shown = items.map((li) => /<span>([^<]*)<\/span>/.exec(li)?.[1]);
+    expect(shown).toEqual([
+      "March 2026",
+      "October 3, 2026",
+      "2026-03",
+      "Reported 2026-10-20",
+      "Reported 2026-10-20",
+      "Reported 2026-10-20",
+      "Reported 2026-10-20",
+      "Date not stated",
+      "Date not stated",
+    ]);
+    expect(html).not.toMatch(KIND_LABEL);
   });
 
   it("Technology product cards render nothing without sources", async () => {

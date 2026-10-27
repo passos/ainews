@@ -507,6 +507,64 @@ describe("Technology product grounding (#144 review)", () => {
     expect(timelineQuote(end, MATERIAL)).not.toBeNull();
   });
 
+  // #144 round 3: "." or "," between two digits is part of one number.
+  it("rejects a quote that starts inside a decimal: 50 mW in 150.50 mW", () => {
+    const body = `${BODY_A} The chip draws 150.50 mW of power at idle.`;
+    const q = "50 mW of power at idle";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("rejects a quote that starts inside a grouped number: 200 in 1,200", () => {
+    const body = `${BODY_A} Acme sold 1,200 units of the chip in March.`;
+    const q = "200 units of the chip in March";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("accepts a digit-led quote after a dot that does not follow a digit", () => {
+    const body = `${BODY_A} That is the end.50 mW of power at idle is the draw.`;
+    const q = "50 mW of power at idle";
+    expect(checkQuote(q, withBody(body))).not.toBeNull();
+    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+  });
+
+  it("rejects a quote that ends inside a decimal: costs 1 in costs 1.5", () => {
+    const body = `${BODY_A} The new chip costs 1.5 million dollars.`;
+    const q = "The new chip costs 1";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("rejects a quote that ends inside a grouped number: sold 1 in sold 1,200", () => {
+    const body = `${BODY_A} This quarter the vendor sold 1,200 units.`;
+    const q = "This quarter the vendor sold 1";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("accepts a digit-ended quote before a sentence-ending dot", () => {
+    const body = `${BODY_A} The benchmark score rose to 50. Then it fell.`;
+    const q = "The benchmark score rose to 50";
+    expect(checkQuote(q, withBody(body))).not.toBeNull();
+    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+  });
+
+  // #144 round 3: a quote edge that is punctuation needs no word boundary.
+  it("accepts a quote that ends with punctuation directly before a word", () => {
+    const body = `${BODY_A} The chip draws 50 mW.Next comes Orion-3.`;
+    const q = "The chip draws 50 mW.";
+    expect(checkQuote(q, withBody(body))).not.toBeNull();
+    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+  });
+
+  it("accepts a quote that starts with an opening quote mark directly after a word", () => {
+    const body = `${BODY_A} Acme said\u201cOrion-2 is the fastest model we have built\u201d today.`;
+    const q = "\u201cOrion-2 is the fastest model we have built";
+    expect(checkQuote(q, withBody(body))).not.toBeNull();
+    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+  });
+
   it("accepts a valid later occurrence after a non-boundary one", () => {
     const body = `${BODY_A} The 150 mW part idles too. The 50 mW part idles too.`;
     const q = "50 mW part idles too.";
@@ -544,6 +602,17 @@ describe("Technology product grounding (#144 review)", () => {
     ["", ""],
     // Two labels only: here "www." is what makes the keys equal.
     ["vendor", "www.vendor"],
+    // URL hostname normalisation (#144 round 3): port, IDN, IP aliases.
+    ["vendor.com:443", "vendor.com"],
+    ["vendor.com..", "vendor.com"],
+    ["b\u00fccher.de", "xn--bcher-kva.de"],
+    ["0x7f.1", "127.0.0.1"],
+    ["0x7f000001", "127.0.0.1"],
+    ["[::1]", "[0:0:0:0:0:0:0:1]"],
+    ["[2001:db8::1]", "[2001:0db8:0000:0000:0000:0000:0000:0001]"],
+    // Not a host name: the URL parser throws, so the key is empty.
+    ["a b.com", "openeval.test"],
+    [".", "openeval.test"],
   ])(
     "drops evidence when the domain keys of %j and %j are equal or empty",
     (claimDomain, evidenceDomain) => {
@@ -558,6 +627,9 @@ describe("Technology product grounding (#144 review)", () => {
     ["vendor.com", "openeval.test"],
     ["vendor.com", "othervendor.com"],
     ["news.vendor.com", "vendor.org"],
+    // An IP literal is its own key, not its last two labels.
+    ["10.0.0.1", "192.168.0.1"],
+    ["[2001:db8::1]", "[2001:db8::2]"],
   ])("keeps evidence from %j against %j", (claimDomain, evidenceDomain) => {
     const out = domains(claimDomain, evidenceDomain);
     expect(out?.claims[0].verdict).toBe("independent_dispute");
