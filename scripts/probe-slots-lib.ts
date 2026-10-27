@@ -245,6 +245,7 @@ function artifactMaterial(
         publishedAt: Date.parse(fixture.published_at),
         summary: fixture.summary,
         bodyText: body(fixture),
+        sourceBodyText: body(fixture),
       },
     ],
     verifiedClaims: [

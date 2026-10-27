@@ -73,6 +73,12 @@ export interface ArtifactArticleMaterial {
   publishedAt: number | null;
   summary: string | null;
   bodyText?: string | null;
+  /**
+   * The stored source body only, or null when R2 has none. `bodyText` falls
+   * back to the summary; quotes are checked against this field instead.
+   * Prompts do not read it, so request bytes do not depend on it.
+   */
+  sourceBodyText: string | null;
 }
 
 export interface ArtifactVerifiedClaim {
@@ -1301,8 +1307,9 @@ export function parseEarningsDecoderOutput(
 // Technology products: Launch Reality Check, Technology Evolution Timeline (N§3)
 // -----------------------------------------------------------------------------
 
+/** Collapses whitespace only: case is kept, so "50 MW" does not match "50 mW". */
 function normalizeSourceText(text: string): string {
-  return text.replace(/\s+/g, " ").trim().toLowerCase();
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** True when `needle` is not empty and occurs in `text` after normalising both. */
@@ -1322,12 +1329,23 @@ function quoteIsGrounded(
   // The schema's 20-character minimum applies to the text, not to padding.
   if (normalizeSourceText(q.quote).length < 20) return false;
   const article = material.articles.find((a) => a.id === q.articleId);
-  return sourceTextContains(article?.bodyText, q.quote);
+  return sourceTextContains(article?.sourceBodyText, q.quote);
+}
+
+function articleDomain(
+  material: ArtifactEventMaterial,
+  articleId: number,
+): string | undefined {
+  return material.articles
+    .find((a) => a.id === articleId)
+    ?.sourceDomain.toLowerCase();
 }
 
 function groundedName(material: ArtifactEventMaterial, value: string): string {
   if (value === NOT_STATED_IN_SOURCES) return value;
-  return material.articles.some((a) => sourceTextContains(a.bodyText, value))
+  return material.articles.some((a) =>
+    sourceTextContains(a.sourceBodyText, value),
+  )
     ? value
     : NOT_STATED_IN_SOURCES;
 }
@@ -1402,12 +1420,17 @@ export function parseLaunchRealityCheckOutput(
   const claims = raw.data.claims.flatMap((c) => {
     if (!quoteIsGrounded(material, c.claimQuote)) return [];
     const claimText = normalizeSourceText(c.claimQuote.quote);
+    const claimDomain = articleDomain(material, c.claimQuote.articleId);
+    // Evidence is independent only when it comes from another article on
+    // another domain: the claimant's own pages cannot confirm the claim.
     const evidence =
       c.verdict === "no_independent_evidence"
         ? []
         : c.independentEvidence.filter(
             (e) =>
               quoteIsGrounded(material, e) &&
+              e.articleId !== c.claimQuote.articleId &&
+              articleDomain(material, e.articleId) !== claimDomain &&
               normalizeSourceText(e.quote) !== claimText,
           );
     const verdict =
@@ -1499,7 +1522,7 @@ export function parseEvolutionTimelineOutput(
     let date: string = NOT_STATED_IN_SOURCES;
     if (e.dateSource === "report_published") {
       if (art?.publishedAt != null) date = localDate(art.publishedAt, "UTC");
-    } else if (sourceTextContains(art?.bodyText, e.date)) {
+    } else if (sourceTextContains(art?.sourceBodyText, e.date)) {
       date = e.date;
     }
     return [{ ...e, date }];

@@ -329,6 +329,7 @@ export async function generateEventArtifacts(
 
   // 3. Fetch body text from R2, or fall back to the summary when the object
   // is missing. An R2 read error propagates: no marker, so the cron retries.
+  // sourceBodyText keeps only the R2 body: quotes are checked against it.
   const articleMaterials: ArtifactArticleMaterial[] = await Promise.all(
     articleRows.map(async (r) => {
       let bodyText: string | null = null;
@@ -346,6 +347,7 @@ export async function generateEventArtifacts(
         publishedAt: r.published_at,
         summary: r.summary,
         bodyText: bodyText || r.summary,
+        sourceBodyText: bodyText || null,
       };
     }),
   );
