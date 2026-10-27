@@ -9,7 +9,8 @@ export const ASK_COPY = {
   intro:
     "Ask one question. The answer uses only the approved reports on this page.",
   researching: "Researching approved sources…",
-  answerLabel: "Model answer — check it against the quotes below",
+  answerLabel: "Model answer · not editor-reviewed",
+  answerNote: "Check it against the quoted sources below.",
   verified: "Verified quotes",
   unverified: "Could not verify",
   refusal: "We could not answer this from approved sources.",

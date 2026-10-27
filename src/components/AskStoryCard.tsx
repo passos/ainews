@@ -25,6 +25,7 @@ function AnswerBlock({ answer }: { answer: StoryAnswer }) {
       ) : (
         <div className="flex flex-col gap-1 border-l-2 border-border pl-3">
           <h3 className={LABEL}>{ASK_COPY.answerLabel}</h3>
+          <p className="text-xs text-muted-foreground">{ASK_COPY.answerNote}</p>
           <p className="whitespace-pre-line text-sm leading-relaxed">
             {answer.answer}
           </p>
