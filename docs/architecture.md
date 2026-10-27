@@ -125,7 +125,7 @@ tests/
 
 每个写入口都满足：
 
-1. 写入用 `method: "POST"` 的 server function，handler 里再检查一次请求方法是 `POST`（不依赖框架拒绝 GET）。请求经过 `src/server/edge.ts` 的 Origin 检查（对 GET、HEAD、OPTIONS 以外的方法生效）。私有 RSS 是 GET：它唯一的写是 `last_read_at`，只延长令牌持有者自己那一行的寿命。
+1. 写入用 `method: "POST"` 的 server function，handler 里再检查一次请求方法是 `POST`（不依赖框架拒绝 GET）。请求经过 `src/server/edge.ts` 的 Origin 检查（对 GET、HEAD、OPTIONS 以外的方法生效）。Origin 检查之后，`handleFetch` 对 `/_serverFn/*` 的非安全方法请求（路径判断与 `handleFetch` 里已有的 `normalizePath(pathname)` 以 `/_serverfn` 开头相同）在解析之前检查请求体大小，这个上限对所有 server function 生效，不只是本表的入口：上限 `SERVER_FN_MAX_BODY_BYTES = 65536`（64 KB；后台有上限的输入字符串最长 1000 个字符，板块和信源配置 JSON 远小于 64 KB）；`Content-Length` 大于上限 → 413；`Content-Length` 不是合法的非负整数 → 400；`Content-Length` 缺失时不返回 411，而是按字节计数读 `request.body`，超过上限就取消读取并返回 413，没超过就把读到的字节用 `new Request(request, { body: bytes })` 交给 handler（浏览器或 HTTP/2 请求可能不带这个头，不能因此让所有后台写失败）。这两种拒绝的写法同 `forbidden()`：纯文本正文，413 是 `payload_too_large`，400 是 `bad_content_length`（这两个字符串是本契约定的），带安全头和 `no-store`，不调用 handler。GET 的 `/_serverFn/*` 和 `/_serverFn/*` 以外的 POST 不检查。检查必须放在 edge：`@tanstack/start-server-core` 的 `server-functions-handler.js` 里，`handleServerAction` 先解析请求体（JSON 用 `await request.json()`，表单用 `request.formData()`），再调用 `action(...)`；函数中间件和 handler 都在 `action` 里运行，所以后台的 Access 中间件也是在解析之后才拒绝。框架自己只限制 GET 的 `payload` 查询参数（`MAX_PAYLOAD_SIZE = 1e6`），不限制 POST 请求体。私有 RSS 是 GET：它唯一的写是 `last_read_at`，只延长令牌持有者自己那一行的寿命。
 2. 输入用 zod 严格 schema（`.strict()`）校验，未知字段拒绝；长度和字符集写在第 6 节「读者 watch」。
 3. 由自己的开关控制，开关只认 `"true"`。
 4. 网络地址只取请求头 `cf-connecting-ip`，不读 `X-Forwarded-For` 或请求体；IPv4 取完整地址，IPv6 取前 64 位。库里只存 `sha256hex(IP_HASH_SALT + ":" + 用途 + ":" + UTC 日期 + ":" + 网络地址)`（假名化：持有盐的人可以对已知地址重算出同一个哈希），原始地址不写库、应用代码不写日志、不返回客户端。`IP_HASH_SALT` 缺失或为空就拒绝写入，不退回不加盐的哈希。
@@ -498,7 +498,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 - 撤销：`revokeReaderWatch({ token })`（POST）把该行写成停用。撤销不退还建立额度。
 - 私有 RSS 的响应头：`Cache-Control: private, no-store`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex, nofollow`。私有 RSS 不出现在公开页面、公开 RSS 和页面的 loader 数据里。
 
-**输入**：请求体不超过 4 KB（4,096 字节），在解析之前检查：`Content-Length` 缺失时返回 411 `length_required`，大于 4,096 时返回 413 `payload_too_large`，都不写库。解析之后、规范化之前，先查每个字符串的原始长度：`question` 不超过 400 个字符，`criteria` 不超过 600，每个关键词不超过 80；超出同样返回 413 `payload_too_large`，不写库。然后做 NFC 规范化、去掉首尾空白、把连续空白合成一个空格，再用 zod `.strict()` 校验。
+**输入**：请求体大小只由第 3 节「公开写入口」第 1 条的全局上限在解析之前检查（`src/server/edge.ts` 的 `SERVER_FN_MAX_BODY_BYTES = 65536`，对所有 `/_serverFn/*` 的非安全方法请求生效），读者写入口没有单独的请求体上限。解析之后、规范化之前，先查每个字符串的原始长度：`question` 不超过 400 个字符，`criteria` 不超过 600，每个关键词不超过 80；超出时返回 413 `payload_too_large`，不写库。这些原始长度上限只对读者写入口生效，后台和其他 server function 不受影响。然后做 NFC 规范化、去掉首尾空白、把连续空白合成一个空格，再用 zod `.strict()` 校验。
 
 | 字段 | 规则 |
 |---|---|
