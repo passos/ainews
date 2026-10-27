@@ -23,6 +23,7 @@ describe("tier table", () => {
       watch: 4,
       digest: 5,
       discover: 5,
+      readerWatch: 5,
     });
   });
 

@@ -170,4 +170,24 @@ describe("runScheduled", () => {
       { kind: "body", articleId: stuck },
     ]);
   });
+
+  it("pauses a reader watch never read for more than 3 days (#132 sweep)", async () => {
+    const slug = `r-entry-${Math.random().toString(16).slice(2)}`;
+    const id = (await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at, owner_kind, token_hash)
+       VALUES (?1, 'Q?', 'C', '["x"]', NULL, 'active', ?2, ?2, 'reader', ?3) RETURNING id`,
+    )
+      .bind(slug, NOW - 3 * DAY - MIN, `hash-${slug}`)
+      .first<{ id: number }>())!.id;
+
+    await runScheduled(controller(NOW), pipelineEnv(fakeQueue(), ON), ctx);
+
+    expect(
+      await env.DB.prepare(
+        `SELECT status, disabled_at FROM watches WHERE id = ?1`,
+      )
+        .bind(id)
+        .first(),
+    ).toEqual({ status: "paused", disabled_at: NOW });
+  });
 });
