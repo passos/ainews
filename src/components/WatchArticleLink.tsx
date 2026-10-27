@@ -14,7 +14,7 @@ export function WatchArticleLink({
       </span>
       <a
         href={`/a/${art.id}`}
-        className="text-sec-ink underline hover:text-primary truncate"
+        className="text-sec-ink underline hover:text-primary wrap-anywhere"
       >
         {art.title}
       </a>
