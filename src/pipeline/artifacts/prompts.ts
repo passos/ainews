@@ -1458,7 +1458,8 @@ export function parseLaunchRealityCheckOutput(
               claimDomain !== "" &&
               evidenceDomain !== "" &&
               evidenceDomain !== claimDomain &&
-              normalizeSourceText(e.quote) !== claimText
+              normalizeSourceText(e.quote) !== claimText &&
+              quote.quote !== claimQuote.quote
               ? [quote]
               : [];
           });
