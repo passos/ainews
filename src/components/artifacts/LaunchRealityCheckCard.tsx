@@ -5,6 +5,7 @@ import type {
 } from "../../lib/artifacts/types";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
+import { SectionHead } from "../SectionHead";
 
 // The verdict is the model's reading of the evidence; code cannot verify it.
 const VERDICT_LABELS: Record<LaunchVerdict, string> = {
@@ -31,15 +32,15 @@ export function LaunchRealityCheckCard({
       aria-label="Launch Reality Check"
       className="min-w-0 border-t border-border pt-6"
     >
-      <header className="mb-3 border-b border-border pb-2">
-        <h3 className="text-xs font-bold text-muted-foreground">
-          Launch Reality Check
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          {k} of {n} {n === 1 ? "claim has" : "claims have"} evidence from other
-          outlets in these sources.
-        </p>
-      </header>
+      <SectionHead
+        title="Launch check"
+        note={
+          <>
+            {k} of {n} {n === 1 ? "claim has" : "claims have"} evidence from
+            other outlets in these sources.
+          </>
+        }
+      />
       <ol className="flex flex-col gap-3">
         {check.claims.map((c, i) => {
           const title = sources.find(

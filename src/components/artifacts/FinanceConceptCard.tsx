@@ -1,4 +1,5 @@
 import type { FinanceConceptExplainer } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function FinanceConceptCard({
   concept,
@@ -10,14 +11,10 @@ export function FinanceConceptCard({
       aria-label="Finance Concepts for Learners"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          💡 Finance Concepts for Learners
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Core Financial Principles
-        </span>
-      </header>
+      <SectionHead
+        title="Finance concepts"
+        note="Core financial principles for learners"
+      />
 
       <div className="flex flex-col gap-4">
         <div>

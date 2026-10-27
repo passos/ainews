@@ -25,6 +25,7 @@ import { EarningsDecoderCard } from "../../components/artifacts/EarningsDecoderC
 import { LaunchRealityCheckCard } from "../../components/artifacts/LaunchRealityCheckCard";
 import { EvolutionTimelineCard } from "../../components/artifacts/EvolutionTimelineCard";
 import { Disclaimer } from "../../components/Disclaimer";
+import { SectionHead } from "../../components/SectionHead";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import {
   getEvent,
@@ -36,10 +37,13 @@ import type {
   EventSourceView,
   EventView,
 } from "../../server/publication/events";
+import {
+  eventSectionFlags,
+  hasTier,
+} from "../../server/publication/event-sections";
 import { askAboutStory, getStoryAnswer } from "../../server/reader-ask/api";
-import { ARTIFACT_AUDIENCES } from "../../lib/artifacts/types";
-import { FINANCE_SLUG } from "../../lib/sections";
 import { SITE_NAME } from "../../lib/site";
+import { cn } from "../../lib/utils";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -118,6 +122,7 @@ interface PagePart {
 
 // The story timeline always renders, after the sources line.
 const TIMELINE_PART = { id: "timeline", label: "Timeline", show: true };
+const CORRECTIONS_PART = { id: "corrections", label: "Corrections" };
 
 export function EventPageView({
   data,
@@ -149,15 +154,15 @@ export function EventPageView({
   // `show` mirrors each card's own empty check, so the anchor nav never
   // links to a section that is not on the page.
   const hasSources = artifactSources.length > 0;
-  const hasTier = (byTier: Partial<Record<string, unknown>> | undefined) =>
-    ARTIFACT_AUDIENCES.some((tier) => !!byTier?.[tier]);
+  // Brief, Evidence, Explain and Ask: one definition, shared with /a/$id.
+  const flags = eventSectionFlags(data, hasSources, !!ask);
 
   // In page order. Each part sits in its own anchor target.
   const parts: PagePart[] = [
     {
       id: "brief",
-      label: "Brief",
-      show: !!artifacts?.brief && hasSources,
+      label: "Story brief",
+      show: flags.brief,
       render: () =>
         artifacts?.brief && (
           <StoryBriefCard
@@ -170,20 +175,19 @@ export function EventPageView({
     {
       id: "ask",
       label: "Ask",
-      // v1 has no Ask for Finance (#133).
-      show: !!ask && section.slug !== FINANCE_SLUG,
+      show: flags.ask,
       render: () => ask && <AskStoryCard eventId={data.id} {...ask} />,
     },
     {
       id: "evidence",
       label: "Evidence",
-      show: !!evidence && evidence.claims.length > 0,
+      show: flags.evidenceClaims > 0,
       render: () => evidence && <InspectEvidencePanel evidence={evidence} />,
     },
     {
       id: "explain",
       label: "Explain",
-      show: hasTier(artifacts?.explanations) && hasSources,
+      show: flags.explain,
       render: () =>
         artifacts && (
           <AudienceExplainCard
@@ -353,8 +357,11 @@ export function EventPageView({
         aria-label="On this page"
         className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b bg-background py-2 text-sm sm:sticky sm:top-0 sm:z-10"
       >
-        <span className="text-muted-foreground">On this page</span>
-        {[...parts, TIMELINE_PART]
+        {[
+          ...parts,
+          { ...CORRECTIONS_PART, show: corrections.length > 0 },
+          TIMELINE_PART,
+        ]
           .filter((part) => part.show)
           .map((part) => (
             <a
@@ -371,23 +378,38 @@ export function EventPageView({
 
       {parts
         .filter((part) => part.show)
-        .map((part) => (
-          <div key={part.id} id={part.id} className="min-w-0 scroll-mt-14">
+        .map((part, i) => (
+          <div
+            key={part.id}
+            id={part.id}
+            // The nav has the one hairline; the first section adds no second.
+            className={cn(
+              "min-w-0 scroll-mt-14",
+              i === 0 && "[&>*]:border-t-0!",
+            )}
+          >
             {part.render()}
           </div>
         ))}
 
       {corrections.length > 0 && (
-        <div className="border border-destructive p-3">
-          <h2 className="text-xs font-bold text-destructive">Correction</h2>
-          <div className="mt-1 space-y-1">
+        <section
+          id={CORRECTIONS_PART.id}
+          aria-label="Corrections"
+          className="scroll-mt-14 border-t border-border pt-6"
+        >
+          <SectionHead
+            title="Corrections"
+            note="Changes made after publication"
+          />
+          <div className="space-y-1 border border-destructive p-3">
             {corrections.map((corr, idx) => (
               <p key={idx} className="text-sm leading-snug">
                 {corr}
               </p>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       <Suspense fallback={null}>
@@ -417,7 +439,10 @@ export function EventPageView({
         aria-label="Story timeline"
         className="flex scroll-mt-14 flex-col gap-4 border-t border-border pt-6"
       >
-        <h2 className="text-xs font-bold text-muted-foreground">Timeline</h2>
+        <SectionHead
+          title="Timeline"
+          note="The reports behind this story, in the order they arrived"
+        />
         <div className="flex flex-col gap-5">
           {timelineRevisions && timelineRevisions.length > 0
             ? timelineRevisions.map((revBlock, revIdx) => (
@@ -432,7 +457,7 @@ export function EventPageView({
                       </span>
                       {revIdx === 0 && (
                         <span className="flex items-center gap-1 text-[0.68rem] font-bold text-muted-foreground">
-                          ★ First seen
+                          First seen
                         </span>
                       )}
                     </div>
@@ -442,7 +467,7 @@ export function EventPageView({
                     <div className="flex flex-col gap-1.5 bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
                       <div>
                         <span className="font-bold text-muted-foreground mr-1">
-                          ★ What&apos;s new in this revision:
+                          What&apos;s new in this revision:
                         </span>
                         <span>{revBlock.diff.summary}</span>
                       </div>
@@ -471,7 +496,7 @@ export function EventPageView({
                           (a.evidence.includes("preprint") ||
                             a.evidence.includes("primary_source")) && (
                             <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
-                              <span>★ Original source</span>
+                              <span>Original source</span>
                             </div>
                           )}
                         <ArticleCard article={a} />
@@ -484,7 +509,7 @@ export function EventPageView({
                 <div key={a.id} className="flex flex-col gap-1">
                   {idx === 0 && (
                     <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
-                      <span>★ First seen</span>
+                      <span>First seen</span>
                     </div>
                   )}
                   <ArticleCard article={a} />

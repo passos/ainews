@@ -2,6 +2,7 @@ import type { TechnologyEvolutionTimeline } from "../../lib/artifacts/types";
 import { localDate } from "../../lib/time";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
+import { SectionHead } from "../SectionHead";
 
 export function EvolutionTimelineCard({
   timeline,
@@ -30,15 +31,10 @@ export function EvolutionTimelineCard({
       aria-label="Technology Evolution Timeline"
       className="min-w-0 border-t border-border pt-6"
     >
-      <header className="mb-3 border-b border-border pb-2">
-        <h3 className="text-xs font-bold text-muted-foreground">
-          Technology Evolution Timeline
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Releases, evaluations, corrections and adoption milestones reported in
-          these sources.
-        </p>
-      </header>
+      <SectionHead
+        title="Evolution timeline"
+        note="Releases, evaluations, corrections and adoption milestones reported in these sources."
+      />
       <ol className="flex flex-col gap-3">
         {entries.map(({ e, day }, i) => (
           <li key={i} className="min-w-0 border-l-2 border-border pl-3">

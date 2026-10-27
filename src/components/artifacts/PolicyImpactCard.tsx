@@ -1,4 +1,5 @@
 import type { PolicyImpactExplorer } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
   return (
@@ -6,14 +7,7 @@ export function PolicyImpactCard({ policy }: { policy: PolicyImpactExplorer }) {
       aria-label="Policy Impact Explorer"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          🏛 Policy Impact Explorer
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Education Policy Analysis
-        </span>
-      </header>
+      <SectionHead title="Policy impact" note="Education policy analysis" />
 
       <div className="flex flex-col gap-4">
         <div>

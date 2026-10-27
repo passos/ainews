@@ -1,4 +1,5 @@
 import type { ResearchPaperDecoder } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function PaperDecoderCard({
   decoder,
@@ -10,14 +11,10 @@ export function PaperDecoderCard({
       aria-label="Research Paper Decoder"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          🔬 Research Paper Decoder
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Hypothesis · Method · Findings · Limitations · Applications
-        </span>
-      </header>
+      <SectionHead
+        title="Paper decoder"
+        note="Hypothesis, method, findings, limitations, applications"
+      />
 
       <div className="flex flex-col gap-3.5">
         <div className="flex flex-col gap-1 border-l-2 border-border-strong pl-3">

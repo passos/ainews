@@ -3,13 +3,12 @@ import { ASK_COPY, pollAnswer, submitAsk, type AskState } from "../lib/ask";
 import type { StoryAnswer } from "../server/reader-ask/ask";
 import type { AnswerInput, AskInput } from "../server/reader-ask/input";
 import { Button } from "./ui/button";
+import { SectionHead } from "./SectionHead";
 
-const LABEL =
-  "font-mono text-xs font-bold uppercase tracking-wider text-muted-foreground";
+const LABEL = "font-mono text-xs font-bold text-muted-foreground";
 const CONTROL =
   "w-full rounded-sm border-2 bg-background px-2 py-1.5 text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
-const BUTTON =
-  "rounded-sm border-2 font-mono text-xs font-bold uppercase tracking-wider";
+const BUTTON = "rounded-sm border-2 font-mono text-xs font-bold";
 
 export interface AskStoryFns {
   onAsk: (input: AskInput) => Promise<unknown>;
@@ -94,11 +93,7 @@ export function AskStoryView({
       aria-label={ASK_COPY.title}
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 border-b border-border pb-2">
-        <h2 className="font-mono text-xs font-bold uppercase tracking-widest">
-          {ASK_COPY.title}
-        </h2>
-      </header>
+      <SectionHead title={ASK_COPY.title} note={ASK_COPY.note} />
       {/* method="post": a submit before hydration does not put the question in the URL. */}
       <form method="post" onSubmit={onSubmit} className="flex flex-col gap-2">
         <label htmlFor="ask-question" className="text-xs text-muted-foreground">

@@ -1,4 +1,5 @@
 import type { IndustryImpactReport } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function IndustryImpactCard({
   report,
@@ -10,14 +11,10 @@ export function IndustryImpactCard({
       aria-label="Industry Impact Report"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          🏢 Industry Impact Report
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Cross-Sector Implications & Evidence Verification
-        </span>
-      </header>
+      <SectionHead
+        title="Industry impact"
+        note="Cross-sector implications and evidence verification"
+      />
 
       <div className="flex flex-col gap-4">
         <div>

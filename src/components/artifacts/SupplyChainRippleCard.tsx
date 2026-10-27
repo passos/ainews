@@ -1,4 +1,5 @@
 import type { SupplyChainRippleMap } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function SupplyChainRippleCard({
   ripple,
@@ -10,20 +11,14 @@ export function SupplyChainRippleCard({
       aria-label="Supply-Chain Ripple Map"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center justify-between border-b border-border pb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-foreground">
-            ⛓️ Supply-Chain Ripple Map
-          </span>
-          <span className="text-[0.68rem] text-muted-foreground">
-            Upstream & Downstream Ramification Modeling
-          </span>
-        </div>
-      </header>
+      <SectionHead
+        title="Supply chain"
+        note="Upstream and downstream ripple modelling"
+      />
 
       {/* Prominent Hypothesis Banner (Newsren §3 mandate) */}
       <div className="mb-4 border border-dashed border-border-strong p-2.5 text-xs text-foreground">
-        <span className="font-bold">⚠️ Working hypothesis:</span>{" "}
+        <span className="font-bold">Working hypothesis:</span>{" "}
         <span className="leading-relaxed">
           Upstream and downstream ripple effects in the supply chain come from
           an inferred model and transmission hypotheses, not from audited facts.
@@ -44,7 +39,7 @@ export function SupplyChainRippleCard({
           {/* Upstream Ripples */}
           <div className="border border-border/80 bg-muted/15 p-3 text-xs">
             <h5 className="font-bold text-muted-foreground">
-              ⬆️ Upstream Dependencies & Suppliers
+              Upstream Dependencies & Suppliers
             </h5>
             <div className="mt-2 space-y-2.5">
               {ripple.upstreamRipples.map((item, idx) => (
@@ -77,7 +72,7 @@ export function SupplyChainRippleCard({
           {/* Downstream Ripples */}
           <div className="border border-border/80 bg-muted/15 p-3 text-xs">
             <h5 className="font-bold text-muted-foreground">
-              ⬇️ Downstream Integrators & End-Markets
+              Downstream Integrators & End-Markets
             </h5>
             <div className="mt-2 space-y-2.5">
               {ripple.downstreamRipples.map((item, idx) => (

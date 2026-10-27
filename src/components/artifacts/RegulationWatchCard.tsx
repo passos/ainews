@@ -1,4 +1,5 @@
 import type { RegulationWatch } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function RegulationWatchCard({ watch }: { watch: RegulationWatch }) {
   return (
@@ -6,19 +7,14 @@ export function RegulationWatchCard({ watch }: { watch: RegulationWatch }) {
       aria-label="Regulation Watch"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-muted-foreground">
-            📜 Regulation Watch
-          </span>
-          <span className="text-[0.68rem] text-muted-foreground">
-            Compliance & Regulatory Intelligence
-          </span>
-        </div>
+      <SectionHead
+        title="Regulation watch"
+        note="Compliance and regulatory intelligence"
+      >
         <span className="border border-border-strong px-2 py-0.5 text-[0.68rem] font-bold text-muted-foreground">
           {watch.regulator}
         </span>
-      </header>
+      </SectionHead>
 
       <div className="flex flex-col gap-4">
         <div>

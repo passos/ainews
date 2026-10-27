@@ -6,6 +6,7 @@ import type { AskInput } from "../server/reader-ask/input";
 
 export const ASK_COPY = {
   title: "Ask about this story",
+  note: "Answered from the approved reports on this page, with quotes.",
   intro:
     "Ask one question. The answer uses only the approved reports on this page.",
   researching: "Researching approved sources…",

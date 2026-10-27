@@ -1,4 +1,5 @@
 import type { SkillsCareerTrends } from "../../lib/artifacts/types";
+import { SectionHead } from "../SectionHead";
 
 export function SkillsCareerTrendsCard({
   trends,
@@ -10,14 +11,10 @@ export function SkillsCareerTrendsCard({
       aria-label="Skills and Career Trends"
       className="border-t border-border pt-6"
     >
-      <header className="mb-3 flex items-center gap-2 border-b border-border pb-2">
-        <span className="text-xs font-bold text-muted-foreground">
-          📈 Skills and Career Trends
-        </span>
-        <span className="text-[0.68rem] text-muted-foreground">
-          Workforce & Occupational Evolution
-        </span>
-      </header>
+      <SectionHead
+        title="Skills and careers"
+        note="Workforce and occupational evolution"
+      />
 
       <div className="flex flex-col gap-4">
         <div>
