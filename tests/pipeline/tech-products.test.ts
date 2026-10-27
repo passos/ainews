@@ -458,6 +458,171 @@ describe("Technology product grounding (#131 review)", () => {
   });
 });
 
+describe("Technology product grounding (#144 review)", () => {
+  /** MATERIAL with article 1's source body replaced. */
+  function withBody(body: string): ArtifactEventMaterial {
+    return withArticles([], (a) =>
+      a.id === 1 ? { bodyText: body, sourceBodyText: body } : {},
+    );
+  }
+  function checkQuote(q: string, material: ArtifactEventMaterial) {
+    return parseLaunchRealityCheckOutput(
+      JSON.stringify(
+        check({ claims: [claim({ claimQuote: { articleId: 1, quote: q } })] }),
+      ),
+      material,
+    );
+  }
+  function timelineQuote(q: string, material: ArtifactEventMaterial) {
+    return parseEvolutionTimelineOutput(
+      JSON.stringify({
+        entries: [entry({ source: { articleId: 1, quote: q } }), EVAL_ENTRY],
+      }),
+      material,
+    );
+  }
+
+  it("rejects a quote that starts inside a number: 50 mW in 150 mW", () => {
+    const body = `${BODY_A} The Orion-2 chip draws 150 mW of power at idle.`;
+    const q = "50 mW of power at idle";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("rejects a quote that ends inside a word: 50 MW in 50 MWh", () => {
+    const body = `${BODY_A} The new plant stores 50 MWh of energy.`;
+    const q = "The new plant stores 50 MW";
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+  });
+
+  it("accepts a quote at the start and at the end of the body", () => {
+    const start = "Acme today released Orion-2, a model";
+    const end = "In March 2026 Acme shipped Orion-1.";
+    expect(BODY_A.startsWith(start)).toBe(true);
+    expect(BODY_A.endsWith(end)).toBe(true);
+    expect(checkQuote(start, MATERIAL)).not.toBeNull();
+    expect(checkQuote(end, MATERIAL)).not.toBeNull();
+    expect(timelineQuote(start, MATERIAL)).not.toBeNull();
+    expect(timelineQuote(end, MATERIAL)).not.toBeNull();
+  });
+
+  it("accepts a valid later occurrence after a non-boundary one", () => {
+    const body = `${BODY_A} The 150 mW part idles too. The 50 mW part idles too.`;
+    const q = "50 mW part idles too.";
+    expect(checkQuote(q, withBody(body))).not.toBeNull();
+    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+  });
+
+  it("matches names and stated dates at word boundaries", () => {
+    const out = parseCheck(check({ subject: "Orion-2", claimant: "Acm" }));
+    expect(out?.subject).toBe("Orion-2");
+    expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
+    const timeline = parseTimeline({
+      entries: [entry({ date: "March 202" }), EVAL_ENTRY],
+    });
+    expect(timeline?.entries[0].date).toBe(NOT_STATED_IN_SOURCES);
+  });
+
+  /** The default check with article 1 on `claim` and article 2 on `evidence`. */
+  function domains(claimDomain: string, evidenceDomain: string) {
+    return parseLaunchRealityCheckOutput(
+      JSON.stringify(check()),
+      withArticles([], (a) => ({
+        sourceDomain: a.id === 1 ? claimDomain : evidenceDomain,
+      })),
+    );
+  }
+
+  it.each([
+    ["vendor.com", "blog.vendor.com"],
+    ["vendor.com", "vendor.com."],
+    ["vendor.com", "www.vendor.com"],
+    ["www.vendor.com", "VENDOR.COM"],
+    ["", "openeval.test"],
+    ["acme.test", ""],
+    ["", ""],
+    // Two labels only: here "www." is what makes the keys equal.
+    ["vendor", "www.vendor"],
+  ])(
+    "drops evidence when the domain keys of %j and %j are equal or empty",
+    (claimDomain, evidenceDomain) => {
+      const out = domains(claimDomain, evidenceDomain);
+      expect(out?.claims).toHaveLength(1);
+      expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+      expect(out?.claims[0].independentEvidence).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["vendor.com", "openeval.test"],
+    ["vendor.com", "othervendor.com"],
+    ["news.vendor.com", "vendor.org"],
+  ])("keeps evidence from %j against %j", (claimDomain, evidenceDomain) => {
+    const out = domains(claimDomain, evidenceDomain);
+    expect(out?.claims[0].verdict).toBe("independent_dispute");
+    expect(out?.claims[0].independentEvidence).toEqual([EVIDENCE_QUOTE]);
+  });
+
+  it("drops a quote bound to article B that exists only in article A", () => {
+    const misbound = { articleId: 2, quote: CLAIM_QUOTE.quote };
+    expect(
+      parseCheck(check({ claims: [claim({ claimQuote: misbound })] })),
+    ).toBeNull();
+    expect(
+      parseTimeline({
+        entries: [
+          entry({
+            source: {
+              articleId: 2,
+              quote: "In March 2026 Acme shipped Orion-1",
+            },
+          }),
+          EVAL_ENTRY,
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("drops evidence whose quote exists only in another article than its articleId", () => {
+    const BODY_C =
+      "The Third Lab measured Orion-2 at 80 percent on CodeBench in its own run.";
+    const third = withArticles([
+      {
+        id: 3,
+        title: "Third lab",
+        sourceName: "Third Lab",
+        sourceDomain: "thirdlab.test",
+        publishedAt: null,
+        summary: "S3",
+        bodyText: BODY_C,
+        sourceBodyText: BODY_C,
+      },
+    ]);
+    const run = (evidence: { articleId: number; quote: string }) =>
+      parseLaunchRealityCheckOutput(
+        JSON.stringify(
+          check({ claims: [claim({ independentEvidence: [evidence] })] }),
+        ),
+        third,
+      );
+    // Control: each quote is kept when bound to its own article.
+    const own = run({
+      articleId: 3,
+      quote: "measured Orion-2 at 80 percent on CodeBench",
+    });
+    expect(own?.claims[0].independentEvidence).toHaveLength(1);
+    for (const evidence of [
+      { articleId: 2, quote: "measured Orion-2 at 80 percent on CodeBench" },
+      { articleId: 3, quote: EVIDENCE_QUOTE.quote },
+    ]) {
+      const out = run(evidence);
+      expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+      expect(out?.claims[0].independentEvidence).toEqual([]);
+    }
+  });
+});
+
 function ctx(
   overrides: Partial<ArtifactEligibilityContext> & {
     contentTypes?: (string | null)[];

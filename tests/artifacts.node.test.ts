@@ -735,6 +735,8 @@ describe("artifact sources (#115)", () => {
 // #131: the cards are imported inside the tests so that, before they exist,
 // only these tests fail and the rest of the file still runs.
 describe("Technology product cards (#131)", () => {
+  const PROVENANCE_NOTE =
+    "Quotes are checked against the source text; whether a benchmark is independent is not verified.";
   const check: LaunchRealityCheck = {
     subject: "Orion-2",
     claimant: "Acme",
@@ -785,7 +787,9 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain(
       "1 of 1 claim has independent evidence in these sources.",
     );
-    expect(html).toContain("Independent evidence disputes this claim");
+    expect(html).toContain("Other outlets report contrary evidence");
+    expect(html).not.toContain("Independent evidence disputes this claim");
+    expect(html).toContain(PROVENANCE_NOTE);
     expect(html).toContain("scores 92 percent on the CodeBench suite");
     expect(html).toContain("Orion-2 scored 81 percent on CodeBench");
     expect(html).toContain('href="/a/1"');
@@ -818,6 +822,7 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain("Acme today released Orion-2, a model");
     expect(html).toContain('href="/a/1"');
     expect(html).toContain('href="/a/2"');
+    expect(html).toContain(PROVENANCE_NOTE);
     expectSourceInfo(html);
     expect(html).toMatch(
       /^<section aria-label="Technology Evolution Timeline" class="min-w-0 /,
@@ -826,6 +831,82 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain('<p class="flex flex-wrap ');
     expect(html).toContain('<blockquote class="wrap-anywhere ');
     expect(html).toMatch(/<\/footer><\/section>$/);
+  });
+
+  it("LaunchRealityCheckCard names each verdict by who reports the evidence", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const base = check.claims[0];
+    const html = renderToStaticMarkup(
+      createElement(LaunchRealityCheckCard, {
+        check: {
+          ...check,
+          claims: [
+            { ...base, verdict: "independent_support" },
+            { ...base, verdict: "independent_dispute" },
+            {
+              ...base,
+              verdict: "no_independent_evidence",
+              independentEvidence: [],
+            },
+          ],
+        },
+        sources: SOURCES,
+      }),
+    );
+    expect(html).toContain("Other outlets report supporting evidence");
+    expect(html).toContain("Other outlets report contrary evidence");
+    expect(html).toContain("No other outlet reports evidence");
+    expect(html).not.toContain("Independent evidence supports this claim");
+    expect(html).not.toContain("No independent evidence in these sources");
+    expect(html.match(new RegExp(PROVENANCE_NOTE, "g"))).toHaveLength(1);
+  });
+
+  it("Technology product cards show the verified quote, not the model's paraphrase", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const { EvolutionTimelineCard } =
+      await import("../src/components/artifacts/EvolutionTimelineCard");
+    const quote = "The Orion-2 chip draws 50 mW of power at idle";
+    expect(JSON.stringify(SOURCES)).not.toContain("50 MW");
+    const launch = renderToStaticMarkup(
+      createElement(LaunchRealityCheckCard, {
+        check: {
+          ...check,
+          claims: [
+            {
+              claim: "Orion-2 draws 50 MW at idle.",
+              claimQuote: { articleId: 1, quote },
+              verdict: "no_independent_evidence",
+              independentEvidence: [],
+            },
+          ],
+        },
+        sources: SOURCES,
+      }),
+    );
+    expect(launch).toContain("50 mW");
+    expect(launch).not.toContain("50 MW");
+    expect(launch).toContain('href="/a/1"');
+
+    const evolution = renderToStaticMarkup(
+      createElement(EvolutionTimelineCard, {
+        timeline: {
+          entries: [
+            {
+              ...timeline.entries[0],
+              description: "Acme released a 50 MW chip.",
+              source: { articleId: 1, quote },
+            },
+            timeline.entries[1],
+          ],
+        },
+        sources: SOURCES,
+      }),
+    );
+    expect(evolution).toContain("50 mW");
+    expect(evolution).not.toContain("50 MW");
+    expect(evolution).toContain("2026-10-20");
   });
 
   it("Technology product cards render nothing without sources", async () => {
