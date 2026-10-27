@@ -100,6 +100,27 @@ describe("createReaderWatchCore (#132)", () => {
     expect(await countWatches()).toBe(0);
   });
 
+  it("checks the method before the switch and the salt", async () => {
+    expect(
+      await rejection(
+        create({ method: "GET", enabled: false, salt: undefined }),
+      ),
+    ).toEqual({ status: 405, code: "method_not_allowed" });
+  });
+
+  it("checks the switch before the salt", async () => {
+    expect(
+      await rejection(create({ enabled: false, salt: undefined })),
+    ).toEqual({ status: 403, code: "reader_watch_disabled" });
+  });
+
+  it("checks the salt before the client IP", async () => {
+    expect(await rejection(create({ salt: undefined, ip: null }))).toEqual({
+      status: 503,
+      code: "unavailable",
+    });
+  });
+
   it("refuses without a client IP", async () => {
     for (const ip of [null, "", "not-an-ip"]) {
       expect(await rejection(create({ ip }))).toEqual({

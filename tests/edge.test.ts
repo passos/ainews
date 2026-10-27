@@ -536,6 +536,41 @@ describe("server function body cap (#132)", () => {
     expect([...seen[0]]).toEqual([...sent]);
   });
 
+  it("passes a body of exactly the cap with Content-Length", async () => {
+    const { seen, handler } = recorder();
+    const sent = new Uint8Array(CAP).map((_, i) => (i * 7) % 256);
+    const request = bodyRequest("/_serverFn/x", sent, {
+      "Content-Length": String(CAP),
+    });
+    expect(request.headers.get("Content-Length")).toBe(String(CAP));
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect([...seen[0]]).toEqual([...sent]);
+  });
+
+  it("passes a streamed body of exactly the cap without Content-Length", async () => {
+    const { seen, handler } = recorder();
+    const sent = new Uint8Array(CAP).map((_, i) => (i * 7) % 256);
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= CAP) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(sent.slice(offset, offset + 1024));
+        offset += 1024;
+      },
+    });
+    const request = bodyRequest("/_serverFn/x", body);
+    expect(request.headers.get("Content-Length")).toBeNull();
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect([...seen[0]]).toEqual([...sent]);
+  });
+
   it("rejects an invalid Content-Length", async () => {
     for (const value of ["abc", "-1", "1e3", "12, 12", ""]) {
       const { seen, handler } = recorder();

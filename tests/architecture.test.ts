@@ -306,6 +306,30 @@ export const b = createServerFn({ method: "GET" }).handler(async () => 2);
       "R5 src/server/reader-watch/x.ts has a server function that is not POST",
     ]);
   });
+
+  it("reports an aliased reader-watch/ server function that is not POST", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const a = c({ method: "GET" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R5 src/server/reader-watch/x.ts has a server function that is not POST",
+    ]);
+  });
+
+  it("does not report an aliased reader-watch/ POST server function", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const a = c({ method: "POST" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([]);
+  });
 });
 
 describe("R0: relative code imports resolve", () => {
@@ -331,6 +355,28 @@ describe("R0: relative code imports resolve", () => {
     expect(v).toEqual([
       "R0 src/routes/index.tsx cannot resolve ../pipeline/gone",
     ]);
+  });
+
+  it("reports a dynamic import whose argument is not a string literal", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/a.tsx": "const m = () => import(`../providers/models`);",
+        "src/providers/models.ts": "",
+      }),
+    );
+    expect(v).toEqual([
+      "R0 src/routes/a.tsx has a dynamic import without a string literal",
+    ]);
+  });
+
+  it("does not report a dynamic import of a string literal", () => {
+    const v = checkImportRules(
+      files({
+        "src/lib/y.ts": `const m = () => import("./x");`,
+        "src/lib/x.ts": "export const x = 1;",
+      }),
+    );
+    expect(v).toEqual([]);
   });
 
   it("does not report asset imports", () => {

@@ -87,6 +87,21 @@ function localNames(
   return names;
 }
 
+// Names that call createServerFn in `source`. The plain name always counts;
+// aliases count from any import source.
+function serverFnNames(source: string): Set<string> {
+  return new Set([
+    "createServerFn",
+    ...localNames(source, "createServerFn", () => true),
+  ]);
+}
+
+// Start of a call by local name `fn`, not as a property of something else.
+const callOf = (fn: string) => `(?<![\\w$.])${escapeRe(fn)}\\s*\\(`;
+
+// A dynamic import() that specifiers() does not see.
+const NON_LITERAL_IMPORT = /(?<![\w$.])import\s*\((?!\s*["'][^"']+["']\s*\))/;
+
 // R4 for one admin file: counts server function calls that do not chain
 // `.middleware([accessMiddleware` directly, by the names the file imports.
 function unguardedServerFns(
@@ -94,11 +109,7 @@ function unguardedServerFns(
   source: string,
   files: Map<string, string>,
 ): number {
-  // The plain name always counts; aliases count from any import source.
-  const fnNames = new Set([
-    "createServerFn",
-    ...localNames(source, "createServerFn", () => true),
-  ]);
+  const fnNames = serverFnNames(source);
   const mwNames = localNames(
     source,
     "accessMiddleware",
@@ -108,7 +119,7 @@ function unguardedServerFns(
   if (file === ACCESS_FN_FILE) mwNames.push("accessMiddleware");
   let unguarded = 0;
   for (const fn of fnNames) {
-    const call = `(?<![\\w$.])${escapeRe(fn)}\\s*\\(`;
+    const call = callOf(fn);
     const total = source.match(new RegExp(call, "g"))?.length ?? 0;
     let guarded = 0;
     if (mwNames.length > 0) {
@@ -140,6 +151,11 @@ export function checkImportRules(files: Map<string, string>): string[] {
       if (!resolve(file, spec, files)) {
         violations.push(`R0 ${file} cannot resolve ${spec}`);
       }
+    }
+    if (NON_LITERAL_IMPORT.test(source)) {
+      violations.push(
+        `R0 ${file} has a dynamic import without a string literal`,
+      );
     }
 
     // R1: public code cannot reach server/db/, pipeline/ or providers/.
@@ -205,10 +221,15 @@ export function checkImportRules(files: Map<string, string>): string[] {
 
     // R5: every server function in server/reader-watch/ is POST.
     if (isReaderWatch) {
-      const all = source.split("createServerFn(").length - 1;
-      const post =
-        source.split('createServerFn({ method: "POST" })').length - 1;
-      if (all !== post) {
+      let notPost = 0;
+      for (const fn of serverFnNames(source)) {
+        const call = callOf(fn);
+        const post = `${call}\\s*\\{\\s*method:\\s*"POST"\\s*\\}\\s*\\)`;
+        notPost +=
+          (source.match(new RegExp(call, "g"))?.length ?? 0) -
+          (source.match(new RegExp(post, "g"))?.length ?? 0);
+      }
+      if (notPost !== 0) {
         violations.push(`R5 ${file} has a server function that is not POST`);
       }
     }
