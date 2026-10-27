@@ -100,6 +100,8 @@ const ABBREVIATIONS = new Set([
   "No",
 ]);
 const INITIAL = /^\p{Lu}$/u;
+/** Opening quotes and brackets that may sit in front of an abbreviation. */
+const OPENER = /^["'“‘([]+/;
 
 /**
  * Sentences of `text` as [start, end) offsets, whitespace trimmed. Simple on
@@ -128,7 +130,10 @@ function sentences(text: string): [number, number][] {
     const end = CLOSER.test(text[i + 1] ?? "") ? i + 2 : i + 1;
     if (!SPACE.test(text[end] ?? "")) continue;
     if (ch === ".") {
-      const token = /\S*$/.exec(text.slice(start, i))?.[0] ?? "";
+      const token = (/\S*$/.exec(text.slice(start, i))?.[0] ?? "").replace(
+        OPENER,
+        "",
+      );
       if (ABBREVIATIONS.has(token) || INITIAL.test(token)) continue;
     }
     push(start, end);
