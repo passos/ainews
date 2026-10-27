@@ -8,6 +8,10 @@ export const listPendingArticles = createServerFn({ method: "GET" })
   .validator((search?: { industryId?: number }) => search)
   .handler(async ({ data }) => ops.listPendingArticles(env.DB, data));
 
+export const listPublishedArticles = createServerFn({ method: "GET" })
+  .middleware([accessMiddleware])
+  .handler(async () => ops.listPublishedArticles(env.DB));
+
 export const decideReview = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
   .validator(

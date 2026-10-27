@@ -5,11 +5,14 @@ import {
   createCorrection,
   getArticle,
   reanalyzeArticle,
-  retractArticle,
   updateArticleOverride,
 } from "../../../server/admin/articles";
-import { isApprovedReview } from "../../../lib/approved-review";
 import { listIndustries } from "../../../server/admin/industries";
+import { decideReview } from "../../../server/admin/review";
+import {
+  TakedownPanel,
+  currentDecision,
+} from "../../../components/admin/RemoveButton";
 
 export const Route = createFileRoute("/admin/articles/$articleId")({
   ssr: "data-only",
@@ -101,26 +104,35 @@ function AdminArticleDetailPage() {
     }
   }
 
-  async function handleRetract() {
-    if (
-      !confirm(
-        "Are you sure you want to retract (take offline) this article? It will no longer appear on public feeds.",
-      )
-    )
-      return;
+  // #87 A3b: Remove from site = reject the current body; Restore = approve
+  // it again. Same server function as the review queue.
+  async function handleTakedown(decision: "approved" | "rejected") {
+    if (!article.bodySha) return;
     setWorking(true);
     setStatusMessage(null);
     setErrorMessage(null);
     try {
-      await retractArticle({ data: article.id });
-      setStatusMessage("Article retracted successfully.");
-      await router.invalidate();
-    } catch (err) {
-      setErrorMessage(
-        err instanceof Error ? err.message : "Failed to retract article",
+      await decideReview({
+        data: { articleId: article.id, bodySha: article.bodySha, decision },
+      });
+      setStatusMessage(
+        decision === "rejected"
+          ? "Article removed from the public site."
+          : "Article restored to the public site.",
       );
+    } catch (err) {
+      if (err instanceof Response && err.status === 409) {
+        setErrorMessage(
+          "Conflict: the article body changed since this page loaded. The page has been refreshed; check the article and try again.",
+        );
+      } else {
+        setErrorMessage(
+          err instanceof Error ? err.message : "Failed to record the decision",
+        );
+      }
     } finally {
       setWorking(false);
+      await router.invalidate();
     }
   }
 
@@ -171,7 +183,7 @@ function AdminArticleDetailPage() {
     }
   }
 
-  const isApproved = reviews.some((r) => isApprovedReview(r, article.bodySha));
+  const decision = currentDecision(reviews, article.bodySha);
 
   return (
     <div className="flex max-w-4xl flex-col gap-8 pb-12">
@@ -192,16 +204,6 @@ function AdminArticleDetailPage() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            {isApproved && (
-              <button
-                type="button"
-                disabled={working}
-                onClick={handleRetract}
-                className="rounded border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50"
-              >
-                Retract / Take Offline
-              </button>
-            )}
             <button
               type="button"
               disabled={working}
@@ -225,6 +227,13 @@ function AdminArticleDetailPage() {
           {errorMessage}
         </div>
       )}
+
+      <TakedownPanel
+        decision={decision}
+        working={working}
+        onRemove={() => handleTakedown("rejected")}
+        onRestore={() => handleTakedown("approved")}
+      />
 
       {/* Overrides form */}
       <section className="flex flex-col gap-4 rounded-lg border bg-card p-5">
