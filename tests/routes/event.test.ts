@@ -2,7 +2,11 @@ import { env } from "cloudflare:workers";
 import { isNotFound } from "@tanstack/react-router";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadEvent } from "../../src/routes/e/$eventId";
-import { getEvent, getEventSources } from "../../src/server/publication/events";
+import {
+  getEvent,
+  getEventArtifactSources,
+  getEventSources,
+} from "../../src/server/publication/events";
 import {
   db,
   resetPublication,
@@ -49,6 +53,7 @@ describe("tests/routes/event.test.ts", () => {
       {
         getEvent: (id) => getEvent(db(), id),
         getEventSources: (id) => getEventSources(db(), id),
+        getEventArtifactSources: (id) => getEventArtifactSources(db(), id),
       },
     );
 
@@ -77,6 +82,7 @@ describe("tests/routes/event.test.ts", () => {
         {
           getEvent: (id) => getEvent(db(), id),
           getEventSources: (id) => getEventSources(db(), id),
+          getEventArtifactSources: (id) => getEventArtifactSources(db(), id),
         },
       );
     } catch (e) {
@@ -151,6 +157,7 @@ describe("tests/routes/event.test.ts", () => {
       {
         getEvent: (id) => getEvent(db(), id),
         getEventSources: (id) => getEventSources(db(), id),
+        getEventArtifactSources: (id) => getEventArtifactSources(db(), id),
       },
     );
 
@@ -241,6 +248,7 @@ describe("tests/routes/event.test.ts", () => {
       {
         getEvent: (id) => getEvent(db(), id),
         getEventSources: (id) => getEventSources(db(), id),
+        getEventArtifactSources: (id) => getEventArtifactSources(db(), id),
       },
     );
 
@@ -330,6 +338,7 @@ describe("tests/routes/event.test.ts", () => {
       {
         getEvent: (id) => getEvent(db(), id),
         getEventSources: (id) => getEventSources(db(), id),
+        getEventArtifactSources: (id) => getEventArtifactSources(db(), id),
       },
     );
 
