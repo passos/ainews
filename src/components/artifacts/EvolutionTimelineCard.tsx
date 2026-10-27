@@ -44,7 +44,7 @@ export function EvolutionTimelineCard({
                 <span>Date of report</span>
               )}
             </p>
-            <p className="wrap-anywhere text-sm">{e.description}</p>
+            {/* The verified quote, not the model's paraphrase in e.description. */}
             <blockquote className="wrap-anywhere text-sm">
               &quot;{e.source.quote}&quot;{" "}
               <a
@@ -57,6 +57,10 @@ export function EvolutionTimelineCard({
           </li>
         ))}
       </ol>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Quotes are checked against the source text; whether a benchmark is
+        independent is not verified.
+      </p>
       <ArtifactSources sources={sources} />
     </section>
   );

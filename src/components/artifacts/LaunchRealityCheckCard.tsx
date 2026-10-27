@@ -6,9 +6,9 @@ import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
 
 const VERDICT_LABELS: Record<LaunchVerdict, string> = {
-  independent_support: "Independent evidence supports this claim",
-  independent_dispute: "Independent evidence disputes this claim",
-  no_independent_evidence: "No independent evidence in these sources",
+  independent_support: "Other outlets report supporting evidence",
+  independent_dispute: "Other outlets report contrary evidence",
+  no_independent_evidence: "No other outlet reports evidence",
 };
 
 export function LaunchRealityCheckCard({
@@ -44,19 +44,19 @@ export function LaunchRealityCheckCard({
       <ol className="flex flex-col gap-3">
         {check.claims.map((c, i) => (
           <li key={i} className="min-w-0 border-l-2 border-border pl-3">
-            <p className="wrap-anywhere text-sm font-bold">{c.claim}</p>
-            <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              {VERDICT_LABELS[c.verdict]}
-            </p>
-            <blockquote className="wrap-anywhere text-sm">
+            {/* The verified quote, not the model's paraphrase in c.claim. */}
+            <p className="wrap-anywhere text-sm font-bold">
               &quot;{c.claimQuote.quote}&quot;{" "}
               <a
                 href={`/a/${c.claimQuote.articleId}`}
-                className="font-mono text-xs hover:underline"
+                className="font-mono text-xs font-normal hover:underline"
               >
                 Claim source
               </a>
-            </blockquote>
+            </p>
+            <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              {VERDICT_LABELS[c.verdict]}
+            </p>
             {c.independentEvidence.map((e, j) => (
               <blockquote key={j} className="wrap-anywhere text-sm">
                 &quot;{e.quote}&quot;{" "}
@@ -71,6 +71,10 @@ export function LaunchRealityCheckCard({
           </li>
         ))}
       </ol>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Quotes are checked against the source text; whether a benchmark is
+        independent is not verified.
+      </p>
       <ArtifactSources sources={sources} />
     </section>
   );

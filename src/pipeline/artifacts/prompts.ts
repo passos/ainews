@@ -1312,13 +1312,31 @@ function normalizeSourceText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** True when `needle` is not empty and occurs in `text` after normalising both. */
+const WORD_CHAR_AT_END = /[\p{L}\p{N}]$/u;
+const WORD_CHAR_AT_START = /^[\p{L}\p{N}]/u;
+
+/**
+ * True when `needle` is not empty and occurs in `text` after normalising both,
+ * at word boundaries: the body characters next to the match are not letters
+ * or digits, so "50 mW" does not match inside "150 mW". Every occurrence is
+ * tried, so an earlier hit inside a word does not hide a later valid one.
+ */
 function sourceTextContains(
   text: string | null | undefined,
   needle: string,
 ): boolean {
   const n = normalizeSourceText(needle);
-  return n.length > 0 && !!text && normalizeSourceText(text).includes(n);
+  if (n.length === 0 || !text) return false;
+  const body = normalizeSourceText(text);
+  for (let i = body.indexOf(n); i !== -1; i = body.indexOf(n, i + 1)) {
+    if (
+      !WORD_CHAR_AT_END.test(body.slice(0, i)) &&
+      !WORD_CHAR_AT_START.test(body.slice(i + n.length))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The quote is copied from the cited article of this material. */
@@ -1332,13 +1350,24 @@ function quoteIsGrounded(
   return sourceTextContains(article?.sourceBodyText, q.quote);
 }
 
+/**
+ * The domain key of an article: lowercase, one trailing "." and a leading
+ * "www." removed, then the last two labels ("blog.vendor.com" -> "vendor.com").
+ * There is no public-suffix list, so multi-part suffixes collapse:
+ * "x.co.uk" and "y.co.uk" both give "co.uk". That errs toward dropping
+ * evidence, which is the safe direction. "" when the article or domain is missing.
+ */
 function articleDomain(
   material: ArtifactEventMaterial,
   articleId: number,
-): string | undefined {
-  return material.articles
-    .find((a) => a.id === articleId)
-    ?.sourceDomain.toLowerCase();
+): string {
+  let d =
+    material.articles
+      .find((a) => a.id === articleId)
+      ?.sourceDomain.toLowerCase() ?? "";
+  if (d.endsWith(".")) d = d.slice(0, -1);
+  if (d.startsWith("www.")) d = d.slice(4);
+  return d.split(".").slice(-2).join(".");
 }
 
 function groundedName(material: ArtifactEventMaterial, value: string): string {
@@ -1423,16 +1452,21 @@ export function parseLaunchRealityCheckOutput(
     const claimDomain = articleDomain(material, c.claimQuote.articleId);
     // Evidence is independent only when it comes from another article on
     // another domain: the claimant's own pages cannot confirm the claim.
+    // An empty domain key on either side cannot be compared, so it drops.
     const evidence =
       c.verdict === "no_independent_evidence"
         ? []
-        : c.independentEvidence.filter(
-            (e) =>
+        : c.independentEvidence.filter((e) => {
+            const evidenceDomain = articleDomain(material, e.articleId);
+            return (
               quoteIsGrounded(material, e) &&
               e.articleId !== c.claimQuote.articleId &&
-              articleDomain(material, e.articleId) !== claimDomain &&
-              normalizeSourceText(e.quote) !== claimText,
-          );
+              claimDomain !== "" &&
+              evidenceDomain !== "" &&
+              evidenceDomain !== claimDomain &&
+              normalizeSourceText(e.quote) !== claimText
+            );
+          });
     const verdict =
       evidence.length === 0 ? ("no_independent_evidence" as const) : c.verdict;
     return [{ ...c, verdict, independentEvidence: evidence }];
