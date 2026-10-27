@@ -26,6 +26,7 @@ import { LaunchRealityCheckCard } from "../../components/artifacts/LaunchReality
 import { EvolutionTimelineCard } from "../../components/artifacts/EvolutionTimelineCard";
 import { Disclaimer } from "../../components/Disclaimer";
 import { SectionHead } from "../../components/SectionHead";
+import { formatUtcDate } from "../../lib/time";
 import { InspectEvidencePanel } from "../../components/evidence/InspectEvidencePanel";
 import {
   getEvent,
@@ -445,66 +446,74 @@ export function EventPageView({
         />
         <div className="flex flex-col gap-5">
           {timelineRevisions && timelineRevisions.length > 0
-            ? timelineRevisions.map((revBlock, revIdx) => (
-                <div
-                  key={revBlock.revision}
-                  className="flex flex-col gap-3 border border-border/70 bg-card/30 p-3 sm:p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
-                        Revision {revBlock.revision}
+            ? timelineRevisions.map((revBlock, revIdx) => {
+                const first = revBlock.articles[0];
+                const firstMs = first
+                  ? (first.publishedAt ?? first.fetchedAt)
+                  : null;
+                return (
+                  <div
+                    key={revBlock.revision}
+                    className={`flex flex-col gap-3${revIdx > 0 ? " border-t border-border pt-5" : ""}`}
+                    data-timeline-block={revIdx + 1}
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold">
+                      <span className="text-foreground">
+                        {revIdx === 0 ? "First report" : "New report"}
                       </span>
-                      {revIdx === 0 && (
-                        <span className="flex items-center gap-1 text-[0.68rem] font-bold text-muted-foreground">
-                          First seen
-                        </span>
+                      {firstMs !== null && (
+                        <time
+                          dateTime={new Date(firstMs).toISOString()}
+                          className="text-muted-foreground"
+                        >
+                          {formatUtcDate(firstMs)}
+                        </time>
                       )}
                     </div>
-                  </div>
 
-                  {revBlock.diff && revBlock.diff.summary && (
-                    <div className="flex flex-col gap-1.5 bg-muted/40 p-2.5 font-sans text-xs leading-relaxed text-foreground/90">
-                      <div>
-                        <span className="font-bold text-muted-foreground mr-1">
-                          What&apos;s new in this revision:
-                        </span>
-                        <span>{revBlock.diff.summary}</span>
-                      </div>
-                      {revBlock.diff.changedClaims &&
-                        revBlock.diff.changedClaims.length > 0 && (
-                          <div className="mt-1 flex flex-col gap-1 border-t border-border/30 pt-1.5">
-                            <span className="text-[0.7rem] font-semibold text-muted-foreground">
-                              Status updates on existing claims:
-                            </span>
-                            <ul className="list-inside list-disc space-y-0.5 text-[0.75rem] text-foreground/80">
-                              {revBlock.diff.changedClaims.map(
-                                (claim, cIdx) => (
-                                  <li key={cIdx}>{claim}</li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                        )}
-                    </div>
-                  )}
-
-                  <div className="flex flex-col gap-3">
-                    {revBlock.articles.map((a) => (
-                      <div key={a.id} className="flex flex-col gap-1">
-                        {a.evidence &&
-                          (a.evidence.includes("preprint") ||
-                            a.evidence.includes("primary_source")) && (
-                            <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
-                              <span>Original source</span>
+                    {revBlock.diff && revBlock.diff.summary && (
+                      <div className="flex flex-col gap-1.5 font-sans text-xs leading-relaxed text-foreground/90">
+                        <div>
+                          <span className="font-bold text-muted-foreground mr-1">
+                            What this report added:
+                          </span>
+                          <span>{revBlock.diff.summary}</span>
+                        </div>
+                        {revBlock.diff.changedClaims &&
+                          revBlock.diff.changedClaims.length > 0 && (
+                            <div className="mt-1 flex flex-col gap-1">
+                              <span className="text-[0.7rem] font-semibold text-muted-foreground">
+                                Changes to earlier claims:
+                              </span>
+                              <ul className="list-inside list-disc space-y-0.5 text-[0.75rem] text-foreground/80">
+                                {revBlock.diff.changedClaims.map(
+                                  (claim, cIdx) => (
+                                    <li key={cIdx}>{claim}</li>
+                                  ),
+                                )}
+                              </ul>
                             </div>
                           )}
-                        <ArticleCard article={a} />
                       </div>
-                    ))}
+                    )}
+
+                    <div className="flex flex-col gap-3">
+                      {revBlock.articles.map((a) => (
+                        <div key={a.id} className="flex flex-col gap-1">
+                          {a.evidence &&
+                            (a.evidence.includes("preprint") ||
+                              a.evidence.includes("primary_source")) && (
+                              <div className="flex items-center gap-1.5 text-[0.68rem] font-bold text-muted-foreground">
+                                <span>Original source</span>
+                              </div>
+                            )}
+                          <ArticleCard article={a} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             : articles.map((a, idx) => (
                 <div key={a.id} className="flex flex-col gap-1">
                   {idx === 0 && (

@@ -4,6 +4,7 @@ import { FollowButton } from "../../components/FollowButton";
 import { WatchArticleLink } from "../../components/WatchArticleLink";
 import { formatUtc } from "../../lib/time";
 import { getWatch } from "../../server/publication/api";
+import type { WatchDetailView } from "../../server/publication/watches";
 import { SITE_NAME } from "../../lib/site";
 
 export const Route = createFileRoute("/w/$watch")({
@@ -36,6 +37,10 @@ export const Route = createFileRoute("/w/$watch")({
 
 function WatchPage() {
   const { data } = Route.useLoaderData();
+  return <WatchView data={data} />;
+}
+
+export function WatchView({ data }: { data: WatchDetailView }) {
   const { watch, hits } = data;
 
   return (
@@ -126,7 +131,6 @@ function WatchPage() {
                       {formatUtc(hit.hitAt)}
                     </time>
                   </span>
-                  <span>Revision #{hit.eventRevision}</span>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
