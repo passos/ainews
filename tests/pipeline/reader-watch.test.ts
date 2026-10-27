@@ -5,10 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { evaluateEventWatches } from "../../src/pipeline/watch/evaluate";
 import { buildWatchJudgeQuestion } from "../../src/pipeline/watch/prompts";
 import { utcDay } from "../../src/providers/budget";
-import {
-  BudgetExceededError,
-  type ModelClient,
-} from "../../src/providers/models";
+import type { ModelClient } from "../../src/providers/models";
 import type { ModelTransport } from "../../src/providers/transport";
 
 const DAY = 86_400_000;
@@ -348,13 +345,16 @@ describe("reader watch judging (#132)", () => {
     // Yesterday: registered, sent, no completed ledger row.
     const first = mockModels(0.1);
     first.judge.mockRejectedValueOnce(new Error("network reset"));
+    // A reader judge error defers the event instead of throwing.
     await expect(
       evaluateEventWatches(ON, eventId, YESTERDAY, {
         models: mockModels(0.1).client,
         readerModels: first.client,
       }),
-    ).rejects.toThrow("network reset");
+    ).resolves.toBeDefined();
+    expect(first.judge).toHaveBeenCalledTimes(1);
     expect(await admissions(utcDay(YESTERDAY))).toBe(1);
+    expect(await marker(eventId)).toBe(0);
 
     await fillAdmissions(TODAY, 500);
     const second = mockModels(0.1);
@@ -376,7 +376,8 @@ describe("reader watch judging (#132)", () => {
 
     await expect(
       evaluateEventWatches(PAID, eventId, NOW, deps),
-    ).rejects.toThrow("network reset");
+    ).resolves.toBeDefined();
+    expect(transport.calls).toBe(1);
     expect((await ledgerFor(readerId))?.status).toBe("failed");
     expect(await marker(eventId)).toBe(0);
 
@@ -431,11 +432,10 @@ describe("reader watch judging (#132)", () => {
     const transport = jevTransport(0.1);
     const deps = { transport, now: () => NOW };
 
-    const error = await evaluateEventWatches(PAID, a.eventId, NOW, deps).catch(
-      (e: unknown) => e,
-    );
-    expect(error).toBeInstanceOf(BudgetExceededError);
-    expect((error as BudgetExceededError).tier).toBe(5);
+    // The refusal defers the event's reader watches instead of throwing.
+    await expect(
+      evaluateEventWatches(PAID, a.eventId, NOW, deps),
+    ).resolves.toBeDefined();
     expect(await ledgerFor(readerId)).toEqual({
       tier: 5,
       status: "failed",
@@ -449,6 +449,42 @@ describe("reader watch judging (#132)", () => {
       status: "completed",
     });
     expect(transport.calls).toBe(1);
+  });
+
+  it("defers the reader watches of an event on a tier 5 refusal and still judges a later admin watch", async () => {
+    // Same budget as above: tier 5 refused, tier 4 admitted.
+    await env.DB.prepare(
+      `INSERT INTO budgets (day, channel, cap_micros, reserved_micros, spent_micros)
+       VALUES (?1, 'gateway', 1900000, 0, 750000)`,
+    )
+      .bind(TODAY)
+      .run();
+    const { eventId } = await seedEvent(techId, "Lidar sensor launch");
+    const readerId = await watch("reader", "lidar");
+    const adminId = await watch("admin", "lidar");
+    expect(adminId).toBeGreaterThan(readerId);
+    const admin = mockModels(0.9);
+    const transport = jevTransport(0.9);
+
+    await expect(
+      evaluateEventWatches(PAID, eventId, NOW, {
+        transport,
+        now: () => NOW,
+        models: admin.client,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(await ledgerFor(readerId)).toEqual({
+      tier: 5,
+      status: "failed",
+      error: "budget_exceeded",
+    });
+    expect(transport.calls).toBe(0);
+    expect(admin.judge).toHaveBeenCalledTimes(1);
+    expect((await hits(eventId)).map((r) => [r.watch_id, r.status])).toEqual([
+      [adminId, "pending_review"],
+    ]);
+    expect(await marker(eventId)).toBe(0);
   });
 
   it("keeps the #85 rules for reader watches", async () => {
