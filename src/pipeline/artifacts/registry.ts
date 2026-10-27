@@ -122,8 +122,8 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: ARTIFACT_AUDIENCES,
     promptVersion: AUDIENCE_EXPLAIN_PROMPT_VERSION,
     isEligible: (ctx) => {
-      // Three-tier explanations require the event score to meet or exceed the deep threshold
-      return ctx.articles.length > 0 && ctx.eventScore >= ctx.deepThreshold;
+      // Round 6 full coverage: every event with an approved article.
+      return ctx.articles.length > 0;
     },
     buildRequest: (material, audience) => {
       const aud = (audience || "student") as ArtifactAudience;
@@ -138,10 +138,7 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: [""],
     promptVersion: RESEARCH_PAPER_DECODER_PROMPT_VERSION,
     isEligible: (ctx) => {
-      // Research Paper Decoder requires:
-      // 1. Event score >= deepThreshold
-      // 2. Contains at least one research paper or arXiv report
-      if (ctx.eventScore < ctx.deepThreshold) return false;
+      // Research Paper Decoder requires at least one research paper or arXiv report
       return ctx.articles.some((a) => {
         const isArxiv = a.sourceDomain.toLowerCase().includes("arxiv");
         const isPaperType = a.contentType === "research_paper";
@@ -162,8 +159,8 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: ARTIFACT_AUDIENCES,
     promptVersion: LEARNING_MATERIAL_PROMPT_VERSION,
     isEligible: (ctx) => {
-      // News-to-Learning materials are generated for deep events across all verticals
-      return ctx.articles.length > 0 && ctx.eventScore >= ctx.deepThreshold;
+      // Round 6 full coverage: every event with an approved article.
+      return ctx.articles.length > 0;
     },
     buildRequest: (material, audience) => {
       const aud = (audience || "student") as ArtifactAudience;
@@ -179,9 +176,7 @@ export const ARTIFACT_REGISTRY: Record<
     promptVersion: POLICY_IMPACT_PROMPT_VERSION,
     isEligible: (ctx) => {
       if (ctx.industrySlug !== "education") return false;
-      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
-        return false;
-      }
+      if (ctx.articles.length === 0) return false;
       return ctx.articles.some(
         (a) =>
           a.contentType === "policy_change" ||
@@ -199,7 +194,7 @@ export const ARTIFACT_REGISTRY: Record<
     promptVersion: CLASSROOM_DISCUSSION_PROMPT_VERSION,
     isEligible: (ctx) => {
       if (ctx.industrySlug !== "education") return false;
-      return ctx.articles.length > 0 && ctx.eventScore >= ctx.selectThreshold;
+      return ctx.articles.length > 0;
     },
     buildRequest: (material) =>
       buildClassroomDiscussionBuilderRequest(material),
@@ -213,9 +208,7 @@ export const ARTIFACT_REGISTRY: Record<
     promptVersion: EDUCATION_EVIDENCE_PROMPT_VERSION,
     isEligible: (ctx) => {
       if (ctx.industrySlug !== "education") return false;
-      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
-        return false;
-      }
+      if (ctx.articles.length === 0) return false;
       return ctx.articles.some(
         (a) =>
           a.contentType === "research_study" ||
@@ -289,9 +282,7 @@ export const ARTIFACT_REGISTRY: Record<
     promptVersion: SKILLS_CAREER_PROMPT_VERSION,
     isEligible: (ctx) => {
       if (ctx.industrySlug !== "industry") return false;
-      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
-        return false;
-      }
+      if (ctx.articles.length === 0) return false;
       return ctx.articles.some(
         (a) =>
           a.contentType === "market_trend" || a.contentType === "company_move",
@@ -307,9 +298,7 @@ export const ARTIFACT_REGISTRY: Record<
     audiences: [""],
     promptVersion: INDUSTRY_IMPACT_PROMPT_VERSION,
     isEligible: (ctx) => {
-      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
-        return false;
-      }
+      if (ctx.articles.length === 0) return false;
       // Industry vertical deep intelligence, or cross-vertical breakthrough/macro moves
       if (ctx.industrySlug === "industry") {
         return true;
@@ -338,9 +327,7 @@ export const ARTIFACT_REGISTRY: Record<
     isEligible: (ctx) => {
       // Newsren §3: Industry vertical exclusive feature
       if (ctx.industrySlug !== "industry") return false;
-      if (ctx.articles.length === 0 || ctx.eventScore < ctx.selectThreshold) {
-        return false;
-      }
+      if (ctx.articles.length === 0) return false;
       return ctx.articles.some(
         (a) =>
           a.contentType === "supply_chain" ||
