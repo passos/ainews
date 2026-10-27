@@ -70,17 +70,63 @@ const sourceRows = async () =>
     }>()
   ).results;
 
+// The sources of #90, in seed order (after the two Technology sources).
+const NEW_SOURCES = [
+  {
+    industry: "education",
+    name: "The Hechinger Report",
+    feedUrl: "https://hechingerreport.org/feed/",
+    siteDomain: "hechingerreport.org",
+    contentDisplay: "excerpt",
+  },
+  {
+    industry: "education",
+    name: "EdSurge",
+    feedUrl: "https://www.edsurge.com/articles_rss",
+    siteDomain: "edsurge.com",
+    contentDisplay: "excerpt",
+  },
+  {
+    industry: "industry",
+    name: "Semiconductor Engineering",
+    feedUrl: "https://semiengineering.com/feed/",
+    siteDomain: "semiengineering.com",
+    contentDisplay: "excerpt",
+  },
+  {
+    industry: "industry",
+    name: "Supply Chain Dive",
+    feedUrl: "https://www.supplychaindive.com/feeds/news/",
+    siteDomain: "supplychaindive.com",
+    contentDisplay: "excerpt",
+  },
+  {
+    industry: "finance",
+    name: "SEC press releases",
+    feedUrl: "https://www.sec.gov/news/pressreleases.rss",
+    siteDomain: "sec.gov",
+    contentDisplay: "full",
+  },
+  {
+    industry: "finance",
+    name: "Banking Dive",
+    feedUrl: "https://www.bankingdive.com/feeds/news/",
+    siteDomain: "bankingdive.com",
+    contentDisplay: "excerpt",
+  },
+];
+
 beforeEach(resetPipeline);
 
 describe("buildSeedSql", () => {
   it("is one statement per line, and D1 exec runs every line", async () => {
     const sql = buildSeedSql(NOW);
     const lines = sql.split("\n");
-    expect(lines).toHaveLength(6);
+    expect(lines).toHaveLength(12);
     for (const line of lines) expect(line).toMatch(/^INSERT INTO .*;$/);
     expect(sql.endsWith("\n")).toBe(false);
     const result = await env.DB.exec(sql);
-    expect(result.count).toBe(6);
+    expect(result.count).toBe(12);
   });
 
   it("doubles every quote inside a string", () => {
@@ -90,11 +136,11 @@ describe("buildSeedSql", () => {
 });
 
 describe("seed on the test database", () => {
-  it("twice: 4 industries, 2 sources, no error", async () => {
+  it("twice: 4 industries, 8 sources, no error", async () => {
     await env.DB.exec(buildSeedSql(NOW));
     await env.DB.exec(buildSeedSql(NOW + 1000));
     expect(await count("SELECT count(*) AS n FROM industries")).toBe(4);
-    expect(await count("SELECT count(*) AS n FROM sources")).toBe(2);
+    expect(await count("SELECT count(*) AS n FROM sources")).toBe(8);
     // The second run changed nothing.
     for (const row of await industryRows()) expect(row.created_at).toBe(NOW);
   });
@@ -196,6 +242,7 @@ describe("seed on the test database", () => {
     // conflicts), the changed one is kept.
     expect(sources.map((s) => s.name)).toEqual([
       "arXiv cs.AI",
+      ...NEW_SOURCES.map((n) => n.name),
       "MIT Technology Review",
     ]);
     expect(sources[0].interval_minutes).toBe(15);
@@ -205,7 +252,9 @@ describe("seed on the test database", () => {
 describe("seed sources", () => {
   it("2 Technology sources with the fields of the issue", async () => {
     await env.DB.exec(buildSeedSql(NOW));
-    const rows = await sourceRows();
+    const rows = (await sourceRows()).filter(
+      (r) => r.industry === "technology",
+    );
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -242,7 +291,7 @@ describe("seed sources", () => {
     });
   });
 
-  it("content_display: arXiv cs.AI full, MIT Technology Review excerpt", async () => {
+  it("content_display: arXiv cs.AI and SEC press releases full, the rest excerpt", async () => {
     await env.DB.exec(buildSeedSql(NOW));
     const { results } = await env.DB.prepare(
       "SELECT name, content_display FROM sources ORDER BY id",
@@ -250,7 +299,42 @@ describe("seed sources", () => {
     expect(results).toEqual([
       { name: "arXiv cs.AI", content_display: "full" },
       { name: "MIT Technology Review", content_display: "excerpt" },
+      ...NEW_SOURCES.map((n) => ({
+        name: n.name,
+        content_display: n.contentDisplay,
+      })),
     ]);
+  });
+
+  it("6 sources for Education, Industry and Finance (#90)", async () => {
+    await env.DB.exec(buildSeedSql(NOW));
+    const rows = (await sourceRows()).filter(
+      (r) => r.industry !== "technology",
+    );
+    expect(
+      rows.map((r) => ({
+        industry: r.industry,
+        name: r.name,
+        feed_url: r.feed_url,
+        site_domain: r.site_domain,
+      })),
+    ).toEqual(
+      NEW_SOURCES.map((n) => ({
+        industry: n.industry,
+        name: n.name,
+        feed_url: n.feedUrl,
+        site_domain: n.siteDomain,
+      })),
+    );
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        kind: "rss",
+        status: "active",
+        jina_enabled: 0,
+        interval_minutes: 60,
+      });
+      parseSourceConfig(row.config);
+    }
   });
 
   it("the seeded arXiv exclude keeps new + cross of the #5 snapshot", async () => {
