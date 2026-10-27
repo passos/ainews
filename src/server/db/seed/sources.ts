@@ -13,7 +13,7 @@ export interface SeedSource {
   /** Host of the articles (not of the feed). #6 fetches bodies only if set. */
   siteDomain: string;
   config: SourceConfig;
-  /** Reader page licensing (#86): full only for public-domain / CC0 text. */
+  /** Reader page display (#86). The owner set every source to full (#154). */
   contentDisplay: ContentDisplay;
 }
 
@@ -42,7 +42,7 @@ export const SEED_SOURCES: SeedSource[] = [
     feedUrl:
       "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
     siteDomain: "technologyreview.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: { exclude: [{ field: "category", values: ["sponsored"] }] },
   },
   {
@@ -51,7 +51,7 @@ export const SEED_SOURCES: SeedSource[] = [
     kind: "rss",
     feedUrl: "https://hechingerreport.org/feed/",
     siteDomain: "hechingerreport.org",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: {},
   },
   {
@@ -60,7 +60,7 @@ export const SEED_SOURCES: SeedSource[] = [
     kind: "rss",
     feedUrl: "https://www.edsurge.com/articles_rss",
     siteDomain: "edsurge.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: {},
   },
   {
@@ -69,7 +69,7 @@ export const SEED_SOURCES: SeedSource[] = [
     kind: "rss",
     feedUrl: "https://semiengineering.com/feed/",
     siteDomain: "semiengineering.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: {},
   },
   {
@@ -79,7 +79,7 @@ export const SEED_SOURCES: SeedSource[] = [
     feedUrl: "https://www.supplychaindive.com/feeds/news/",
     siteDomain: "supplychaindive.com",
     // robots.txt asks for Crawl-delay 5.
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: {},
   },
   {
@@ -99,7 +99,7 @@ export const SEED_SOURCES: SeedSource[] = [
     feedUrl: "https://www.bankingdive.com/feeds/news/",
     siteDomain: "bankingdive.com",
     // robots.txt asks for Crawl-delay 5.
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
     config: {},
   },
 ];

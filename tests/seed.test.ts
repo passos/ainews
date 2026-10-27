@@ -77,28 +77,28 @@ const NEW_SOURCES = [
     name: "The Hechinger Report",
     feedUrl: "https://hechingerreport.org/feed/",
     siteDomain: "hechingerreport.org",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
   },
   {
     industry: "education",
     name: "EdSurge",
     feedUrl: "https://www.edsurge.com/articles_rss",
     siteDomain: "edsurge.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
   },
   {
     industry: "industry",
     name: "Semiconductor Engineering",
     feedUrl: "https://semiengineering.com/feed/",
     siteDomain: "semiengineering.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
   },
   {
     industry: "industry",
     name: "Supply Chain Dive",
     feedUrl: "https://www.supplychaindive.com/feeds/news/",
     siteDomain: "supplychaindive.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
   },
   {
     industry: "finance",
@@ -112,7 +112,7 @@ const NEW_SOURCES = [
     name: "Banking Dive",
     feedUrl: "https://www.bankingdive.com/feeds/news/",
     siteDomain: "bankingdive.com",
-    contentDisplay: "excerpt",
+    contentDisplay: "full",
   },
 ];
 
@@ -291,14 +291,14 @@ describe("seed sources", () => {
     });
   });
 
-  it("content_display: arXiv cs.AI and SEC press releases full, the rest excerpt", async () => {
+  it("content_display: every seeded source is full", async () => {
     await env.DB.exec(buildSeedSql(NOW));
     const { results } = await env.DB.prepare(
       "SELECT name, content_display FROM sources ORDER BY id",
     ).all<{ name: string; content_display: string }>();
     expect(results).toEqual([
       { name: "arXiv cs.AI", content_display: "full" },
-      { name: "MIT Technology Review", content_display: "excerpt" },
+      { name: "MIT Technology Review", content_display: "full" },
       ...NEW_SOURCES.map((n) => ({
         name: n.name,
         content_display: n.contentDisplay,

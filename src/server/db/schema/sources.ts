@@ -6,10 +6,7 @@ import {
   text,
   unique,
 } from "drizzle-orm/sqlite-core";
-import {
-  CONTENT_DISPLAYS,
-  DEFAULT_CONTENT_DISPLAY,
-} from "../../../lib/content-display";
+import { CONTENT_DISPLAYS } from "../../../lib/content-display";
 import { industries } from "./industries";
 
 export const sources = sqliteTable(
@@ -59,11 +56,13 @@ export const sources = sqliteTable(
     /**
      * How much of the body the reader page shows. No table CHECK: adding one
      * rebuilds the table. The closed set is checked on write (zod) and read
-     * (parseContentDisplay).
+     * (parseContentDisplay). The column default stays 'excerpt' (migration
+     * 0000); new sources get DEFAULT_CONTENT_DISPLAY from the app, and changing
+     * the column default needs a migration.
      */
     contentDisplay: text("content_display", { enum: CONTENT_DISPLAYS })
       .notNull()
-      .default(DEFAULT_CONTENT_DISPLAY),
+      .default("excerpt"),
     /** Epoch milliseconds. */
     createdAt: integer("created_at").notNull(),
   },
