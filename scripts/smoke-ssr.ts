@@ -66,6 +66,10 @@ const PUBLIC_FN_ID = serverFnId(
   "getSiteInfo",
   "src/server/publication/site.ts",
 );
+const CREATE_WATCH_FN_ID = serverFnId(
+  "createReaderWatch",
+  "src/server/reader-watch/api.ts",
+);
 const BUILT_CONFIG = "dist/server/wrangler.json";
 const builtConfig = JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
 const ADMIN_EMAIL: string = builtConfig.vars.ADMIN_EMAIL;
@@ -280,6 +284,59 @@ async function main() {
     fail(`GET /?audience=bogus returned ${bogus.status}`);
   }
 
+  // The reader watch entrance (#132), driven through the built worker with the
+  // switch off (env.test): the real dispatch, the edge Origin check and the
+  // validator run, then the handler refuses. Wire format: the body is what the
+  // client sends, seroval's JSON for { data: { ... } }. This one is
+  // { question: "Will agent protocols converge?", criteria: "A shipped
+  // standard adopted by two vendors.", keywords: ["agent", "protocol"],
+  // industrySlug: null }; it passes the validator, so the 403 below comes
+  // from the handler's switch check, not from input checks.
+  const CREATE_BODY =
+    '{"t":{"t":10,"i":0,"p":{"k":["data"],"v":[{"t":10,"i":1,"p":{"k":["question","criteria","keywords","industrySlug"],"v":[{"t":1,"s":"Will agent protocols converge?"},{"t":1,"s":"A shipped standard adopted by two vendors."},{"t":9,"i":2,"a":[{"t":1,"s":"agent"},{"t":1,"s":"protocol"}],"o":0},{"t":2,"s":0}]},"o":0}]},"o":0},"f":127,"m":[]}';
+  const postCreate = (body: string, origin: string | null) =>
+    fetch(`${BASE}/_serverFn/${CREATE_WATCH_FN_ID}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tsr-serverfn": "true",
+        "Sec-Fetch-Site": "same-origin",
+        ...(origin === null ? {} : { Origin: origin }),
+      },
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  const siteOrigin: string = new URL(builtConfig.vars.SITE_URL).origin;
+  const createOff = await postCreate(CREATE_BODY, siteOrigin);
+  const createOffBody = await createOff.text();
+  if (
+    createOff.status !== 403 ||
+    createOffBody.trim() !== '{"error":"reader_watch_disabled"}'
+  ) {
+    fail(
+      `POST createReaderWatch with the switch off returned ${createOff.status} ${createOffBody.slice(0, 120)}`,
+    );
+  }
+  // Input that fails the validator is refused with 400 before the handler.
+  // Both refusals are plain JSON responses ({"error": code}); the client
+  // receives them as a resolved value, not a thrown error (src/lib/follow.ts
+  // handles both).
+  const createBad = await postCreate(
+    CREATE_BODY.replace("Will agent protocols converge?", "short"),
+    siteOrigin,
+  );
+  const createBadBody = await createBad.text();
+  if (
+    createBad.status !== 400 ||
+    createBadBody.trim() !== '{"error":"invalid_input"}'
+  ) {
+    fail(
+      `POST createReaderWatch with bad input returned ${createBad.status} ${createBadBody.slice(0, 120)}`,
+    );
+  }
+  console.log("ok: POST createReaderWatch is 403 reader_watch_disabled");
+
   // Public pages, against the fixture rows. Redirects are followed: an
   // invalid search param is redirected to its canonical URL.
   const page = async (path: string) => {
@@ -367,6 +424,26 @@ async function main() {
     const { res, text } = await page(path);
     if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
     if (text.includes("HIDDEN")) fail(`GET ${path} shows an unapproved item`);
+  }
+
+  // Reader watches (#132): the switch is off under env.test. /follow is a 404,
+  // no page links it, and a reader watch's text is on no public page.
+  const follow = await page("/follow");
+  if (follow.res.status !== 404) {
+    fail(`GET /follow returned ${follow.res.status}`);
+  }
+  if (follow.text.includes("Create watch")) {
+    fail("GET /follow renders the form while the switch is off");
+  }
+  for (const path of ["/", "/w/", "/w", "/rss/w/tech-agent-protocols.xml"]) {
+    const { res, text } = await page(path);
+    if (res.status !== 200) fail(`GET ${path} returned ${res.status}`);
+    if (text.includes("zq-reader-private-3")) {
+      fail(`GET ${path} shows a reader watch`);
+    }
+    if (text.includes("/follow")) {
+      fail(`GET ${path} links /follow while the switch is off`);
+    }
   }
 
   // Topic watches: a header entry while active watches exist, a list page,
