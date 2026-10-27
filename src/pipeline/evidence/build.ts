@@ -14,12 +14,14 @@ import { FINANCE_SLUG } from "../../server/admin/ops";
 import { APPROVED_ARTICLE_SQL } from "../../server/publication/articles";
 import type { PipelineEnv } from "../messages";
 import { attributeSource } from "../../lib/source-attribution";
+import { diagnoseArtifactRejection } from "../artifacts/prompts";
 import { indexArticleChunks, sha256Hex } from "./chunks";
 import {
   buildClaimsExtractionRequest,
   CLAIMS_PROMPT_VERSION,
   MAX_BODY_CHARS_PER_ARTICLE,
   parseClaimsOutput,
+  rawClaimsOutputSchema,
   type ArticleEvidenceInput,
   type EventEvidenceInput,
   type RawClaim,
@@ -427,7 +429,7 @@ export async function generateEventEvidence(
       warning: "failed to parse claims output against schema",
       eventId,
       finishReason: res.finishReason,
-      rawText: res.text.slice(0, 200),
+      issues: diagnoseArtifactRejection(res.text, rawClaimsOutputSchema),
     });
     return {
       status: "skipped",
