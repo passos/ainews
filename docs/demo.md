@@ -1,6 +1,6 @@
 # Demo script (3 minutes)
 
-The demo shows the loop in `docs/Newsren_Plan.md` §7 "Build three features
+The demo shows the loop in `docs/plan/Newsren_Plan.md` §7 "Build three features
 first": discover → understand → investigate → follow up. Site:
 <https://news.ioenv.com>. Admin pages need a Cloudflare Access login; log in
 before the demo.

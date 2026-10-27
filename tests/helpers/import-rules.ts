@@ -1,4 +1,4 @@
-// Import rules from docs/architecture.md sections 2 and 3.
+// Import rules from docs/architecture/architecture.md sections 2 and 3.
 // Input: map of "src/..." path -> source. Output: one line per violation.
 import { posix } from "node:path";
 

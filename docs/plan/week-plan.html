@@ -1,4 +1,4 @@
-<title>Personal News 实施计划</title>
+<title>Personal News implementation plan</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -70,151 +70,151 @@ tr.ms td { background: var(--bg); font: 600 12px/1.4 var(--f-mono); letter-spaci
 <div class="wrap">
 
 <section class="hero">
-  <div class="label"><b>Personal News</b> · 实施计划 v2.1 · 2026-10-22 · 已开 issue</div>
-  <h1>Newsren Stage 1–4：5 个里程碑，24 个 issue</h1>
-  <p class="answer">不设截止日期，按依赖和"全部完成"的顺序排。M1 结束时 Technology 板块在 <code>news.ioenv.com</code> 上用真实信源跑通；之后每个里程碑对应 Newsren 的一个 Stage。最耗时的 EDGAR 和 Funding Tracker 排在 M4，<strong>延后，不砍</strong>。实现细节以 <code>docs/architecture.md</code> 为准，每个 issue 只写自己的范围和验收。</p>
+  <div class="label"><b>Personal News</b> · Implementation plan v2.1 · 2026-10-22 · Issues opened</div>
+  <h1>Newsren Stage 1–4: 5 milestones, 24 issues</h1>
+  <p class="answer">There is no deadline. Work is ordered by dependency and by "finish everything". At the end of M1, the Technology section runs end to end on <code>news.ioenv.com</code> with real sources. After that, each milestone matches one Newsren Stage. The most time-consuming items, EDGAR and Funding Tracker, sit in M4: <strong>delayed, not cut</strong>. For implementation details, <code>docs/architecture/architecture.md</code> is authoritative. Each issue states only its own scope and acceptance.</p>
 </section>
 
 <section>
   <header>
-    <div class="label">01 · 你这次定下的</div>
+    <div class="label">01 · What you decided this time</div>
   </header>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>项</th><th>决定</th><th>落到设计上</th></tr></thead>
+    <thead><tr><th>Item</th><th>Decision</th><th>Effect on the design</th></tr></thead>
     <tbody>
-      <tr><td>运行时</td><td>simon 账号，单 Worker <code>ainews-app</code>，<code>news.ioenv.com</code></td><td>自定义入口 <code>src/server.ts</code> 同时导出 <code>fetch</code>、<code>scheduled</code>、<code>queue</code> <span class="pill ok">已验证</span>；关掉 <code>workers.dev</code></td></tr>
-      <tr><td>前端</td><td>TanStack Start（你给的那段要求原文写进了架构契约）</td><td>公开页完整 SSR + 流式；后台 <code>ssr: 'data-only'</code>；数据只经 server function</td></tr>
-      <tr><td>数据</td><td>D1 + Drizzle + R2</td><td>正文按版本存 R2，不覆盖；多表更新用 <code>batch()</code></td></tr>
-      <tr><td>模型</td><td>固定流程用确定性代码；快速判断用 Jev；写作和推理用 Gemini 3.8 Flash / Sonnet 5.5</td><td>四个槽位：<code>judge</code> = <code>typesafe/jev</code>、<code>embed</code> = bge-m3、<code>write</code> = gemini-3.8-flash、<code>reason</code> = claude-sonnet-5.5 <span class="pill ok">都在模型目录里</span></td></tr>
-      <tr><td>抓取</td><td>不收需要浏览器的信源；优先 Jina 和 CF 免费额度</td><td>抓取梯只到第 3 档（Jina）；PDF 用 <code>toMarkdown()</code> <span class="pill ok">已验证</span></td></tr>
-      <tr><td>流程</td><td>epic + sub-issue，PR + CI + auto-merge</td><td>main 只允许 squash、要求 CI 通过才能合并（#2 里设置）</td></tr>
-      <tr><td>范围</td><td>Newsren 必须满足；读者邮件订阅以后</td><td>每个 issue 标出对应的 Newsren 章节；缺口见 02 节</td></tr>
+      <tr><td>Runtime</td><td>simon account, single Worker <code>ainews-app</code>, <code>news.ioenv.com</code></td><td>The custom entry <code>src/server.ts</code> exports <code>fetch</code>, <code>scheduled</code>, and <code>queue</code> together <span class="pill ok">Verified</span>; turn off <code>workers.dev</code></td></tr>
+      <tr><td>Front end</td><td>TanStack Start (the exact requirement text you gave is written into the architecture contract)</td><td>Public pages use full SSR + streaming; the admin area uses <code>ssr: 'data-only'</code>; data goes only through server functions</td></tr>
+      <tr><td>Data</td><td>D1 + Drizzle + R2</td><td>Bodies are stored in R2 by version and never overwritten; multi-table updates use <code>batch()</code></td></tr>
+      <tr><td>Models</td><td>Fixed processes use deterministic code; quick judgments use Jev; writing and reasoning use Gemini 3.8 Flash / Sonnet 5.5</td><td>Four slots: <code>judge</code> = <code>typesafe/jev</code>, <code>embed</code> = bge-m3, <code>write</code> = gemini-3.8-flash, <code>reason</code> = claude-sonnet-5.5 <span class="pill ok">All in the model catalog</span></td></tr>
+      <tr><td>Fetching</td><td>Do not accept sources that need a browser; prefer the free quotas of Jina and CF</td><td>The fetch ladder goes only up to tier 3 (Jina); PDF uses <code>toMarkdown()</code> <span class="pill ok">Verified</span></td></tr>
+      <tr><td>Process</td><td>epic + sub-issues, PR + CI + auto-merge</td><td>main allows only squash and requires CI to pass before merge (set in #2)</td></tr>
+      <tr><td>Scope</td><td>Newsren must be met; reader email subscription later</td><td>Each issue names its Newsren section; see section 02 for the gaps</td></tr>
     </tbody>
   </table></div>
-  <p><strong>Jev 是什么</strong>：TypeSafe 的结构化评估模型。输入一段状态和一组 <code>noul</code>（是/否概率）、<code>choice</code>、<code>score</code> 问题，输出带概率的答案；上下文 32k；输入 $0.042 / 1M token，输出免费 <span class="pill ok">已验证</span>。它覆盖了预筛、五维评分、标签、归组判定、watch 判定和信源评估这些"判断"步骤。<strong>它走 Workers AI 计费，不在你给 AI Gateway 充的 credits 里</strong> <span class="pill asm">推断</span>，所以账本和预算按渠道分开记。</p>
+  <p><strong>What Jev is</strong>: a structured evaluation model from TypeSafe. The input is a state and a set of <code>noul</code> (yes/no probability), <code>choice</code>, and <code>score</code> questions. The output is answers with probabilities. Context is 32k; input is $0.042 / 1M tokens and output is free <span class="pill ok">Verified</span>. It covers the "judgment" steps: pre-filter, five-dimension scoring, tags, grouping judgment, watch judgment, and source evaluation. <strong>It is billed through Workers AI, not from the credits you topped up in AI Gateway</strong> <span class="pill asm">Inferred</span>, so the ledger and the budget are kept separately by channel.</p>
 </section>
 
 <section>
   <header>
-    <div class="label">02 · Newsren 还有两处缺口要你定</div>
-    <p>这两处和之前的 scope 决定冲突。不阻塞开 issue，影响的 issue 已经标出。</p>
+    <div class="label">02 · Two more Newsren gaps for you to decide</div>
+    <p>These two conflict with the earlier scope decisions. They do not block opening issues. The affected issues are marked.</p>
   </header>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>Newsren 要求</th><th>冲突</th><th>我推荐</th><th>影响</th></tr></thead>
+    <thead><tr><th>Newsren requirement</th><th>Conflict</th><th>My recommendation</th><th>Affects</th></tr></thead>
     <tbody>
-      <tr><td>N§9 Usefulness：读者给简报打分</td><td>scope 里"访客反馈 = 不做"</td><td>每份 Brief 和日报下放"有用 / 没用"两个按钮，不收文字，匿名、按 IP 限频</td><td class="dim">#24</td></tr>
-      <tr><td>N§2.1 My Newsren（优先级最高）：读者自选主题和深度</td><td>没有读者账号（Q12）</td><td>偏好存在读者浏览器里：关注的板块、解释档位、收藏的公开 watch。每人单独监测的部分随读者邮件订阅一起放到以后</td><td class="dim">#10 #17</td></tr>
+      <tr><td>N§9 Usefulness: readers rate the briefing</td><td>In the scope, "visitor feedback = not doing"</td><td>Under each Brief and each daily digest, put two buttons, "useful / not useful". No free text; anonymous; rate-limited by IP</td><td class="dim">#24</td></tr>
+      <tr><td>N§2.1 My Newsren (highest priority): readers choose topics and depth</td><td>No reader accounts (Q12)</td><td>Preferences live in the reader's browser: followed sections, explanation tier, saved public watches. The per-person monitoring part goes to later, together with reader email subscription</td><td class="dim">#10 #17</td></tr>
     </tbody>
   </table></div>
 </section>
 
 <section>
   <header>
-    <div class="label">03 · 里程碑</div>
-    <p>每个里程碑的关口过了，才开始下一个里程碑里依赖它的 issue。同一里程碑里没有依赖关系的 issue 并行做。</p>
+    <div class="label">03 · Milestones</div>
+    <p>Only after the gate of a milestone is passed do the issues that depend on it in the next milestone start. Issues in the same milestone with no dependency between them run in parallel.</p>
   </header>
   <div class="strip">
-    <div class="m"><span class="k">M0 · 基础</span><h3>能部署、能测、能记账</h3><p>#2–#4：骨架与 CI、数据模型与账本、鉴权与读取层边界</p><div class="gate"><b>关口</b>空站部署到域名；<code>/admin</code> 被 Access 拦住；一次真实的 Gateway 调用记进账本</div></div>
-    <div class="m"><span class="k">M1 · Stage 1</span><h3>Technology 跑通</h3><p>#5–#12：采集、抓取梯、分析、种子板块、后台、公开站、归组与时间线、日报</p><div class="gate"><b>关口</b>arXiv cs.AI 和 MIT Technology Review 连续采集 24 小时以上，出过日报，所有条目都经过审核</div></div>
-    <div class="m"><span class="k">M2 · Stage 2</span><h3>解释与提问</h3><p>#13–#16：产物生成器（Brief、三档解释、论文解读）、论断级证据、Ask、AI 起草与信源发现</p><div class="gate"><b>关口</b>事件页的每条论断都能点到原文片段；Ask 对查不到的问题会拒答</div></div>
-    <div class="m"><span class="k">M3 · Stage 3</span><h3>关联与跟踪</h3><p>#17–#19：Follow a Topic、一手来源与变化检测、周报</p><div class="gate"><b>关口</b>一个 watch 只在有实质进展时命中，同一进展不重复命中</div></div>
-    <div class="m"><span class="k">M4 · Stage 4</span><h3>深度产品</h3><p>#20–#25：学习材料与板块产品、行业影响、EDGAR 财报、Funding Tracker、看板、上线收尾</p><div class="gate"><b>关口</b>四个板块全部在线；财报里每个数字都链接到 filing</div></div>
+    <div class="m"><span class="k">M0 · Foundation</span><h3>Can deploy, can test, can keep the ledger</h3><p>#2–#4: scaffold and CI, data model and ledger, auth and read-layer boundary</p><div class="gate"><b>Gate</b>An empty site is deployed to the domain; <code>/admin</code> is blocked by Access; one real Gateway call is recorded in the ledger</div></div>
+    <div class="m"><span class="k">M1 · Stage 1</span><h3>Technology runs end to end</h3><p>#5–#12: collection, fetch ladder, analysis, seed sections, admin area, public site, grouping and timeline, daily digest</p><div class="gate"><b>Gate</b>arXiv cs.AI and MIT Technology Review are collected for more than 24 hours in a row, a daily digest has been produced, and all items have been reviewed</div></div>
+    <div class="m"><span class="k">M2 · Stage 2</span><h3>Explain and ask</h3><p>#13–#16: artifact generator (Brief, three-tier explanations, paper decoder), claim-level evidence, Ask, AI drafting and source discovery</p><div class="gate"><b>Gate</b>Every claim on the event page links to a source snippet; Ask refuses questions it cannot find answers to</div></div>
+    <div class="m"><span class="k">M3 · Stage 3</span><h3>Connect and follow</h3><p>#17–#19: Follow a Topic, primary sources and change detection, weekly report</p><div class="gate"><b>Gate</b>A watch hits only when there is substantive progress, and the same progress does not hit twice</div></div>
+    <div class="m"><span class="k">M4 · Stage 4</span><h3>Depth products</h3><p>#20–#25: learning materials and section products, industry impact, EDGAR financial reports, Funding Tracker, dashboard, launch wrap-up</p><div class="gate"><b>Gate</b>All four sections are online; every number in a financial report links to the filing</div></div>
   </div>
 </section>
 
 <section>
   <header>
-    <div class="label">04 · Issue 清单</div>
-    <p>档位是执行模型：<span class="pill op">opus</span> 用于难点在设计、牵涉幂等或外部语义的；<span class="pill so">sonnet</span> 用于规格清楚的。M0 和 M1 的 issue 开出来时就带"实现细化"；M2–M4 先写范围和验收，派发前再细化（原因见 07 节）。</p>
+    <div class="label">04 · Issue list</div>
+    <p>The tier is the executing model: <span class="pill op">opus</span> is for work whose difficulty is in design or that involves idempotency or external semantics; <span class="pill so">sonnet</span> is for work with a clear spec. Issues of M0 and M1 are opened with an "implementation detail" section. For M2–M4, scope and acceptance come first, and the detail is written before dispatch (reason in section 07).</p>
   </header>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>#</th><th>内容</th><th>依赖</th><th>档位</th><th>Newsren</th></tr></thead>
+    <thead><tr><th>#</th><th>Content</th><th>Depends on</th><th>Tier</th><th>Newsren</th></tr></thead>
     <tbody>
-      <tr class="ms"><td colspan="5">M0 · 基础</td></tr>
-      <tr><td class="id">2</td><td>项目骨架、部署与 CI：TanStack Start、自定义入口、wrangler 绑定、Drizzle、安全阀、测试框架、GitHub Actions、仓库合并规则</td><td class="dim">—</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
-      <tr><td class="id">3</td><td>数据模型、模型客户端与账本：核心表、<code>llm_calls</code> 状态与租约、按渠道预留预算、Gateway 与 Workers AI 客户端、Jev 封装、假服务</td><td class="dim">2</td><td><span class="pill op">opus</span></td><td class="dim">§6 预算</td></tr>
-      <tr><td class="id">4</td><td>后台鉴权、读取层边界与安全基线：Access JWT 全字段校验、路径规范化、架构测试、markdown 净化、Origin 校验</td><td class="dim">2</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
+      <tr class="ms"><td colspan="5">M0 · Foundation</td></tr>
+      <tr><td class="id">2</td><td>Project scaffold, deployment, and CI: TanStack Start, custom entry, wrangler bindings, Drizzle, safety valves, test framework, GitHub Actions, repo merge rules</td><td class="dim">—</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
+      <tr><td class="id">3</td><td>Data model, model client, and ledger: core tables, <code>llm_calls</code> states and leases, per-channel budget reservation, Gateway and Workers AI clients, Jev wrapper, fake servers</td><td class="dim">2</td><td><span class="pill op">opus</span></td><td class="dim">§6 budget</td></tr>
+      <tr><td class="id">4</td><td>Admin auth, read-layer boundary, and security baseline: full-field validation of the Access JWT, path normalization, architecture tests, markdown sanitizing, Origin check</td><td class="dim">2</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
       <tr class="ms"><td colspan="5">M1 · Stage 1 Foundation</td></tr>
-      <tr><td class="id">5</td><td>信源与采集：到期挑选、RSS/Atom、列表页、URL 规范化去重、时区、健康监测、补队</td><td class="dim">3</td><td><span class="pill op">opus</span></td><td class="dim">§6 §7</td></tr>
-      <tr><td class="id">6</td><td>正文抓取梯 0–3 档：robots、探测、R2 版本化正文、PDF、Jina 开关、大小上限、溯源字段</td><td class="dim">3 5</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
-      <tr><td class="id">7</td><td>分析：Jev 预筛、五维评分、内容类型与证据标签、确定性加权与门槛、摘要、发布模式、金融边界</td><td class="dim">3 5 6</td><td><span class="pill op">opus</span></td><td class="dim">§4 §6</td></tr>
-      <tr><td class="id">8</td><td>四个板块的种子配置：分类、英文提示词、门槛、一手来源白名单、免责声明、示范信源。<strong>需要你确认每个板块什么重要、什么是噪声</strong></td><td class="dim">5 6 7</td><td><span class="pill so">sonnet</span></td><td class="dim">§3</td></tr>
-      <tr><td class="id">9</td><td>后台：板块、信源、审核队列（绑定正文版本）、人工覆盖、更正、账本与预算、死信重放</td><td class="dim">4 5 7 10</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
-      <tr><td class="id">10</td><td>公开站与 RSS：首页、四个板块导航、溯源信息、证据标签、金融提示、读者档位、各路由 SSR 模式</td><td class="dim">4 7</td><td><span class="pill so">sonnet</span></td><td class="dim">§5 §6</td></tr>
-      <tr><td class="id">11</td><td>事件归组与时间线：嵌入、Vectorize 召回加最近事件、Jev 判定、顺序归组、revision、事件页</td><td class="dim">7 9 10</td><td><span class="pill op">opus</span></td><td class="dim">§2.2</td></tr>
-      <tr><td class="id">12</td><td>日报与管理员邮件：确定性选题、写作模型成文、页面、RSS、邮件</td><td class="dim">10 11</td><td><span class="pill op">opus</span></td><td class="dim">§7</td></tr>
+      <tr><td class="id">5</td><td>Sources and collection: pick due sources, RSS/Atom, list pages, URL-normalized dedup, time zones, health monitoring, requeue</td><td class="dim">3</td><td><span class="pill op">opus</span></td><td class="dim">§6 §7</td></tr>
+      <tr><td class="id">6</td><td>Body fetch ladder tiers 0–3: robots, probing, versioned bodies in R2, PDF, Jina switch, size limits, provenance fields</td><td class="dim">3 5</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
+      <tr><td class="id">7</td><td>Analysis: Jev pre-filter, five-dimension scoring, content type and evidence labels, deterministic weighting and threshold, summary, publish mode, finance boundary</td><td class="dim">3 5 6</td><td><span class="pill op">opus</span></td><td class="dim">§4 §6</td></tr>
+      <tr><td class="id">8</td><td>Seed configuration of the four sections: categories, English prompts, thresholds, primary-source allowlists, disclaimers, sample sources. <strong>Needs your confirmation of what matters and what is noise in each section</strong></td><td class="dim">5 6 7</td><td><span class="pill so">sonnet</span></td><td class="dim">§3</td></tr>
+      <tr><td class="id">9</td><td>Admin area: sections, sources, review queue (bound to the body version), manual overrides, corrections, ledger and budget, dead-letter replay</td><td class="dim">4 5 7 10</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
+      <tr><td class="id">10</td><td>Public site and RSS: home page, navigation for the four sections, provenance information, evidence labels, finance notice, reader tier, SSR mode of each route</td><td class="dim">4 7</td><td><span class="pill so">sonnet</span></td><td class="dim">§5 §6</td></tr>
+      <tr><td class="id">11</td><td>Event grouping and timeline: embeddings, Vectorize recall plus recent events, Jev judgment, sequential grouping, revision, event page</td><td class="dim">7 9 10</td><td><span class="pill op">opus</span></td><td class="dim">§2.2</td></tr>
+      <tr><td class="id">12</td><td>Daily digest and admin email: deterministic topic selection, writing model composes the text, page, RSS, email</td><td class="dim">10 11</td><td><span class="pill op">opus</span></td><td class="dim">§7</td></tr>
       <tr class="ms"><td colspan="5">M2 · Stage 2 Ask and explain</td></tr>
-      <tr><td class="id">13</td><td>事件产物生成器、Story Brief、三档解释、术语表、Research Paper Decoder</td><td class="dim">11</td><td><span class="pill op">opus</span></td><td class="dim">§2.3 §3 §7</td></tr>
-      <tr><td class="id">14</td><td>论断级证据：抽取、引文校验、跨信源支持或反驳、事实与解读与预测、"Inspect evidence"面板、正文分块索引</td><td class="dim">13</td><td><span class="pill op">opus</span></td><td class="dim">§2.5 §6</td></tr>
-      <tr><td class="id">15</td><td>Ask Newsren（后台）：检索已批准正文、需要新证据时在白名单内补抓、带引用回答、"没能核实的部分"、拒答</td><td class="dim">14</td><td><span class="pill op">opus</span></td><td class="dim">§1 §7</td></tr>
-      <tr><td class="id">16</td><td>AI 起草板块配置与信源发现：Web Search、探测、Jev 抽样评估、带上限的自动启用</td><td class="dim">6 9</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
+      <tr><td class="id">13</td><td>Event artifact generator, Story Brief, three-tier explanations, glossary, Research Paper Decoder</td><td class="dim">11</td><td><span class="pill op">opus</span></td><td class="dim">§2.3 §3 §7</td></tr>
+      <tr><td class="id">14</td><td>Claim-level evidence: extraction, quote validation, cross-source support or contradiction, fact vs. interpretation vs. forecast, "Inspect evidence" panel, body chunk index</td><td class="dim">13</td><td><span class="pill op">opus</span></td><td class="dim">§2.5 §6</td></tr>
+      <tr><td class="id">15</td><td>Ask Newsren (admin area): retrieve approved bodies, fetch more within the allowlist when new evidence is needed, answer with citations, "parts that could not be verified", refusal</td><td class="dim">14</td><td><span class="pill op">opus</span></td><td class="dim">§1 §7</td></tr>
+      <tr><td class="id">16</td><td>AI-drafted section config and source discovery: Web Search, probing, Jev sample evaluation, automatic enabling with a cap</td><td class="dim">6 9</td><td><span class="pill op">opus</span></td><td class="dim">§6</td></tr>
       <tr class="ms"><td colspan="5">M3 · Stage 3 Connect and follow</td></tr>
-      <tr><td class="id">17</td><td>Follow a Topic：watch、规则预过滤加 Jev 判定、按事件 revision 去重、公开页与 RSS</td><td class="dim">11</td><td><span class="pill op">opus</span></td><td class="dim">§2.6 §7</td></tr>
-      <tr><td class="id">18</td><td>追到一手来源与变化检测：白名单内跟链接、revision 之间的变化、厂商说法与第三方评测分开标</td><td class="dim">6 14</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.2 §2.5 §3</td></tr>
-      <tr><td class="id">19</td><td>周报：页面、RSS、管理员邮件</td><td class="dim">12</td><td><span class="pill so">sonnet</span></td><td class="dim">§7</td></tr>
+      <tr><td class="id">17</td><td>Follow a Topic: watch, rule pre-filter plus Jev judgment, dedup by event revision, public page and RSS</td><td class="dim">11</td><td><span class="pill op">opus</span></td><td class="dim">§2.6 §7</td></tr>
+      <tr><td class="id">18</td><td>Trace to primary source and change detection: follow links within the allowlist, changes between revisions, label vendor claims and third-party evaluations separately</td><td class="dim">6 14</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.2 §2.5 §3</td></tr>
+      <tr><td class="id">19</td><td>Weekly report: page, RSS, admin email</td><td class="dim">12</td><td><span class="pill so">sonnet</span></td><td class="dim">§7</td></tr>
       <tr class="ms"><td colspan="5">M4 · Stage 4 Briefings and depth</td></tr>
-      <tr><td class="id">20</td><td>学习材料与板块编辑产品：课堂讨论、测验、活动；Policy Impact Explorer、Education Evidence Checker、AI-in-Finance Reality Check、Regulation Watch、Skills and Career Trends</td><td class="dim">13</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.3 §3 §4</td></tr>
-      <tr><td class="id">21</td><td>行业影响报告：有依据与推测分开标，供应链影响按假设呈现</td><td class="dim">14</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.4 §3</td></tr>
-      <tr><td class="id">22</td><td>EDGAR 结构化适配器与 Earnings Decoder：公司范围、submissions 与 XBRL、8-K Item 2.02、对比指引和前期、每个数字链接 filing</td><td class="dim">3 13</td><td><span class="pill op">opus</span></td><td class="dim">§4</td></tr>
-      <tr><td class="id">23</td><td>Funding Round Tracker：从已批准文章抽取、确定性去重与更正、按领域和阶段的趋势、不做投资排名</td><td class="dim">14</td><td><span class="pill op">opus</span></td><td class="dim">§4</td></tr>
-      <tr><td class="id">24</td><td>可信度与成本看板：论断抽检、更正率、审核耗时、按渠道的每条成本、信源健康、匿名访问统计</td><td class="dim">9 14</td><td><span class="pill so">sonnet</span></td><td class="dim">§9</td></tr>
-      <tr><td class="id">25</td><td>上线收尾：四个板块上线、冒烟脚本、预算核对、部署手册</td><td class="dim">全部</td><td><span class="pill op">opus</span></td><td class="dim">—</td></tr>
+      <tr><td class="id">20</td><td>Learning materials and section editorial products: class discussion, quizzes, activities; Policy Impact Explorer, Education Evidence Checker, AI-in-Finance Reality Check, Regulation Watch, Skills and Career Trends</td><td class="dim">13</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.3 §3 §4</td></tr>
+      <tr><td class="id">21</td><td>Industry impact report: label what is evidenced and what is speculation separately; present supply-chain impact as assumptions</td><td class="dim">14</td><td><span class="pill so">sonnet</span></td><td class="dim">§2.4 §3</td></tr>
+      <tr><td class="id">22</td><td>EDGAR structured adapter and Earnings Decoder: company scope, submissions and XBRL, 8-K Item 2.02, compare with guidance and prior periods, every number links to the filing</td><td class="dim">3 13</td><td><span class="pill op">opus</span></td><td class="dim">§4</td></tr>
+      <tr><td class="id">23</td><td>Funding Round Tracker: extract from approved articles, deterministic dedup and correction, trends by field and stage, no investment ranking</td><td class="dim">14</td><td><span class="pill op">opus</span></td><td class="dim">§4</td></tr>
+      <tr><td class="id">24</td><td>Credibility and cost dashboard: spot checks of claims, correction rate, review time, cost per item by channel, source health, anonymous visit statistics</td><td class="dim">9 14</td><td><span class="pill so">sonnet</span></td><td class="dim">§9</td></tr>
+      <tr><td class="id">25</td><td>Launch wrap-up: four sections online, smoke script, budget reconciliation, deployment handbook</td><td class="dim">All</td><td><span class="pill op">opus</span></td><td class="dim">—</td></tr>
     </tbody>
   </table></div>
-  <p class="dim" style="color:var(--muted)">表里的编号就是 GitHub issue 编号；总任务是 epic #26。M1 基本是串行的，执行顺序见 epic。</p>
+  <p class="dim" style="color:var(--muted)">The numbers in the table are GitHub issue numbers. The overall task is epic #26. M1 is mostly sequential; see the epic for the execution order.</p>
 </section>
 
 <section>
   <header>
-    <div class="label">05 · 放到以后的</div>
+    <div class="label">05 · Left for later</div>
   </header>
   <ul class="notes">
-    <li><strong>你定的：</strong>读者邮件订阅；需要浏览器才能抓的信源（Browser Run 第 4 档）。</li>
-    <li><strong>scope 表里原本就是"以后"的：</strong>月报、站内搜索、定期重新发现、按标注样本校准门槛。</li>
-    <li><strong>Newsren 里做不到的：</strong>N§9 Education 的"理解与迁移测试提升"要有读者账号和对照实验，这个项目里测不了。</li>
+    <li><strong>Decided by you:</strong> reader email subscription; sources that need a browser to fetch (Browser Run, tier 4).</li>
+    <li><strong>Already "later" in the scope table:</strong> monthly report, on-site search, periodic re-discovery, threshold calibration from labeled samples.</li>
+    <li><strong>Cannot be done from Newsren:</strong> the N§9 Education metric "improvement in understanding and transfer tests" needs reader accounts and a controlled experiment. This project cannot measure it.</li>
   </ul>
 </section>
 
 <section>
   <header>
-    <div class="label">06 · 开工前要你做的</div>
-    <p>不阻塞开 issue；阻塞 #2 的部署和 #12 的邮件。</p>
+    <div class="label">06 · What you need to do before work starts</div>
+    <p>These do not block opening issues. They block the deployment of #2 and the email of #12.</p>
   </header>
   <ul class="checks">
-    <li><span>建好 Zero Trust 应用后，把 <strong>AUD tag 和 team domain</strong> 给我<small>Worker 校验 Access JWT 要用这两个值。应用只保护 <code>news.ioenv.com/admin*</code></small></span></li>
-    <li><span>部署用的 Cloudflare API token，存进 GitHub secret <code>CLOUDFLARE_API_TOKEN</code><small>要有 Workers Scripts、D1、R2、Queues、Vectorize 的编辑权限，以及 <code>ioenv.com</code> 的 Workers Routes 权限。<code>CF_AI_API_TOKEN</code> 看名字是给 AI Gateway 用的，不够部署 <span class="pill asm">假设</span>。命令：<code>gh secret set CLOUDFLARE_API_TOKEN -R githonllc/ainews</code></small></span></li>
-    <li><span>在 Email Service 里接入 <code>ioenv.com</code> 作为发件域名<small>评审提到 DNS 可能要 24 小时才生效 <span class="pill asm">未核实</span>，越早越好</small></span></li>
-    <li><span>确认 <code>CF_AI_API_TOKEN</code> 是 AI Gateway 的鉴权 token<small>#3 会用它做一次真实调用来核实</small></span></li>
-    <li><span>Workers Paid 是否已在 simon 账号开通<small>Queues、Vectorize 和 30 秒的 cron CPU 都依赖它</small></span></li>
+    <li><span>After the Zero Trust app is created, give me the <strong>AUD tag and the team domain</strong><small>The Worker needs these two values to validate the Access JWT. The app protects only <code>news.ioenv.com/admin*</code></small></span></li>
+    <li><span>Store the Cloudflare API token for deployment in the GitHub secret <code>CLOUDFLARE_API_TOKEN</code><small>It needs edit permission for Workers Scripts, D1, R2, Queues, and Vectorize, and Workers Routes permission for <code>ioenv.com</code>. By its name, <code>CF_AI_API_TOKEN</code> is for AI Gateway and is not enough for deployment <span class="pill asm">Assumed</span>. Command: <code>gh secret set CLOUDFLARE_API_TOKEN -R githonllc/ainews</code></small></span></li>
+    <li><span>In Email Service, connect <code>ioenv.com</code> as the sending domain<small>The review mentions that DNS may take 24 hours to take effect <span class="pill asm">Not verified</span>. The earlier the better</small></span></li>
+    <li><span>Confirm that <code>CF_AI_API_TOKEN</code> is the AI Gateway auth token<small>#3 will verify it with one real call</small></span></li>
+    <li><span>Whether Workers Paid is already enabled on the simon account<small>Queues, Vectorize, and the 30-second cron CPU all depend on it</small></span></li>
   </ul>
 </section>
 
 <section>
   <header>
-    <div class="label">07 · 执行方式</div>
+    <div class="label">07 · How the work runs</div>
   </header>
   <ul class="notes">
-    <li>每个 issue 一个分支、一个 worktree、一个 PR；CI 通过后 auto-merge（squash）。仓库的第一个 commit 只有文档，直接进 main，之后全部走 PR。</li>
-    <li><strong>细化的时机偏离了我的默认规则</strong>：规则要求 issue 一开出来就带"实现细化"。但仓库现在没有代码，M2–M4 的细化只能猜文件和接口，#2 落地后就会过期。所以 M0 和 M1 现在细化、打 <code>refined</code> 标签；M2–M4 先写范围、验收和依赖，派发前再细化。</li>
-    <li>#2、#3、#6、#7、#11、#14 牵涉幂等、外部语义或数据完整性，合并前再过一轮跨家族评审。</li>
-    <li>执行 agent 报告"测试全绿"后，我独立复核，不直接相信报告。</li>
-    <li>评审意见已经并入架构契约：账本租约、预算预留、顺序归组、revision 键、审核绑定版本、只发布已批准输入、Funding 和 EDGAR 单独建模（见 <code>docs/plan/review-2026-10-22.md</code>）。</li>
+    <li>One branch, one worktree, one PR per issue. After CI passes, auto-merge (squash). The first commit of the repo holds only documents and goes straight to main. Everything after that goes through PRs.</li>
+    <li><strong>The timing of the detail work departs from my default rule</strong>: the rule says an issue carries an "implementation detail" section as soon as it is opened. But the repo has no code now. For M2–M4, the detail could only guess at files and interfaces, and it would be outdated once #2 lands. So M0 and M1 are detailed now and get the <code>refined</code> label. For M2–M4, scope, acceptance, and dependencies come first, and the detail is written before dispatch.</li>
+    <li>#2, #3, #6, #7, #11, and #14 involve idempotency, external semantics, or data integrity. They get one more cross-family review round before merge.</li>
+    <li>After an executing agent reports "all tests green", I check independently. I do not trust the report directly.</li>
+    <li>The review findings are already merged into the architecture contract: ledger leases, budget reservation, sequential grouping, revision key, review bound to version, publish only approved input, Funding and EDGAR modeled separately (see <code>docs/plan/review-2026-10-22.md</code>).</li>
   </ul>
 </section>
 
 <section>
   <header>
-    <div class="label">08 · 风险</div>
+    <div class="label">08 · Risks</div>
   </header>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>风险</th><th>后果</th><th>对策</th></tr></thead>
+    <thead><tr><th>Risk</th><th>Consequence</th><th>Countermeasure</th></tr></thead>
     <tbody>
-      <tr><td>Unified Billing 的请求格式 <span class="pill asm">假设</span></td><td>#3 的客户端要返工</td><td>#3 第一步做一次真实调用；不行就换槽位里的模型</td></tr>
-      <tr><td>Jev 的 32k 上下文</td><td>长文评分被截断</td><td>判断只送标题、摘要和开头；长文的推理交给 <code>reason</code> 槽位</td></tr>
-      <tr><td>Web Search API 还是 Beta</td><td>信源发现中断</td><td>只影响 #16；手动加信源一直可用</td></tr>
-      <tr><td>提示词没有按样本校准</td><td>入选质量不稳</td><td>所有板块先用审核模式；校准放到以后</td></tr>
-      <tr><td>自动启用信源（Q4）</td><td>成本跟着信源数涨</td><td>每板块 50 个上限、每日发现预算、按渠道预算预留</td></tr>
-      <tr><td>arXiv cs.AI 每天几百条</td><td>预算和归组队列积压</td><td>预筛用 Jev（几乎免费）；归组积压十几分钟对日报可以接受 <span class="pill asm">推断</span></td></tr>
+      <tr><td>Request format of Unified Billing <span class="pill asm">Assumed</span></td><td>The client in #3 needs rework</td><td>The first step of #3 is one real call; if it fails, change the model in the slot</td></tr>
+      <tr><td>The 32k context of Jev</td><td>Scoring of long articles is truncated</td><td>Send only the title, summary, and opening for judgment; leave reasoning on long articles to the <code>reason</code> slot</td></tr>
+      <tr><td>Web Search API is still Beta</td><td>Source discovery stops</td><td>Affects only #16; adding sources by hand always works</td></tr>
+      <tr><td>Prompts are not calibrated on samples</td><td>Selection quality is unstable</td><td>All sections use review mode first; calibration goes to later</td></tr>
+      <tr><td>Automatic enabling of sources (Q4)</td><td>Cost grows with the number of sources</td><td>Cap of 50 per section, a daily discovery budget, per-channel budget reservation</td></tr>
+      <tr><td>arXiv cs.AI has several hundred items per day</td><td>Budget and grouping queue back up</td><td>Pre-filter with Jev (almost free); a grouping backlog of ten-odd minutes is acceptable for the daily digest <span class="pill asm">Inferred</span></td></tr>
     </tbody>
   </table></div>
 </section>

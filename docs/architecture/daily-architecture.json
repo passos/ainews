@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Daily system architecture: an agentic news site on one Cloudflare Worker",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "reader-path",
+        "label": "Reader path",
+        "focus": [
+          "readers",
+          "app",
+          "d1"
+        ],
+        "note": "Public pages read only approved content through the publication layer. They never import model code."
+      },
+      {
+        "id": "editor-path",
+        "label": "Editor console",
+        "focus": [
+          "editor",
+          "access",
+          "app",
+          "d1"
+        ],
+        "note": "/admin sits behind Cloudflare Access. Every admin server function checks the identity again."
+      },
+      {
+        "id": "pipeline-path",
+        "label": "News pipeline",
+        "focus": [
+          "queues",
+          "pipeline",
+          "sources",
+          "d1",
+          "r2",
+          "vectorize"
+        ],
+        "note": "Cron only schedules. Queue consumers collect, fetch bodies, analyze, group and generate."
+      },
+      {
+        "id": "cost-path",
+        "label": "Cost control",
+        "focus": [
+          "pipeline",
+          "modelclient",
+          "models"
+        ],
+        "note": "Every model call writes a ledger row and reserves today's budget first. Over the cap, the call is not sent."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "readers",
+      "type": "external",
+      "label": "Readers",
+      "sublabel": "news.ioenv.com",
+      "pos": [
+        40,
+        90
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "app",
+      "type": "frontend",
+      "label": "Worker fetch",
+      "sublabel": "public site + /admin",
+      "pos": [
+        260,
+        90
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "editor",
+      "type": "external",
+      "label": "Editor",
+      "sublabel": "review, take down, Ask",
+      "pos": [
+        40,
+        260
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "access",
+      "type": "security",
+      "label": "Cloudflare Access",
+      "sublabel": "protects /admin",
+      "pos": [
+        260,
+        260
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "d1",
+      "type": "database",
+      "label": "D1",
+      "sublabel": "articles, events, ledger",
+      "pos": [
+        520,
+        90
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "r2",
+      "type": "database",
+      "label": "R2",
+      "sublabel": "versioned bodies",
+      "pos": [
+        520,
+        260
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "vectorize",
+      "type": "database",
+      "label": "Vectorize",
+      "sublabel": "event recall, body chunks",
+      "pos": [
+        520,
+        430
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "queues",
+      "type": "messagebus",
+      "label": "Cron + Queues",
+      "sublabel": "every 10 min, three queues",
+      "pos": [
+        790,
+        90
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "Pipeline consumers",
+      "sublabel": "collect, analyze, group, write",
+      "pos": [
+        790,
+        260
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "sources",
+      "type": "external",
+      "label": "Sources",
+      "sublabel": "RSS, list pages, SEC",
+      "pos": [
+        1080,
+        260
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "modelclient",
+      "type": "security",
+      "label": "createModelClient",
+      "sublabel": "call ledger + daily budget",
+      "pos": [
+        790,
+        430
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "models",
+      "type": "cloud",
+      "label": "AI Gateway / Workers AI",
+      "sublabel": "Jev, Gemini, bge-m3",
+      "pos": [
+        1080,
+        430
+      ],
+      "size": [
+        200,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Cloudflare: one Worker, ainews-app",
+      "wraps": [
+        "app",
+        "access",
+        "d1",
+        "r2",
+        "vectorize",
+        "queues",
+        "pipeline",
+        "modelclient"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "reader-https",
+      "from": "readers",
+      "to": "app",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "editor-login",
+      "from": "editor",
+      "to": "access",
+      "label": "sign in",
+      "variant": "security"
+    },
+    {
+      "id": "access-identity",
+      "from": "access",
+      "to": "app",
+      "label": "identity",
+      "variant": "security"
+    },
+    {
+      "id": "app-reads",
+      "from": "app",
+      "to": "d1",
+      "label": "approved only",
+      "variant": "emphasis"
+    },
+    {
+      "id": "dispatch",
+      "from": "queues",
+      "to": "pipeline",
+      "label": "by kind",
+      "labelAt": [
+        890,
+        207
+      ]
+    },
+    {
+      "id": "fetch-sources",
+      "from": "pipeline",
+      "to": "sources",
+      "label": "fetch"
+    },
+    {
+      "id": "write-state",
+      "from": "pipeline",
+      "to": "d1",
+      "label": "state, artifacts"
+    },
+    {
+      "id": "write-bodies",
+      "from": "pipeline",
+      "to": "r2",
+      "label": "bodies",
+      "labelDy": 14
+    },
+    {
+      "id": "write-vectors",
+      "from": "pipeline",
+      "to": "vectorize",
+      "label": "vectors"
+    },
+    {
+      "id": "model-call",
+      "from": "pipeline",
+      "to": "modelclient",
+      "label": "every call",
+      "labelAt": [
+        890,
+        377
+      ]
+    },
+    {
+      "id": "send-model",
+      "from": "modelclient",
+      "to": "models",
+      "label": "reserved",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Publication boundary",
+      "items": [
+        "Public pages read data only through server/publication",
+        "One definition of approved: approvedArticleWhere",
+        "An architecture test blocks routes from importing model code"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Pipeline",
+      "items": [
+        "Code for fixed steps; Jev for judgment; Gemini for writing and reasoning",
+        "Event revision stops stale jobs from overwriting new results",
+        "Quotes are matched word for word against the source in code"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust and cost",
+      "items": [
+        "Editor review before publication; Finance always manual",
+        "Ledger llm_calls: one row per call, no double payment",
+        "Gateway daily cap in five tiers; over the cap, no call"
+      ]
+    }
+  ]
+}
