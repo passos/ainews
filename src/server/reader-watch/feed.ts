@@ -26,7 +26,8 @@ function plain(status: number, body: string): Response {
 
 /**
  * The cited articles (rationale.articleIds) of a hit, or null when the list
- * is missing, corrupt or empty: the hit is then not shown.
+ * is missing or corrupt: the hit is then not shown. An empty list cites no
+ * visible article, so citedOnly drops it too.
  */
 function citedIds(rationale: string): Set<unknown> | null {
   let parsed: unknown;
@@ -39,23 +40,28 @@ function citedIds(rationale: string): Set<unknown> | null {
     parsed !== null && typeof parsed === "object"
       ? (parsed as { articleIds?: unknown }).articleIds
       : undefined;
-  if (!Array.isArray(ids) || ids.length === 0) return null;
+  if (!Array.isArray(ids)) return null;
   return new Set(ids);
 }
 
-/** Keeps only the cited articles of each hit; drops hits without a valid list. */
-function citedOnly(hits: WatchHitItem[]): WatchHitItem[] {
+/** Item title when the newest cited article has an empty title. */
+export const UNTITLED_ITEM = "Watch update";
+
+/**
+ * Keeps only the cited articles of each hit; drops a hit without a valid
+ * list or without a visible cited article. The item title is the newest
+ * cited article's own title: never the event title, which can come from an
+ * article the hit does not cite.
+ */
+export function citedOnly(hits: WatchHitItem[]): WatchHitItem[] {
   const out: WatchHitItem[] = [];
   for (const h of hits) {
     const ids = citedIds(h.rationale);
     if (ids === null) continue;
     const articles = h.articles.filter((a) => ids.has(a.id));
-    out.push({
-      ...h,
-      // Same rule as getWatchView (newest approved article), cited only.
-      eventTitle: articles.at(-1)?.title || h.eventTitle,
-      articles,
-    });
+    const newest = articles.at(-1);
+    if (newest === undefined) continue;
+    out.push({ ...h, eventTitle: newest.title || UNTITLED_ITEM, articles });
   }
   return out;
 }
@@ -110,13 +116,17 @@ export async function readerFeedResponse(
   const row = await db.get<{
     id: number;
     question: string;
+    status: string;
     disabled_at: number | null;
   }>(sql`
-    SELECT id, question, disabled_at FROM watches
+    SELECT id, question, status, disabled_at FROM watches
     WHERE token_hash = ${await tokenHash(token)} AND owner_kind = 'reader'
   `);
   if (!row) return plain(404, "Not found");
-  if (row.disabled_at !== null) return plain(410, "Gone");
+  // Fail closed: any row that is not plainly active is gone.
+  if (row.disabled_at !== null || row.status !== "active") {
+    return plain(410, "Gone");
+  }
 
   // At most one write per watch every 6 hours (architecture §6 "清理").
   await db.run(sql`
