@@ -39,7 +39,12 @@ export async function loadEvent(
   // Awaited, not streamed: the artifact cards are in the shell and show them.
   const [data, artifactSources] = await Promise.all([
     fns.getEvent(eventId),
-    fns.getEventArtifactSources(eventId),
+    // Source info is optional: a failed query must not break the page or
+    // turn a 404 into a 500.
+    fns.getEventArtifactSources(eventId).catch((e) => {
+      console.error({ error: "artifact sources query failed", eventId, e });
+      return [];
+    }),
   ]);
   if (!data) throw notFound();
   return {

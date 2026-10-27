@@ -699,6 +699,12 @@ describe("artifact sources (#115)", () => {
     expect(html.match(/<time/g)).toHaveLength(1);
   });
 
+  it("ArtifactSources renders nothing for an empty sources array", () => {
+    expect(
+      renderToStaticMarkup(createElement(ArtifactSources, { sources: [] })),
+    ).toBe("");
+  });
+
   it("artifact cards render nothing without sources", () => {
     expect(
       renderToStaticMarkup(

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { isNotFound } from "@tanstack/react-router";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadEvent } from "../../src/routes/e/$eventId";
 import {
   getEvent,
@@ -87,6 +87,58 @@ describe("tests/routes/event.test.ts", () => {
       );
     } catch (e) {
       caught = e;
+    }
+
+    expect(caught).toBeDefined();
+    expect(isNotFound(caught)).toBe(true);
+  });
+
+  it("artifact sources query failure still loads the event with empty sources", async () => {
+    const eventId = await seedEvent(tech.industryId, "Sources Fail Event", 0);
+    const art = await seedArticle({
+      ...tech,
+      title: "Approved Article Title",
+      publishedAt: 1000,
+    });
+    await seedEventArticle(eventId, art, 1000);
+    await seedReview(art, "approved");
+
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await loadEvent(
+        { eventId: String(eventId) },
+        {
+          getEvent: (id) => getEvent(db(), id),
+          getEventSources: (id) => getEventSources(db(), id),
+          getEventArtifactSources: () =>
+            Promise.reject(new Error("d1 unavailable")),
+        },
+      );
+      expect(result.data.articles[0].id).toBe(art);
+      expect(result.artifactSources).toEqual([]);
+      expect(errors).toHaveBeenCalledTimes(1);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("missing event with a failing artifact sources query throws notFound, not the query error", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let caught: unknown = null;
+    try {
+      await loadEvent(
+        { eventId: "999999" },
+        {
+          getEvent: async () => null,
+          getEventSources: (id) => getEventSources(db(), id),
+          getEventArtifactSources: () =>
+            Promise.reject(new Error("d1 unavailable")),
+        },
+      );
+    } catch (e) {
+      caught = e;
+    } finally {
+      errors.mockRestore();
     }
 
     expect(caught).toBeDefined();
