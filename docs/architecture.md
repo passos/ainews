@@ -41,8 +41,8 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 ### 变量与密钥
 
 - 变量：`SITE_URL`、`ADMIN_EMAIL`、`EMAIL_FROM`（默认 `digest@ioenv.com`，**假设**，待使用者确认）、`ACCESS_TEAM_DOMAIN`（完整 origin，如 `https://<team>.cloudflareaccess.com`）、`ACCESS_AUD`、`AI_GATEWAY_ID`、`SEC_USER_AGENT`、`CF_BEACON_TOKEN`（Web Analytics；空字符串 = 不输出 beacon 脚本）。
-- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。
-- 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`。
+- 密钥（本地在 `.env.prod`，不进 git；线上用 `wrangler secret`）：`JINA_API_KEY`；`CF_AI_API_TOKEN` 只在 #3 的冒烟测试证明运行时需要它时才上传。`CLOUDFLARE_API_TOKEN` 是 Account API token（`ainews-deploy`），给本地 `provision.sh` 和 CI 部署用，GitHub secret 同名。`account_id` 写在 `wrangler.jsonc` 里，所以 CI 不需要 `CLOUDFLARE_ACCOUNT_ID`，它只给本地脚本用。`IP_HASH_SALT`（#132）：公开写入口给网络地址做哈希用的盐，至少 32 个随机字节，所有公开写入口共用，只用 `wrangler secret` 设置，不进 `vars`；缺失或为空时，需要它的写入口拒绝写入。
+- 安全阀，只有值为 `"true"` 才打开，默认全关：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`EMAIL_ENABLED`、`THIRD_PARTY_READER_ENABLED`、`DISCOVERY_ENABLED`、`READER_WATCH_ENABLED`（#132，读者自建关注，见第 6 节「读者 watch」）。
 - 测试里安全阀一直关着；外部请求只连本地假服务。
 
 ## 2. 前端契约（使用者原文）
@@ -56,6 +56,8 @@ TanStack Start 用 `@cloudflare/vite-plugin`。自定义入口可以同时导出
 | `/`、`/s/$section`、`/e/$eventId`、`/digest/$section/$date`、`/w/$watch` | 完整 SSR，次要区块流式 | loader 调 `publication/` 的 server function |
 | `/a/$articleId` | 完整 SSR | loader 调 `publication/` 的 server function（D1 + R2 `BODIES`，不调模型，不占预算） |
 | `/rss/*.xml` | server route，纯文本 | `publication/`；板块 feed 的条目 `<link>` 是 `{SITE_URL}/a/{id}`，描述里带原始链接，guid 不变 |
+| `/follow` | 完整 SSR | 读者建 watch 的表单与撤销表单；开关状态来自 `loadSiteShell`；写入只经 `server/reader-watch/` 的 POST server function；`READER_WATCH_ENABLED` 不是 `"true"` 时 404 |
+| `/rss/p/{token}.xml` | server route，纯文本 | 读者的私有 RSS，只经 `server/reader-watch/`；见第 6 节「读者 watch」 |
 | `/admin/*` | `ssr: 'data-only'` | `admin/` 的 server function，先过 Access 中间件 |
 
 文章阅读页 `/a/$articleId`：
@@ -97,6 +99,7 @@ src/
   server/
     publication/            唯一的公开读取层：所有公开页面和 RSS 只从这里读
     admin/                  后台 server function + Access 中间件
+    reader-watch/           公开写入口：读者建 watch、撤销；私有 RSS 的读取层（#132）。写只限「公开写入口」表里的入口
     db/                     Drizzle schema、查询
   pipeline/                 collect · body · analyze · group · generate · digest · watch · ask · discover · edgar · funding
   providers/                模型客户端、llm_calls 账本、预算、Jina、toMarkdown
@@ -105,10 +108,29 @@ drizzle/migrations/         wrangler d1 migrations 执行
 tests/
 ```
 
-架构测试（`tests/architecture.test.ts`）强制两条：
+架构测试（`tests/architecture.test.ts`）强制四条：
 
 1. `routes/**` 和 `server/publication/**` 不 import `pipeline/**` 或 `providers/**` 的模型模块。这保证"读者打开页面不触发模型调用"。
-2. `routes/**` 读数据只经过 `server/publication/**` 或 `server/admin/**`。
+2. `routes/**` 读数据只经过 `server/publication/**`、`server/admin/**`，或 `server/reader-watch/**`（私有 RSS 的读取层，#132）。`server/reader-watch/**` 的写只限下面「公开写入口」表里的入口。
+3. `server/reader-watch/**` 不 import `pipeline/**`、`providers/**`、`server/admin/**`；公开入口的 R1 遍历在 `server/reader-watch/` 停下（同 `server/publication/`）；`routes/**` 可以 import `server/reader-watch/**`。
+4. `server/reader-watch/**` 里每个 `createServerFn(` 都写成 `createServerFn({ method: "POST" })`。
+
+**公开写入口**（#132 新增）：公开站能写数据库的只有下表的入口，其他公开代码只读。新增入口要先改本表（#24 的匿名反馈、#133 的读者 Ask 按同样规则加行）。
+
+| 入口 | 文件 + 符号 | 写什么 |
+|---|---|---|
+| 读者建 watch | `src/server/reader-watch/api.ts` `createReaderWatch` | `watches` 一行，`owner_kind = 'reader'` |
+| 读者撤销 watch | `src/server/reader-watch/api.ts` `revokeReaderWatch` | 该行的 `status`、`disabled_at`、`updated_at` |
+| 私有 RSS 读取 | `src/routes/rss/p/{$token}[.]xml.ts` → `serveReaderFeed` | 该行的 `last_read_at`，每 6 小时最多一次 |
+
+每个写入口都满足：
+
+1. 写入用 `method: "POST"` 的 server function，handler 里再检查一次请求方法是 `POST`（不依赖框架拒绝 GET）。请求经过 `src/server/edge.ts` 的 Origin 检查（对 GET、HEAD、OPTIONS 以外的方法生效）。私有 RSS 是 GET：它唯一的写是 `last_read_at`，只延长令牌持有者自己那一行的寿命。
+2. 输入用 zod 严格 schema（`.strict()`）校验，未知字段拒绝；长度和字符集写在第 6 节「读者 watch」。
+3. 由自己的开关控制，开关只认 `"true"`。
+4. 网络地址只取请求头 `cf-connecting-ip`，不读 `X-Forwarded-For` 或请求体；IPv4 取完整地址，IPv6 取前 64 位。库里只存 `sha256hex(IP_HASH_SALT + ":" + 用途 + ":" + UTC 日期 + ":" + 网络地址)`（假名化：持有盐的人可以对已知地址重算出同一个哈希），原始地址不写库、应用代码不写日志、不返回客户端。`IP_HASH_SALT` 缺失或为空就拒绝写入，不退回不加盐的哈希。
+5. 不调用模型。
+6. 超出上限时立即返回明确的错误码，不排队。
 
 ## 4. 流水线：确定性步骤与模型步骤
 
@@ -169,7 +191,7 @@ cron ─► Q_INGEST : collect(source) ─► body(article) ─► analyze(artic
 - **模型调用账本** `llm_calls`：`logical_key` 唯一，状态 `pending → in_flight → completed | failed | unknown`，带 `lease_expires_at`。租约过期的行可以用条件 `UPDATE` 接管；调用已发出、结果没落库的标 `unknown`，后台人工核账。承诺的是"不重复发起、可以恢复"，不是"恰好一次付费"。
 - **预算预留**：调用前用一条条件语句预留 `UPDATE budgets SET reserved = reserved + ? WHERE day = ? AND channel = ? AND reserved + spent + ? + ?floor <= cap`。`?floor` 是这一档的地板（见下一条「gateway 五档」），非 `gateway` 渠道恒为 0。影响行数为 0 就不调用。AI Gateway 的 spend limit 是最终一致的，只作外层兜底（**已验证**："Spend limits are eventually consistent"）。
 - **gateway 五档**（#116 新增）：`gateway` 的每日额度按调用用途分五档，档位挂在模型客户端上（`createModelClient` 的必填选项 `tier`），不挂在槽位、请求或 logical key 上，所以不改 `request_json`、`promptVersion` 和已有 key。
-  1 = 预筛评分摘要、归组（含 `body` 的记账）；2 = Story Brief 与三档解释；3 = 论断与证据、后台 Ask；4 = 学习材料、板块编辑产品、watch；5 = 日报导语（日报、周报）与 discover。
+  1 = 预筛评分摘要、归组（含 `body` 的记账）；2 = Story Brief 与三档解释；3 = 论断与证据、后台 Ask；4 = 学习材料、板块编辑产品、管理员 watch；5 = 日报导语（日报、周报）、discover 与读者 watch 的判定（#132）。
   - **保留额**：第 1–4 档各有一个保留额 `R1..R4`（整数微美元，默认 `R1 = 500000, R2 = 400000, R3 = 200000, R4 = 100000`，写在 `DEFAULT_TIER_RESERVES`；`settings` 键 `budget.tier_reserves` 可选，有就覆盖，没有就用默认，不写迁移）。第 N 档的地板 `floor(N) = R1 + … + R(N−1)`，所以第 1 档的地板是 0，第 5 档的地板是 `R1 + R2 + R3 + R4`。
   - **准入**：第 N 档的调用只有在花完之后剩余额度仍不少于 `floor(N)` 时才放行，即上面那条 `reserved + spent + est + floor(N) <= cap`。前面的档因此总能先用完自己的份额。只作用于 `gateway`；`workers_ai`（embed）和 `jina` 各有自己的上限，不分档。
   - **账本**：`llm_calls.tier`（可空整数，#116 迁移 ADD COLUMN；迁移前的旧行为 NULL，后台显示 "untiered"）。后台 `/admin/ledger` 按 `tier` 汇总当天 `gateway` 的花费。
@@ -447,12 +469,102 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 2. **跨事件依赖**：事件 E2 的同比数字取自事件 E1 的 filing；E1 的文章后来被拒，E1 加 1，E2 不加 1，E2 的产物不撤下。实现：W4 EDGAR 跟进。
 3. **后期重抓正文不加 1**（「事件 revision」第 16 行）：`src/pipeline/body/body.ts` 的 `force` 分支换 `body_sha` 时不加 1。现在没有调用方传 `force: true`，所以没有实际暴露。没有实现 issue；加调用方的 PR 按第 14 行实现。
 
+### 读者 watch（#132 新增）
+
+读者不注册，写下问题、命中条件和关键词，拿到一个私有 RSS 地址（N§2.1、N§2.6、N§7 "Follow a Topic"）。实现：#132。
+
+**数据**：读者 watch 和管理员 watch 在同一张 `watches` 表，共用 `evaluateEventWatches`（`src/pipeline/watch/evaluate.ts`）现有的规则 1–3（1 板块范围；2 只看本 watch 没引用过、且在 watch 创建之后批准的文章；3 至少命中一个关键词）和 `watch_hits`。新增列都用 `ALTER TABLE ADD COLUMN`，不加 CHECK：
+
+| 列 | 类型 | 含义 |
+|---|---|---|
+| `owner_kind` | text，非空，默认 `'admin'` | `admin` 或 `reader`；闭集在写入端校验 |
+| `token_hash` | text，可空，唯一索引 | 读者 watch 令牌的 SHA-256（小写 hex）；管理员 watch 为 NULL |
+| `creator_hash` | text，可空，索引 | 建立者网络地址的加盐哈希（第 3 节「公开写入口」第 4 条，用途 `reader_watch`） |
+| `last_read_at` | integer，可空 | 私有 RSS 最近一次被读取的时刻 |
+| `disabled_at` | integer，可空 | 停用时刻。停用 = `status = 'paused'` 且 `disabled_at` 非空，不可恢复 |
+
+- 读者 watch 的 `slug` = `r-` 加 16 位随机小写 hex，与令牌无关，只用来满足 `slug` 非空唯一；任何公开路径都不用它。
+- **公开的 watch 只有一个判定**：`adminWatchWhere`（`src/server/publication/watches.ts`，`watches.owner_kind = 'admin'`）。所有公开读取 `watches` 的查询都带它（watch 页、`/w/` 列表、首页、页眉、公开 watch RSS），公开查询里不给 `watches` 起别名。扫描测试固定 `src/server/publication/**` 和 `src/routes/**` 里每处 `watches` 读取都引用它。
+- 读者 watch 的命中 `status = 'delivered'`：不进后台审核队列，也不满足公开读取的 `status = 'published'`。
+- 后台的 watch 编辑只处理 `owner_kind = 'admin'`。读者 watch 在后台单独列出，只能停用，不能编辑或恢复；后台不显示 `token_hash` 和 `creator_hash`。
+
+**令牌**：
+
+- 建立时用 `crypto.getRandomValues` 取 32 字节（256 位），编码为不带填充的 base64url，43 个字符。
+- 库里只存 `token_hash = sha256hex(token)`。明文只在建立的响应里返回一次，不写库、不进 `llm_calls`。应用代码不把令牌或完整的私有 RSS 地址写进日志。
+- 日志：令牌在 URL 路径里，Cloudflare 的调用日志记录请求 URL，所以令牌可能出现在那里。这些日志只有账户所有者能读，而账户所有者本来就能在 D1 里读到所有 watch，所以没有人因此多得到访问权。
+- 私有 RSS 地址：`{SITE_URL}/rss/p/{token}.xml`。令牌不匹配 `^[A-Za-z0-9_-]{43}$`，或按 `token_hash` 与 `owner_kind = 'reader'` 查不到：404。已停用：410。
+- 不可枚举：令牌空间是 2^256；没有任何公开接口列出读者 watch；`slug` 与令牌无关，用 `slug` 访问 `/w/$slug` 被 `adminWatchWhere` 挡住（404）。
+- 撤销：`revokeReaderWatch({ token })`（POST）把该行写成停用。撤销不退还建立额度。
+- 私有 RSS 的响应头：`Cache-Control: private, no-store`、`Referrer-Policy: no-referrer`、`X-Robots-Tag: noindex, nofollow`。私有 RSS 不出现在公开页面、公开 RSS 和页面的 loader 数据里。
+
+**输入**：请求体不超过 4 KB（4,096 字节），在解析之前检查：`Content-Length` 缺失时返回 411 `length_required`，大于 4,096 时返回 413 `payload_too_large`，都不写库。解析之后、规范化之前，先查每个字符串的原始长度：`question` 不超过 400 个字符，`criteria` 不超过 600，每个关键词不超过 80；超出同样返回 413 `payload_too_large`，不写库。然后做 NFC 规范化、去掉首尾空白、把连续空白合成一个空格，再用 zod `.strict()` 校验。
+
+| 字段 | 规则 |
+|---|---|
+| `question` | 10–200 个字符 |
+| `criteria` | 10–300 个字符 |
+| `keywords` | 1–5 个，每个 2–40 个字符，不区分大小写去重 |
+| `industrySlug` | 可为 null（= 除 Finance 外的全部板块）；非 null 时必须是存在的板块，且不是 Finance |
+
+- 三个文字字段共用字符白名单 `/^[\p{L}\p{M}\p{N} .,;:!?'()\-–—\/&%$#+@*]+$/u`。双引号、反引号、`< > { } [ ] = \ | ^ ~ _`、控制字符、零宽字符和双向控制字符都不在白名单里，校验时拒绝。换行和其他空白在规范化时合成一个空格，所以到达提示词的文字里没有换行。
+- 白名单只约束格式。判定提示词 `buildWatchJudgeQuestion` 把问题和条件放在双引号里（`Topic Question: "…"`），这段文字不改。读者的文字里没有双引号和换行，但这不能阻止问题试图引导判定结果。钱和发布安全不依赖模型守规矩，只依赖确定性的防线：每日判定尝试上限、第 5 档预算准入、私有 RSS 只输出已批准文章且不含模型写的文字（见「命中」）。离线评估的题集要包含注入式的问题（见「开关」）。
+- 关键词必填：规则 3 对没有关键词的 watch 不调用模型。关键词按 `matchKeyword` 匹配（纯 ASCII 单词按词边界，其他按子串）；`AI` 这类常见词会让一个 watch 匹配大多数事件，兜底是每日判定尝试上限和第 5 档预算准入。不从问题里自动抽关键词：用模型抽要在匿名入口上花钱；按词切分会让关键词过滤失去作用。
+- 存什么、送到哪：问题、条件和关键词以明文存在 `watches`；问题和条件也以明文存在 `llm_calls.request_json`（判定请求），并发给模型提供方。watch 停用后这些文字仍然保留；删除已停用的读者行、清理 `llm_calls.request_json` 里的读者文字是以后单独的 issue（#132 的非目标）。`/follow` 页面用一行字写明这一点。
+
+**上限**（常量 `READER_WATCH_LIMITS`，`src/server/reader-watch/limits.ts`，改值另开 PR）：
+
+| 上限 | 值 | 超出时 |
+|---|---|---|
+| 每个网络地址每个 UTC 日的建立数（含已撤销、已停用的行） | 3 | 429 `per_network_limit` |
+| 全站活跃读者 watch 数（`owner_kind = 'reader' AND status = 'active'`） | 200 | 503 `capacity_full` |
+| 每个 UTC 日的读者 watch 判定尝试数（每次真实发送计一次） | 500 | 跳过当次事件余下的读者 watch，管理员 watch 照常评估；事件不标记，第二天继续（见「判定」） |
+
+- 哈希里带 UTC 日期，所以每日建立数直接按 `creator_hash` 计数。这个哈希是假名化，不是匿名化：不同日期的哈希不同，但持有 `IP_HASH_SALT` 的人可以对一个已知地址重算出任一天的哈希。
+- 建立是一条 `INSERT INTO watches … SELECT … WHERE (同一 creator_hash 的行数) < 3 AND (全站活跃读者 watch 数) < 200`。影响 0 行时再读两个计数，决定返回 429 还是 503。
+- 建立不调用模型，不花钱。
+
+**判定**：`evaluateEventWatches` 在现有规则之上只加下面几条；规则 1–3、去重、revision 标记都不变。
+
+- `READER_WATCH_ENABLED` 不是 `"true"` 时，读者 watch 不参与评估（在 SQL 里排除），事件照常标记。关闭期间出现的进展，读者 watch 以后不补判。
+- 读者 watch 不评估 Finance 板块的事件（N§4 "no personalized investment advice"；第六轮读者 Ask v1 不含 Finance）。
+- 判定用同一个 `buildWatchJudgeQuestion`、同一个 `WATCH_PROMPT_VERSION`、同样的 logical key 写法。档位：读者 watch 是第 5 档（`CALL_TIERS.readerWatch`），管理员 watch 仍是第 4 档（`CALL_TIERS.watch`）。档位挂在模型客户端上，所以 `evaluateEventWatches` 给读者 watch 另建一个第 5 档的模型客户端。
+- 每日判定尝试上限：计的是尝试，不是 key。每次真实发送在发送当天（UTC）计一次：第一次尝试、重试、前一天已经登记过的 key 再次发送，都各计一次。只有账本缓存命中不计：读者 watch 调用 `judge` 之前先查这个 logical key 在 `llm_calls` 里有没有 `completed` 行（`findCompleted`，`src/providers/ledger.ts`），有就直接调用（模型客户端返回已存结果，不发送，不登记）。没有就在 `reader_watch_admissions` 登记一次尝试：`INSERT INTO reader_watch_admissions (logical_key, day, created_at) SELECT ?1, ?2, ?3 WHERE (SELECT count(*) FROM reader_watch_admissions WHERE day = ?2) < ?4`。影响 1 行：放行。影响 0 行：跳过这个读者 watch，这个事件余下的读者 watch 也直接跳过（不再登记），管理员 watch 照常评估，不抛错，事件的评估照常走完。评估结束时这个事件不标记（不写 `watch_evaluated_revision`），cron 的到期扫描以后重新入队；重跑时已经判过的 watch 走账本里的已存结果，不再付费。所以不需要规定管理员 watch 先评估。`day` = `utcDay(now)`。登记在预算准入之前，所以被预算拒掉的尝试也计一次。
+- 到期扫描（#92 `enqueueDueEvents`）按 `watch_scheduled_at` 从旧到新轮转，每轮最多 20 个事件，所以停在上限的事件不会挤掉其他事件；已经写入的命中不受影响。
+- issue 原文"超出后新建请求返回明确的错误，不排队"针对建立请求：每地址上限和全站上限都立即返回错误码。每日判定上限不针对建立请求，它推迟的是后台判定，不是读者的请求。
+- **命中**：读者 watch 的命中不调用 `write`，`summary` 写空字符串，`status` 写 `delivered`。私有 RSS 只显示该命中引用的（`rationale.articleIds`）、当前仍满足 `approvedArticleWhere` 的文章自己的标题和摘要，同第六轮日报条目的做法。`rationale` 不是合法 JSON、没有 `articleIds`、`articleIds` 不是数组或是空数组时，私有 RSS 不输出这个命中。理由：第六轮"生成内容到达读者之前，仍然必须经过人工批准"，不放宽；送后台审核的话，审核量随匿名读者数增长；而且 write 平均每次 3,083 µ$，500 次命中最坏每天 $1.54，超过第 5 档的窗口。
+- 不新增 write 或 reason 调用点，不需要新的 finishReason 探测。
+
+**清理**：`sweepReaderWatches`（`src/pipeline/watch/reader.ts`）由 `runScheduled` 每轮 cron 调用一次，不看开关（它只停用、只删除）。
+
+- 停用：`owner_kind = 'reader' AND status = 'active'`，并且满足下面任意一条，写 `status = 'paused', disabled_at = now, updated_at = now`：
+  - `last_read_at IS NULL AND created_at <= now − 3 天`（建好后一直没有人订阅）；
+  - `last_read_at <= now − 30 天`。
+- 删除 `reader_watch_admissions` 里 `day` 早于 `utcDay(now − 7 天)` 的行。
+- `last_read_at` 的写法：私有 RSS 每次读取执行 `UPDATE watches SET last_read_at = ?2 WHERE id = ?1 AND (last_read_at IS NULL OR last_read_at <= ?2 − 21600000)`，每个 watch 每 6 小时最多写一次。
+
+**钱**（**推断**，基于 2026-10-26 的生产只读查询）：
+
+- 生产还没有 watch 调用（**已验证**：`watches` 0 行，`llm_calls` 没有 `watch:` 开头的 key）。代理值：`judge` 槽位全部 `completed` 行，1,128 行，平均 133.8 µ$，最大 337 µ$，平均输入 3,174 token（Jev 输入 $0.042 / 1M token，输出免费）。watch 判定的输入有上限（新报道 ≤ 2,000 字符，旧报道 ≤ 2,000，摘要 ≤ 1,000，问题 ≤ 200，条件 ≤ 300），比 analyze 的判定小，所以 134 µ$ 偏高。
+- 每天 500 次判定尝试：平均 500 × 134 = 67,000 µ$（$0.067）；按过去最大的一次样本估算，最坏 500 × 337 = 168,500 µ$（$0.169）。这两个数是估计，不是上限；硬上限是每日判定尝试上限和第 5 档预算准入。建立、撤销、RSS 读取都不花模型费用。
+- 第 5 档只在 `reserved + spent + 估计 + floor(5) <= cap` 时放行。`floor(5)` = 第 1–4 档预留之和 = 500,000 + 400,000 + 200,000 + 100,000 = 1,200,000，`cap = 1,900,000`，所以读者判定只在当天 gateway 已用额度低于 700,000 µ$（$0.70）时能花钱，这个窗口与日报导语、discover 共用。按上面的估计，读者判定平均占窗口的 9.6%，最坏占 24%。
+- 管理员 watch 在第 4 档，地板是 `floor(4)` = 1,100,000：`floor(5) − floor(4) = R4` = 100,000 µ$（$0.10）。当天已用额度在 $0.70 到 $0.80 之间时，读者判定被拒，管理员 watch 仍放行。这条按档位成立，跨事件也成立，所以不需要规定一个事件里管理员 watch 先评估。读者判定花不到第 1–4 档的保留额。
+- 日报导语也在第 5 档，但日报在预算日开始（00:00 UTC）时生成（本节「gateway 五档」的「已知行为」），那时已用额度接近 0，导语和读者判定都能放行。改了 `digest.timezone` 后，日报在预算日中途生成，读者判定先用掉的第 5 档额度会让导语更容易被拒。
+- 当天 gateway 已用额度超过 $0.70 时（**已验证**：gateway 当日花费 2026-10-24 $0.48、2026-10-25 $1.63、2026-10-26 $0.77，三天里一天在 $0.70 以内，两天超出），读者判定和其他第 5 档调用一样被拒（`budget_exceeded`），之后重新入队。
+
+**开关** `READER_WATCH_ENABLED`：
+
+- 不是 `"true"` 时：`/follow` 返回 404，公开页不显示 `/follow` 的入口；`createReaderWatch` 返回 403 `reader_watch_disabled`；判定不评估读者 watch。
+- 不受开关影响：`revokeReaderWatch`、私有 RSS 读取、`sweepReaderWatches`。它们不花钱，只读或只停用。
+- 打开开关另开一个只改那几行的 PR，并要使用者同意。打开之前：用 `wrangler secret put IP_HASH_SALT` 设好盐（至少 32 个随机字节）；做一次离线评估（N§6 "limit automatic delivery to low-risk personal briefings after evaluation"），题集包含注入式的问题。
+
 ## 7. 发布与审核
 
 - 每个板块有 `publish_mode = auto | review`。Finance 固定为 `review`（N§4 guardrails）。自动批准在提交时用 SQL 重新判断文章当前的板块（`publish_mode = 'auto'` 且 slug 不是 `finance`），不只看分析开始时读到的配置（第 6 节「事件 revision」第 9、10 行）。上线时所有板块都设为 `review`。
 - 审核记录绑定内容版本：`reviews(article_id, body_sha, decision)`。`auto` 模式由规则写一条自动批准记录。
 - 公开读取层只读已批准的输入：事件页、Brief、时间线、RSS、日报和 watch 只用已批准的文章及基于它们生成的产物。Finance 的产物发布前同样要审核。已批准的输入、可见产物、可公开论断的定义见第 6 节。
-- 模型输出和信源内容一律当不可信数据处理：markdown 渲染前先净化，只允许 `http`/`https` 链接；后台的写操作校验 `Origin`。
+- 模型输出、信源内容和读者输入一律当不可信数据处理：markdown 渲染前先净化，只允许 `http`/`https` 链接；所有写操作（后台，以及第 3 节「公开写入口」）校验 `Origin`。
+- 读者写的文字（watch 的问题、条件、关键词）不出现在任何公开页面、公开 RSS 或页面的 loader 数据里，只出现在后台、模型请求（`llm_calls.request_json`）和该读者自己的私有 RSS 里。公开的 watch 只有管理员建的（第 6 节「读者 watch」的 `adminWatchWhere`）。
 - Finance 每个页面显示"仅供参考，不构成投资建议"（N§4）。
 - 发布后的更正写进 `corrections` 表，并在原页面公开显示（N§9 Trust）。
 
@@ -489,7 +601,8 @@ Jina 按 read 槽位走模型客户端，写进 llm_calls，渠道 jina。
 | `event_artifacts` | 见第 6 节的键 |
 | `claims` / `claim_evidence` | 证据 = `(article_id, body_sha, quote, start, end, stance)` |
 | `digests` | `(industry_id, kind, period_start)` 唯一 |
-| `watches` / `watch_hits` | `watch_hits (watch_id, event_id, event_revision)` 唯一 |
+| `watches` / `watch_hits` | `watch_hits (watch_id, event_id, event_revision)` 唯一；`watches.owner_kind admin\|reader`（非空，默认 `admin`，ADD COLUMN，不加 CHECK）；`watches.token_hash` 唯一（可空，只有读者 watch 有）；`watch_hits.status` 增加 `delivered`（读者 watch 的命中，不进审核队列、不公开）。见第 6 节「读者 watch」 |
+| `reader_watch_admissions` | `id` 自增主键，`logical_key` 非空，不唯一；按 `day` 建索引；每行是一次读者 watch 判定尝试，用于每日尝试次数上限（第 6 节「读者 watch」） |
 | `questions` | Ask，只在后台 |
 | `source_candidates` / `discovery_runs` | 发现 |
 | `companies` / `filings` / `financial_facts` | EDGAR |
