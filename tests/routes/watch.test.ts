@@ -97,6 +97,45 @@ describe("tests/routes/watch.test.ts", () => {
     );
   });
 
+  it("passes the original link through safeHttpUrl and keeps the article id", async () => {
+    const watchRes = await env.DB.prepare(
+      `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)
+       VALUES ('unsafe-url-watch', 'Unsafe URL watch', 'Any', '["x"]', ?1, 'active', 1000, 1000)
+       RETURNING id`,
+    )
+      .bind(tech.industryId)
+      .first<{ id: number }>();
+    const eventId = await seedEvent(tech.industryId, "Unsafe URL event", 1);
+    const unsafeId = await seedArticle({
+      ...tech,
+      title: "Unsafe",
+      url: "javascript:alert(1)",
+      publishedAt: 1000,
+    });
+    const safeId = await seedArticle({
+      ...tech,
+      title: "Safe",
+      url: "https://news.example/safe",
+      publishedAt: 2000,
+    });
+    for (const id of [unsafeId, safeId]) {
+      await seedEventArticle(eventId, id, 1000);
+      await seedReview(id, "approved");
+    }
+    await env.DB.prepare(
+      `INSERT INTO watch_hits (watch_id, event_id, event_revision, hit_at, summary, rationale, status)
+       VALUES (?1, ?2, 1, 2000, 'Something new.', '{}', 'published')`,
+    )
+      .bind(watchRes!.id, eventId)
+      .run();
+
+    const view = await getWatchView(db(), "unsafe-url-watch");
+    const articles = view!.hits[0].articles;
+    expect(articles.map((a) => a.id)).toEqual([unsafeId, safeId]);
+    expect(articles[0].url).toBeNull();
+    expect(articles[1].url).toBe("https://news.example/safe");
+  });
+
   it("a watch hit names a placeholder-source document by its host", async () => {
     const watch = await env.DB.prepare(
       `INSERT INTO watches (slug, question, criteria, keywords, industry_id, status, created_at, updated_at)

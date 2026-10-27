@@ -385,6 +385,19 @@ async function main() {
   if (!techWatch.text.includes("Watch fixture: handshake overhead measured")) {
     fail("GET /w/tech-agent-protocols lacks its published hit");
   }
+  // The article titles on a watch page link the reader page (#134); the
+  // original link stays.
+  const watchReaderId = /href="\/a\/(\d+)"/.exec(techWatch.text)?.[1];
+  if (!watchReaderId) fail("GET /w/tech-agent-protocols has no /a/ links");
+  if (!techWatch.text.includes('href="https://arxiv.org/abs/2610.30151"')) {
+    fail("GET /w/tech-agent-protocols lacks the original link");
+  }
+  const watchReader = await page(`/a/${watchReaderId}`);
+  if (watchReader.res.status !== 200) {
+    fail(
+      `GET /a/${watchReaderId} from the watch page returned ${watchReader.res.status}`,
+    );
+  }
 
   // Reader page /a/$articleId (#86). Every card links one; unapproved
   // articles are 404, never shown. The preview DB is rebuilt each run, so

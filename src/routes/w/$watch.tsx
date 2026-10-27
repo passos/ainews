@@ -1,6 +1,7 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { Disclaimer } from "../../components/Disclaimer";
 import { FollowButton } from "../../components/FollowButton";
+import { WatchArticleLink } from "../../components/WatchArticleLink";
 import { formatUtc } from "../../lib/time";
 import { getWatch } from "../../server/publication/api";
 import { SITE_NAME } from "../../lib/site";
@@ -165,26 +166,7 @@ function WatchPage() {
                       </span>
                       <ul className="flex flex-col gap-1 text-xs">
                         {hit.articles.map((art) => (
-                          <li
-                            key={art.id}
-                            className="flex items-baseline gap-2"
-                          >
-                            <span className="font-mono text-muted-foreground">
-                              [{art.sourceName}]
-                            </span>
-                            {art.url ? (
-                              <a
-                                href={art.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sec-ink underline hover:text-primary truncate"
-                              >
-                                {art.title}
-                              </a>
-                            ) : (
-                              <span className="truncate">{art.title}</span>
-                            )}
-                          </li>
+                          <WatchArticleLink key={art.id} article={art} />
                         ))}
                       </ul>
                     </div>
