@@ -18,6 +18,7 @@ import {
   type ArtifactEligibilityContext,
   type ArticleMetadata,
 } from "./registry";
+import { diagnoseArtifactRejection } from "./prompts";
 import type {
   ArtifactArticleMaterial,
   ArtifactEventMaterial,
@@ -729,12 +730,12 @@ export async function generateEventArtifacts(
       // Validate output schema
       const parsed = def.parseOutput(res.text, aud, material);
       if (!parsed) {
-        console.error({
-          error: "failed to parse artifact output against schema",
+        console.warn({
+          warning: "artifact output rejected by parser",
           eventId,
           type: def.type,
           audience: aud,
-          rawText: res.text.slice(0, 200),
+          issues: diagnoseArtifactRejection(res.text, def.diagnosisSchema),
         });
         continue;
       }

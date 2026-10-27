@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   generateEventArtifacts,
   markArtifactsEvaluated,
@@ -3992,6 +3992,76 @@ describe("artifact scheduling (#92)", () => {
       .bind(id)
       .run();
     expect(await enqueueDueArtifacts(schedEnv(), 3000)).toContain(id);
+  });
+
+  /** Runs the generator on a story_brief event whose model returns `text`; returns the rejection warnings and every console argument. */
+  async function logsForModelText(tag: string, text: string) {
+    await env.DB.prepare("UPDATE events SET revision = 0").run();
+    const s = await seedSection(tag);
+    const id = await seedDueEvent(s, 1000);
+    const models = modelsWith(async () => ({
+      text,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      finishReason: "STOP",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await generateEventArtifacts(testEnv, id, 1000, { models });
+      const rejections = warn.mock.calls
+        .map((c) => c[0])
+        .filter((o) => o?.warning === "artifact output rejected by parser");
+      const everything = JSON.stringify(
+        [warn, error, log, info].flatMap((spy) => spy.mock.calls),
+      );
+      return { id, rejections, everything };
+    } finally {
+      vi.restoreAllMocks();
+    }
+  }
+
+  it("a schema rejection logs path and code, never the model text (#126)", async () => {
+    const { id, rejections, everything } = await logsForModelText(
+      "p126a",
+      JSON.stringify({
+        whatHappened: "x",
+        whatIsNew: "x",
+        whatEvidenceExists: "x",
+        whatToWatchNext: "x",
+        SENTINEL_K_7f3a: "SENTINEL_V_7f3a",
+      }),
+    );
+    expect(rejections).toEqual([
+      {
+        warning: "artifact output rejected by parser",
+        eventId: id,
+        type: "story_brief",
+        audience: "",
+        issues: [{ path: [], code: "unrecognized_keys" }],
+      },
+    ]);
+    expect(everything).not.toContain("7f3a");
+    expect(await evaluatedRevision(id)).toBe(1);
+  });
+
+  it("a non-JSON output logs invalid_json, never the model text (#126)", async () => {
+    const { id, rejections, everything } = await logsForModelText(
+      "p126b",
+      "SENTINEL_RAW_7f3a{{{",
+    );
+    expect(rejections).toEqual([
+      {
+        warning: "artifact output rejected by parser",
+        eventId: id,
+        type: "story_brief",
+        audience: "",
+        issues: "invalid_json",
+      },
+    ]);
+    expect(everything).not.toContain("7f3a");
+    expect(await evaluatedRevision(id)).toBe(1);
   });
 
   it("an exhausted artifact call (CallFailedError) is skipped and the revision is still marked", async () => {

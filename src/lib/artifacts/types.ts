@@ -111,13 +111,30 @@ export const quizQuestionSchema = z
   });
 export type QuizQuestion = z.infer<typeof quizQuestionSchema>;
 
+/**
+ * The model often writes an activity as an object ({title, description},
+ * {title, instructions}, ...) instead of a string. A plain object (prototype
+ * Object.prototype or null) whose values are all strings is joined into one
+ * string (non-empty values, key order, ": "). Every other shape, including
+ * String objects and class instances, is passed on unchanged and z.string()
+ * rejects it.
+ */
+const activitySchema = z.preprocess((v) => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return v;
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return v;
+  const values = Object.values(v);
+  if (!values.every((x) => typeof x === "string")) return v;
+  return values.filter((x) => x.length > 0).join(": ");
+}, z.string().min(1));
+
 export const learningMaterialSchema = z.strictObject({
   audience: z.enum(ARTIFACT_AUDIENCES),
   conceptExplainer: z.string().min(1),
   glossary: z.array(glossaryItemSchema),
   quiz: z.array(quizQuestionSchema),
   discussionQuestions: z.array(z.string().min(1)),
-  activities: z.array(z.string().min(1)),
+  activities: z.array(activitySchema),
 });
 export type LearningMaterial = z.infer<typeof learningMaterialSchema>;
 

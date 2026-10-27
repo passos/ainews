@@ -1,7 +1,21 @@
+import type { ZodType } from "zod";
 import {
   type ArtifactAudience,
   type ArtifactType,
   ARTIFACT_AUDIENCES,
+  storyBriefSchema,
+  audienceExplainSchema,
+  researchPaperDecoderSchema,
+  learningMaterialSchema,
+  policyImpactExplorerSchema,
+  classroomDiscussionBuilderSchema,
+  educationEvidenceCheckerSchema,
+  financeRealityCheckSchema,
+  regulationWatchSchema,
+  financeConceptExplainerSchema,
+  skillsCareerTrendsSchema,
+  industryImpactReportSchema,
+  supplyChainRippleMapSchema,
 } from "../../lib/artifacts/types";
 import { FINANCE_SLUG } from "../analyze/analyze";
 import type { TextRequest } from "../../providers/adapters";
@@ -82,6 +96,8 @@ export interface ArtifactDefinition {
     audience?: string,
     material?: ArtifactEventMaterial,
   ) => unknown | null;
+  /** The schema parseOutput applies to the raw JSON, for diagnosing a null; null when the parser enriches before safeParse. */
+  diagnosisSchema: ZodType | null;
 }
 
 export const ARTIFACT_REGISTRY: Record<
@@ -98,6 +114,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildStoryBriefRequest(material),
     parseOutput: (rawText) => parseStoryBriefOutput(rawText),
+    diagnosisSchema: storyBriefSchema,
   },
 
   audience_explain: {
@@ -113,6 +130,7 @@ export const ARTIFACT_REGISTRY: Record<
       return buildAudienceExplainRequest(material, aud);
     },
     parseOutput: (rawText) => parseAudienceExplainOutput(rawText),
+    diagnosisSchema: audienceExplainSchema,
   },
 
   research_paper_decoder: {
@@ -136,6 +154,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildResearchPaperDecoderRequest(material),
     parseOutput: (rawText) => parseResearchPaperDecoderOutput(rawText),
+    diagnosisSchema: researchPaperDecoderSchema,
   },
 
   learning_material: {
@@ -151,6 +170,7 @@ export const ARTIFACT_REGISTRY: Record<
       return buildLearningMaterialRequest(material, aud);
     },
     parseOutput: (rawText) => parseLearningMaterialOutput(rawText),
+    diagnosisSchema: learningMaterialSchema,
   },
 
   policy_impact_explorer: {
@@ -170,6 +190,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildPolicyImpactExplorerRequest(material),
     parseOutput: (rawText) => parsePolicyImpactExplorerOutput(rawText),
+    diagnosisSchema: policyImpactExplorerSchema,
   },
 
   classroom_discussion_builder: {
@@ -183,6 +204,7 @@ export const ARTIFACT_REGISTRY: Record<
     buildRequest: (material) =>
       buildClassroomDiscussionBuilderRequest(material),
     parseOutput: (rawText) => parseClassroomDiscussionBuilderOutput(rawText),
+    diagnosisSchema: classroomDiscussionBuilderSchema,
   },
 
   education_evidence_checker: {
@@ -204,6 +226,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildEducationEvidenceCheckerRequest(material),
     parseOutput: (rawText) => parseEducationEvidenceCheckerOutput(rawText),
+    diagnosisSchema: educationEvidenceCheckerSchema,
   },
 
   finance_reality_check: {
@@ -224,6 +247,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildFinanceRealityCheckRequest(material),
     parseOutput: (rawText) => parseFinanceRealityCheckOutput(rawText),
+    diagnosisSchema: financeRealityCheckSchema,
   },
 
   regulation_watch: {
@@ -243,6 +267,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildRegulationWatchRequest(material),
     parseOutput: (rawText) => parseRegulationWatchOutput(rawText),
+    diagnosisSchema: regulationWatchSchema,
   },
 
   finance_concept_explainer: {
@@ -255,6 +280,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildFinanceConceptExplainerRequest(material),
     parseOutput: (rawText) => parseFinanceConceptExplainerOutput(rawText),
+    diagnosisSchema: financeConceptExplainerSchema,
   },
 
   skills_career_trends: {
@@ -273,6 +299,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildSkillsCareerTrendsRequest(material),
     parseOutput: (rawText) => parseSkillsCareerTrendsOutput(rawText),
+    diagnosisSchema: skillsCareerTrendsSchema,
   },
 
   industry_impact_report: {
@@ -301,6 +328,7 @@ export const ARTIFACT_REGISTRY: Record<
     buildRequest: (material) => buildIndustryImpactReportRequest(material),
     parseOutput: (rawText, _aud, material) =>
       parseIndustryImpactReportOutput(rawText, material),
+    diagnosisSchema: industryImpactReportSchema,
   },
 
   supply_chain_ripple_map: {
@@ -325,6 +353,7 @@ export const ARTIFACT_REGISTRY: Record<
     },
     buildRequest: (material) => buildSupplyChainRippleMapRequest(material),
     parseOutput: (rawText) => parseSupplyChainRippleMapOutput(rawText),
+    diagnosisSchema: supplyChainRippleMapSchema,
   },
 
   earnings_decoder: {
@@ -347,5 +376,6 @@ export const ARTIFACT_REGISTRY: Record<
     buildRequest: (material) => buildEarningsDecoderRequest(material),
     parseOutput: (rawText, _aud, material) =>
       parseEarningsDecoderOutput(rawText, material),
+    diagnosisSchema: null,
   },
 };

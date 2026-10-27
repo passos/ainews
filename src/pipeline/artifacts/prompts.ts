@@ -1,3 +1,4 @@
+import type { ZodType } from "zod";
 import {
   type AudienceExplain,
   type ClassroomDiscussionBuilder,
@@ -153,6 +154,37 @@ function extractJsonText(rawText: string): string {
   const trimmed = rawText.trim();
   const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return fenceMatch ? fenceMatch[1].trim() : trimmed;
+}
+
+/** Why an artifact parser returned null, safe to log: never model text. */
+export type ArtifactRejection =
+  | { path: (string | number)[]; code: string }[]
+  | "invalid_json"
+  | "unavailable";
+
+/**
+ * Re-runs the parser's first two steps on `rawText`. `[]` means the schema
+ * accepts the text and the parser rejected it for another reason. Only
+ * `path` and `code` are kept: `message`, `keys` and the JSON.parse error
+ * can contain model text.
+ */
+export function diagnoseArtifactRejection(
+  rawText: string,
+  schema: ZodType | null,
+): ArtifactRejection {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonText(rawText));
+  } catch {
+    return "invalid_json";
+  }
+  if (!schema) return "unavailable";
+  const res = schema.safeParse(parsed);
+  if (res.success) return [];
+  return res.error.issues.map((issue) => ({
+    path: issue.path.map((p) => (typeof p === "number" ? p : String(p))),
+    code: issue.code,
+  }));
 }
 
 // -----------------------------------------------------------------------------
