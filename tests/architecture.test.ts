@@ -332,6 +332,101 @@ export const a = c({ method: "POST" }).handler(async () => 1);
   });
 });
 
+describe("R1, R2, R5: server/reader-ask/ (#133)", () => {
+  const API = `import { createServerFn } from "@tanstack/react-start";
+import { getDb } from "../db/client";
+export const askAboutStory = createServerFn({ method: "POST" }).handler(
+  async () => getDb,
+);
+`;
+
+  it("lets a route and a component import reader-ask/, which reads server/db/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/e/$eventId.tsx": `import { askAboutStory } from "../../server/reader-ask/api";`,
+        "src/components/Ask.tsx": `import type { X } from "../server/reader-ask/api";`,
+        "src/server/reader-ask/api.ts": API,
+        "src/server/db/client.ts": "export const getDb = 1;",
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+
+  it("reports reader-ask/ that imports pipeline/ (even a type)", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-ask/x.ts": `import type { AskMessage } from "../../pipeline/messages";`,
+        "src/pipeline/messages.ts": "export type AskMessage = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-ask/x.ts reaches src/pipeline/messages.ts via src/server/reader-ask/x.ts",
+    ]);
+  });
+
+  it("reports reader-ask/ that reaches providers/ through lib/", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-ask/x.ts": `import { y } from "../../lib/y";`,
+        "src/lib/y.ts": `import "../providers/models";`,
+        "src/providers/models.ts": "",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-ask/x.ts reaches src/providers/models.ts via src/lib/y.ts",
+    ]);
+  });
+
+  it("reports reader-ask/ that imports server/admin/", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-ask/x.ts": `import { listQuestions } from "../admin/ops";`,
+        "src/server/admin/ops.ts": "export const listQuestions = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-ask/x.ts reaches src/server/admin/ops.ts via src/server/reader-ask/x.ts",
+    ]);
+  });
+
+  it("reports a route that reaches pipeline/ through reader-ask/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/e/$eventId.tsx": `import { a } from "../../server/reader-ask/api";`,
+        "src/server/reader-ask/api.ts": `import { s } from "../../pipeline/messages";`,
+        "src/pipeline/messages.ts": "export const s = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-ask/api.ts reaches src/pipeline/messages.ts via src/server/reader-ask/api.ts",
+    ]);
+  });
+
+  it("reports a reader-ask/ server function that is not POST", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-ask/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const a = c({ method: "POST" }).handler(async () => 1);
+export const b = c({ method: "GET" }).handler(async () => 2);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R5 src/server/reader-ask/x.ts has a server function that is not POST",
+    ]);
+  });
+
+  it("lets a route import reader-ask/ (R2)", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/a.tsx": `import { a } from "../server/reader-ask/api";`,
+        "src/server/reader-ask/api.ts": "export const a = 1;",
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+});
+
 describe("R0: relative code imports resolve", () => {
   it("resolves a .js specifier to the .ts file and reports the route", () => {
     const v = checkImportRules(
