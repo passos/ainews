@@ -888,6 +888,28 @@ describe("groundedSentences (#144 B)", () => {
   const TAIL = "on the suite.";
 
   it.each([
+    ["“", "Dr"],
+    ["(", "Dr"],
+    ["“", "U.S"],
+    ["‘", "Mr"],
+    ['"', "Dr"],
+    ["[", "Dr"],
+  ])(
+    "does not split after %s%s. when the abbreviation follows opening punctuation",
+    (open, abbr) => {
+      const q = "Smith proved the device is safe for children";
+      const sentence = `The regulator denied that ${open}${abbr}. ${q}” during Tuesday’s hearing.`;
+      expect(groundedSentences(`${LEAD} ${sentence}`, q)).toBe(sentence);
+    },
+  );
+
+  it("still splits after a quoted word that is not an abbreviation", () => {
+    const q = "Smith proved the device is safe for children";
+    const rest = `${q} during Tuesday’s hearing.`;
+    expect(groundedSentences(`${LEAD} He said “Done. ${rest}`, q)).toBe(rest);
+  });
+
+  it.each([
     "Mr",
     "Mrs",
     "Ms",
