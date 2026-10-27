@@ -2,14 +2,10 @@
 // `pn:prefs:v1`). The server never sees them, so SSR output does not depend
 // on them. #17 adds `watches` to the same key: unknown fields are kept.
 
-export const AUDIENCES = ["student", "educator", "professional"] as const;
-export type Audience = (typeof AUDIENCES)[number];
-
 export const THEMES = ["light", "dark"] as const;
 export type Theme = (typeof THEMES)[number];
 
 export interface ReaderPrefs {
-  audience?: Audience;
   /** Missing means light: the site does not follow the system setting. */
   theme?: Theme;
   /** Section slugs the reader follows. */
@@ -20,10 +16,6 @@ export interface ReaderPrefs {
 }
 
 export const PREFS_KEY = "pn:prefs:v1";
-
-export function isAudience(value: unknown): value is Audience {
-  return AUDIENCES.includes(value as Audience);
-}
 
 export function isTheme(value: unknown): value is Theme {
   return THEMES.includes(value as Theme);
@@ -42,7 +34,6 @@ export function parsePrefs(raw: string | null): ReaderPrefs {
     return {};
   }
   const prefs: ReaderPrefs = { ...(value as Record<string, unknown>) };
-  if (!isAudience(prefs.audience)) delete prefs.audience;
   if (!isTheme(prefs.theme)) delete prefs.theme;
   if (
     !Array.isArray(prefs.sections) ||
@@ -61,10 +52,6 @@ export function parsePrefs(raw: string | null): ReaderPrefs {
 
 export function serializePrefs(prefs: ReaderPrefs): string {
   return JSON.stringify(prefs);
-}
-
-export function withAudience(prefs: ReaderPrefs, audience: Audience) {
-  return { ...prefs, audience };
 }
 
 export function withTheme(prefs: ReaderPrefs, theme: Theme): ReaderPrefs {

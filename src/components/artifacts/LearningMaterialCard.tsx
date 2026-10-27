@@ -59,7 +59,7 @@ export function LearningMaterialCard({
   return (
     <section
       aria-label="Learning Materials"
-      className="border border-border bg-card p-4 sm:p-5"
+      className="border-t border-border pt-6"
     >
       <header className="mb-4 flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>

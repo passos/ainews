@@ -39,7 +39,6 @@ function Home() {
                 <Link
                   to="/s/$section"
                   params={{ section: s.slug }}
-                  search={(prev) => ({ audience: prev.audience })}
                   className="underline"
                 >
                   All {s.name}

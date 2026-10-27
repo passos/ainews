@@ -8,7 +8,7 @@ export function FinanceRealityCheckCard({
   return (
     <section
       aria-label="AI-in-Finance Reality Check"
-      className="border border-border bg-card p-4 sm:p-5"
+      className="border-t border-border pt-6"
     >
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
         <div className="flex items-center gap-2">

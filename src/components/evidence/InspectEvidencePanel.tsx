@@ -32,7 +32,7 @@ export function InspectEvidencePanel({
   return (
     <section
       aria-label="Inspect evidence"
-      className="border border-border bg-card p-4 sm:p-5"
+      className="border-t border-border pt-6"
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
         <div className="flex items-center gap-2">

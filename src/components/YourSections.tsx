@@ -34,7 +34,6 @@ export function YourSections({
           key={s.slug}
           to="/s/$section"
           params={{ section: s.slug }}
-          search={(prev) => ({ audience: prev.audience })}
           data-section={s.slug}
           className="font-bold text-foreground underline"
         >
@@ -46,7 +45,6 @@ export function YourSections({
           key={w.slug}
           to="/w/$watch"
           params={{ watch: w.slug }}
-          search={(prev) => ({ audience: prev.audience })}
           data-watch={w.slug}
           className="font-bold text-foreground underline"
         >

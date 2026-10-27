@@ -165,7 +165,7 @@
    never scrolls sideways at 375px. */
 @layer components {
   .article-body {
-    max-width: 36em;
+    max-width: none;
     overflow-wrap: anywhere;
     font-family: var(--font-serif);
     font-size: 1.0625rem;

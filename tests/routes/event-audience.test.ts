@@ -65,7 +65,7 @@ function eventView(withExplanations: boolean): EventView {
   } as unknown as EventView;
 }
 
-const renderEvent = (withExplanations: boolean, audience?: "educator") =>
+const renderEvent = (withExplanations: boolean, url = "/") =>
   renderInRouter(
     createElement(EventPageView, {
       data: eventView(withExplanations),
@@ -73,9 +73,8 @@ const renderEvent = (withExplanations: boolean, audience?: "educator") =>
         { id: 1, title: "S", publishedAt: null, fetchedAt: 1_000 },
       ],
       sources: Promise.resolve([]),
-      audience,
     }),
-    audience ? `/?audience=${audience}` : "/",
+    url,
   );
 
 describe("Explain for control", () => {
@@ -104,27 +103,29 @@ describe("Explain for control", () => {
     expect(html).not.toContain("Explain for");
   });
 
-  it("event page: ?audience=educator opens on the Educator explanation", async () => {
-    const html = await renderEvent(true, "educator");
-    expect(html).toContain("EDUCATOR-OVERVIEW");
-    expect(html).not.toContain("STUDENT-OVERVIEW");
-    const none = await renderEvent(true);
-    expect(none).toContain("STUDENT-OVERVIEW");
-    expect(none).not.toContain("EDUCATOR-OVERVIEW");
+  it("event page: the explanation starts at Student; ?audience= is ignored", async () => {
+    for (const url of ["/", "/?audience=educator", "/?audience=professional"]) {
+      const html = await renderEvent(true, url);
+      expect(html, url).toContain("STUDENT-OVERVIEW");
+      expect(html, url).not.toContain("EDUCATOR-OVERVIEW");
+    }
   });
 
-  it("header: no selector, nav links still carry the audience", async () => {
-    const html = await renderInRouter(
-      createElement(SiteHeader, {
-        name: "Daily",
-        sections: [{ slug: "technology", name: "Technology" }],
-        hasWatches: false,
-        readerWatchEnabled: false,
-      }),
-      "/?audience=student",
-    );
-    expect(html).toContain("Technology");
-    expect(html).not.toContain("Explain for");
-    expect(html).toContain("audience=student");
+  it("header: no selector, no link carries an audience, even from ?audience=", async () => {
+    for (const url of ["/?audience=student", "/?audience=professional", "/"]) {
+      const html = await renderInRouter(
+        createElement(SiteHeader, {
+          name: "Daily",
+          sections: [{ slug: "technology", name: "Technology" }],
+          hasWatches: true,
+          readerWatchEnabled: true,
+        }),
+        url,
+      );
+      expect(html).toContain("Technology");
+      expect(html).toContain('href="/w"');
+      expect(html).not.toContain("Explain for");
+      expect(html, url).not.toContain("audience=");
+    }
   });
 });

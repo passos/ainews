@@ -4,7 +4,6 @@ import {
   serializePrefs,
   toggleSection,
   toggleWatch,
-  withAudience,
   withTheme,
 } from "../src/lib/reader-prefs";
 
@@ -21,17 +20,11 @@ describe("parsePrefs", () => {
     }
   });
 
-  it("drops an unknown audience and keeps the rest", () => {
-    expect(parsePrefs('{"audience":"wizard","sections":["finance"]}')).toEqual({
-      sections: ["finance"],
-    });
-  });
-
-  it("keeps a known audience", () => {
-    for (const a of ["student", "educator", "professional"]) {
-      expect(parsePrefs(JSON.stringify({ audience: a }))).toEqual({
-        audience: a,
-      });
+  it("treats a stored audience as an unknown field: kept as is, never checked", () => {
+    for (const audience of ["student", "wizard"]) {
+      expect(
+        parsePrefs(JSON.stringify({ audience, sections: ["finance"] })),
+      ).toEqual({ audience, sections: ["finance"] });
     }
   });
 
@@ -76,18 +69,6 @@ describe("parsePrefs", () => {
 describe("updates", () => {
   const raw =
     '{"audience":"student","custom":123,"sections":["finance"],"watches":["gpt-5"]}';
-
-  it("withAudience keeps unknown fields", () => {
-    const next = JSON.parse(
-      serializePrefs(withAudience(parsePrefs(raw), "educator")),
-    );
-    expect(next).toEqual({
-      audience: "educator",
-      custom: 123,
-      sections: ["finance"],
-      watches: ["gpt-5"],
-    });
-  });
 
   it("withTheme keeps unknown fields", () => {
     const next = JSON.parse(serializePrefs(withTheme(parsePrefs(raw), "dark")));

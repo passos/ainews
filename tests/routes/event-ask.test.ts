@@ -44,7 +44,6 @@ const render = (section: SectionInfo, ask: typeof ASK | null) =>
       data: eventView(section),
       artifactSources: [],
       sources: Promise.resolve([]),
-      audience: undefined,
       ask,
     }),
   );

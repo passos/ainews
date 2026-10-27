@@ -92,7 +92,7 @@ export function AskStoryView({
   return (
     <section
       aria-label={ASK_COPY.title}
-      className="border-2 border-border bg-card p-4 sm:p-5"
+      className="border-t border-border pt-6"
     >
       <header className="mb-3 border-b border-border pb-2">
         <h2 className="font-mono text-xs font-bold uppercase tracking-widest">

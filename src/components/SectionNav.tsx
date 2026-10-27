@@ -21,8 +21,6 @@ export function SectionNav({ sections }: { sections: NavSection[] }) {
           key={s.slug}
           to="/s/$section"
           params={{ section: s.slug }}
-          // Keep the reader's audience: a click must not drop it.
-          search={(prev) => ({ audience: prev.audience })}
           data-section={s.slug}
           className={NAV_ITEM_CLASS}
         >
@@ -36,12 +34,7 @@ export function SectionNav({ sections }: { sections: NavSection[] }) {
 /** Header link to the topic watch list. Shown only while watches exist. */
 export function WatchesNavLink() {
   return (
-    <Link
-      to="/w"
-      search={(prev) => ({ audience: prev.audience })}
-      data-nav="watches"
-      className={NAV_ITEM_CLASS}
-    >
+    <Link to="/w" data-nav="watches" className={NAV_ITEM_CLASS}>
       Watches
     </Link>
   );
