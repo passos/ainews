@@ -626,7 +626,7 @@ describe("tests/routes/digest.test.ts", () => {
       expect(rss).not.toContain("MODEL LINER 114");
     });
 
-    it("empty approved title never falls back to the stored item title", async () => {
+    it("empty approved title shows the placeholder, never the stored item title", async () => {
       // The stored title came from an article whose approval was later
       // revoked; only the current approved article may name the item.
       const eventId = await seedCopyDigest({ title: "" });
@@ -643,7 +643,7 @@ describe("tests/routes/digest.test.ts", () => {
         fns,
       );
       expect(data.items).toHaveLength(1);
-      expect(data.items[0].title).toBe("");
+      expect(data.items[0].title).toBe("Untitled story");
       expect(data.items[0].oneLiner).toBe("Approved summary 114");
       expect(JSON.stringify(data)).not.toContain("Stored title 114");
 
@@ -678,6 +678,50 @@ describe("tests/routes/digest.test.ts", () => {
       expect(rss).not.toContain("MODEL INTRO 114");
       expect(rss).not.toContain("MODEL LINER 114");
       expect(rss).toContain("Approved summary 114");
+    });
+
+    // #109 (d): an item never has an empty title, so no empty link on the page
+    // and no ": " prefix in the RSS description.
+    it("first approved article has an empty title: the next non-empty title names the item", async () => {
+      const eventId = await seedCopyDigest({ title: "", summary: "" });
+      const secondId = await seedArticle({
+        ...tech,
+        title: "Second Title",
+        summary: "",
+        publishedAt: 2000,
+      });
+      await seedEventArticle(eventId, secondId, 2000);
+      await seedReview(secondId, "approved");
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].title).toBe("Second Title");
+
+      const rss = await techRss();
+      expect(rss).toContain("Second Title: ");
+      expect(rss).not.toContain("| : ");
+      expect(rss).not.toMatch(/<description>: /);
+    });
+
+    it("all approved titles and summaries empty: the item shows the placeholder", async () => {
+      await seedCopyDigest({ title: "", summary: "" });
+
+      const { data } = await loadDigest(
+        { section: "technology", date: DATE },
+        fns,
+      );
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].title).toBe("Untitled story");
+      expect(data.items[0].oneLiner).toBe("Untitled story");
+
+      const rss = await techRss();
+      expect(rss).toContain("Untitled story: Untitled story");
+      expect(rss).not.toMatch(/<description>: /);
+      expect(rss).not.toMatch(/: <\/description>/);
+      expect(rss).not.toContain("| : ");
     });
   });
 });
