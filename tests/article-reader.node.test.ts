@@ -42,6 +42,8 @@ const asideOf = (html: string) =>
     html,
   )?.[0] ?? "";
 
+const textOf = (html: string) => html.replace(/<[^>]*>/g, "");
+
 const render = (page: Partial<ArticlePage>, a: Partial<ArticleView> = {}) =>
   renderToStaticMarkup(
     createElement(ArticleReader, {
@@ -133,7 +135,7 @@ describe("ArticleReader", () => {
     const html = render({}, { eventId: 42 });
     const aside = asideOf(html);
     expect(aside).toContain('href="/e/42"');
-    expect(aside).toContain("Story brief, explanations and evidence →");
+    expect(textOf(aside)).toContain("Story brief, explanations and evidence →");
     expect(html).not.toContain("This story on Daily");
     // The only story link on the page.
     expect(html.split('href="/e/42"').length - 1).toBe(1);
@@ -289,11 +291,51 @@ describe("ArticleReader", () => {
       ]);
       // Between the story link and the Source block.
       expect(aside.indexOf("An audit found flaws.")).toBeGreaterThan(
-        aside.indexOf("Story brief, explanations and evidence →"),
+        aside.indexOf("Story brief, explanations and "),
       );
       expect(aside.indexOf("An audit found flaws.")).toBeLessThan(
         aside.indexOf("Source<"),
       );
+    });
+
+    it("keeps the last word and the arrow together in one nowrap span inside one link", () => {
+      const aside = asideOf(render({ event }, { eventId: 42 }));
+      const link =
+        /<a [^>]*href="\/e\/42"[^>]*>([\s\S]*?)<\/a>/.exec(aside)?.[1] ?? "";
+      expect(textOf(link)).toBe("Story brief, explanations and evidence →");
+      const span = /<span class="([^"]*)">([^<]*)<\/span>/.exec(link);
+      expect(span?.[1]).toMatch(/(^| )whitespace-nowrap( |$)/);
+      expect(span?.[2]).toBe("evidence →");
+      expect(aside.split('href="/e/42"').length - 1).toBe(1);
+    });
+
+    it("shows only the first sentence of What happened", () => {
+      const aside = asideOf(
+        render(
+          {
+            event: {
+              ...event,
+              whatHappened:
+                "An audit found flaws. A second sentence follows. And a third.",
+            },
+          },
+          { eventId: 42 },
+        ),
+      );
+      expect(aside).toContain("An audit found flaws.");
+      expect(aside).not.toContain("second sentence");
+      expect(aside).not.toContain("third");
+    });
+
+    it("caps a very long What happened sentence", () => {
+      const aside = asideOf(
+        render(
+          { event: { ...event, whatHappened: `${"word ".repeat(100)}end.` } },
+          { eventId: 42 },
+        ),
+      );
+      expect(aside).toContain("…");
+      expect(aside).not.toContain("end.");
     });
 
     it("omits the sentence when there is none", () => {
@@ -341,7 +383,9 @@ describe("ArticleReader", () => {
         ),
       );
       expect(links(none)).toEqual([]);
-      expect(none).toContain("Story brief, explanations and evidence →");
+      expect(textOf(none)).toContain(
+        "Story brief, explanations and evidence →",
+      );
     });
   });
 });

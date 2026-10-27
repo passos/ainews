@@ -1,5 +1,6 @@
 // The reader page body (#86). Pure display: the page gets sanitised HTML from
 // the read layer; markdown-it stays on the server.
+import { firstSentence } from "../lib/first-sentence";
 import { formatUtc } from "../lib/time";
 import type { ArticlePage } from "../server/publication/articles";
 import { Disclaimer } from "./Disclaimer";
@@ -119,11 +120,12 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
                 href={`/e/${a.eventId}`}
                 className="font-heading text-[1.375rem] leading-[1.2] font-semibold text-foreground no-underline hover:underline"
               >
-                Story brief, explanations and evidence →
+                Story brief, explanations and{" "}
+                <span className="whitespace-nowrap">evidence →</span>
               </a>
               {page.event?.whatHappened && (
                 <p className="font-serif text-[0.9375rem] leading-[1.55]">
-                  {page.event.whatHappened}
+                  {firstSentence(page.event.whatHappened)}
                 </p>
               )}
               {anchors.length > 0 && (
