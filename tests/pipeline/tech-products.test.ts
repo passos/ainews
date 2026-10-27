@@ -264,6 +264,45 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
     expect(out?.claims[0].independentEvidence).toEqual([]);
   });
 
+  it("drops evidence whose stored sentence is the claim's, even from a different substring", () => {
+    // The wire article repeats the vendor sentence. The model quotes two
+    // different parts of it, so the quote texts differ but the stored
+    // sentences are the same.
+    const sentence =
+      "Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite.";
+    const wire = withArticles([
+      {
+        id: 3,
+        title: "Wire copy",
+        sourceName: "Wire",
+        sourceDomain: "wire.test",
+        canonicalUrl: "https://wire.test/orion-2",
+        publishedAt: null,
+        summary: "S3",
+        bodyText: sentence,
+        sourceBodyText: sentence,
+      },
+    ]);
+    const out = parseLaunchRealityCheckOutput(
+      JSON.stringify(
+        check({
+          claims: [
+            claim({
+              verdict: "independent_support",
+              independentEvidence: [
+                { articleId: 3, quote: "Acme today released Orion-2" },
+              ],
+            }),
+          ],
+        }),
+      ),
+      wire,
+    );
+    expect(out?.claims[0].claimQuote.quote).toBe(sentence);
+    expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+    expect(out?.claims[0].independentEvidence).toEqual([]);
+  });
+
   it('replaces an ungrounded subject or claimant with "Not stated in sources"', () => {
     const out = parseCheck(check({ claimant: "Globex" }));
     expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
