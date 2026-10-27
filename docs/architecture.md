@@ -518,7 +518,7 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 |---|---|---|
 | 每个网络地址每个 UTC 日的建立数（含已撤销、已停用的行） | 3 | 429 `per_network_limit` |
 | 全站活跃读者 watch 数（`owner_kind = 'reader' AND status = 'active'`） | 200 | 503 `capacity_full` |
-| 每个 UTC 日的读者 watch 判定尝试数（每次真实发送计一次） | 500 | 跳过当次事件余下的读者 watch，管理员 watch 照常评估；事件不标记，第二天继续（见「判定」） |
+| 每个 UTC 日的读者 watch 判定尝试数（每次登记计一次，见「判定」） | 500 | 跳过当次事件余下的读者 watch，管理员 watch 照常评估；事件不标记，第二天继续（见「判定」） |
 
 - 哈希里带 UTC 日期，所以每日建立数直接按 `creator_hash` 计数。这个哈希是假名化，不是匿名化：不同日期的哈希不同，但持有 `IP_HASH_SALT` 的人可以对一个已知地址重算出任一天的哈希。
 - 建立是一条 `INSERT INTO watches … SELECT … WHERE (同一 creator_hash 的行数) < 3 AND (全站活跃读者 watch 数) < 200`。影响 0 行时再读两个计数，决定返回 429 还是 503。
@@ -529,7 +529,8 @@ OR (a.stage = 'body_ready' AND a.requeue_count >= 3 AND ${APPROVED_ARTICLE_SQL}
 - `READER_WATCH_ENABLED` 不是 `"true"` 时，读者 watch 不参与评估（在 SQL 里排除），事件照常标记。关闭期间出现的进展，读者 watch 以后不补判。
 - 读者 watch 不评估 Finance 板块的事件（N§4 "no personalized investment advice"；第六轮读者 Ask v1 不含 Finance）。
 - 判定用同一个 `buildWatchJudgeQuestion`、同一个 `WATCH_PROMPT_VERSION`、同样的 logical key 写法。档位：读者 watch 是第 5 档（`CALL_TIERS.readerWatch`），管理员 watch 仍是第 4 档（`CALL_TIERS.watch`）。档位挂在模型客户端上，所以 `evaluateEventWatches` 给读者 watch 另建一个第 5 档的模型客户端。
-- 每日判定尝试上限：计的是尝试，不是 key。每次真实发送在发送当天（UTC）计一次：第一次尝试、重试、前一天已经登记过的 key 再次发送，都各计一次。只有账本缓存命中不计：读者 watch 调用 `judge` 之前先查这个 logical key 在 `llm_calls` 里有没有 `completed` 行（`findCompleted`，`src/providers/ledger.ts`），有就直接调用（模型客户端返回已存结果，不发送，不登记）。没有就在 `reader_watch_admissions` 登记一次尝试：`INSERT INTO reader_watch_admissions (logical_key, day, created_at) SELECT ?1, ?2, ?3 WHERE (SELECT count(*) FROM reader_watch_admissions WHERE day = ?2) < ?4`。影响 1 行：放行。影响 0 行：跳过这个读者 watch，这个事件余下的读者 watch 也直接跳过（不再登记），管理员 watch 照常评估，不抛错，事件的评估照常走完。评估结束时这个事件不标记（不写 `watch_evaluated_revision`），cron 的到期扫描以后重新入队；重跑时已经判过的 watch 走账本里的已存结果，不再付费。所以不需要规定管理员 watch 先评估。`day` = `utcDay(now)`。登记在预算准入之前，所以被预算拒掉的尝试也计一次。
+- 每日判定尝试上限：计的是登记，不是 key，也不是真实发送。账本里没有 `completed` 行时，每次调用 `judge` 之前在调用当天（UTC）登记一次：第一次尝试、重试、前一天已经登记过的 key 再次调用，都各计一次。登记之后没有真正发送的调用也计一次：被预算拒掉、`CallInProgressError`（同一 key 正在另一个消费者里发送）、重试次数已用完。同一事件被重复投递、两个消费者同时判同一个 key 时，两边都登记。这些都只会让上限更早触发，不会多花钱。只有账本缓存命中不计：读者 watch 调用 `judge` 之前先查这个 logical key 在 `llm_calls` 里有没有 `completed` 行（`findCompleted`，`src/providers/ledger.ts`），有就直接调用（模型客户端返回已存结果，不发送，不登记）。没有就在 `reader_watch_admissions` 登记一次尝试：`INSERT INTO reader_watch_admissions (logical_key, day, created_at) SELECT ?1, ?2, ?3 WHERE (SELECT count(*) FROM reader_watch_admissions WHERE day = ?2) < ?4`。影响 1 行：放行。影响 0 行，或者读者 watch 的 `judge` 抛出 `CallFailedError` 以外的错误（例如第 5 档预算拒绝 `BudgetExceededError`）：推迟这个事件的读者 watch，即跳过这个读者 watch，这个事件余下的读者 watch 也直接跳过（不再登记），管理员 watch 照常评估，不抛错，事件的评估照常走完。读者 watch 的 `CallFailedError` 只跳过这一个 watch，不推迟。管理员 watch 的错误照旧抛出。评估结束时这个事件不标记（不写 `watch_evaluated_revision`），cron 的到期扫描以后重新入队；重跑时已经判过的 watch 走账本里的已存结果，不再付费。所以不需要规定管理员 watch 先评估。`day` = `utcDay(now)`。登记在预算准入之前，所以被预算拒掉的尝试也计一次。
+- **已知行为**：推迟期间事件进入新的 revision 时，被推迟的读者 watch 下次只把最新 revision 的报道当作新报道，较早的报道放进「旧报道」。只在达到每日判定尝试上限或第 5 档被拒时发生，不多花钱。不加补判机制。
 - 到期扫描（#92 `enqueueDueEvents`）按 `watch_scheduled_at` 从旧到新轮转，每轮最多 20 个事件，所以停在上限的事件不会挤掉其他事件；已经写入的命中不受影响。
 - issue 原文"超出后新建请求返回明确的错误，不排队"针对建立请求：每地址上限和全站上限都立即返回错误码。每日判定上限不针对建立请求，它推迟的是后台判定，不是读者的请求。
 - **命中**：读者 watch 的命中不调用 `write`，`summary` 写空字符串，`status` 写 `delivered`。私有 RSS 只显示该命中引用的（`rationale.articleIds`）、当前仍满足 `approvedArticleWhere` 的文章自己的标题和摘要，同第六轮日报条目的做法。`rationale` 不是合法 JSON、没有 `articleIds`、`articleIds` 不是数组或是空数组时，私有 RSS 不输出这个命中。理由：第六轮"生成内容到达读者之前，仍然必须经过人工批准"，不放宽；送后台审核的话，审核量随匿名读者数增长；而且 write 平均每次 3,083 µ$，500 次命中最坏每天 $1.54，超过第 5 档的窗口。
