@@ -4335,7 +4335,8 @@ describe("artifact scheduling (#92)", () => {
 });
 
 describe("Technology products (#131)", () => {
-  it("generates both Technology products for a two-article product_launch event (#131)", async () => {
+  /** Seeds a two-article Technology product_launch event and its fake model. */
+  async function seedTechEvent(tag: string, summaryIsBody = false) {
     await ensureBudget();
     const BODY_A =
       "Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite. In March 2026 Acme shipped Orion-1.";
@@ -4371,9 +4372,9 @@ describe("Technology products (#131)", () => {
       .bind(config)
       .first<{ id: number }>();
     const src = await env.DB.prepare(
-      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, 'https://tech131.test/feed', 'tech131.test', 'rss', 1000) RETURNING id",
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, ?2, 'tech131.test', 'rss', 1000) RETURNING id",
     )
-      .bind(ind!.id)
+      .bind(ind!.id, `https://tech131.test/${tag}/feed`)
       .first<{ id: number }>();
     const event = await env.DB.prepare(
       "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'Orion-2 launch', 1, 1000, 1000) RETURNING id",
@@ -4386,14 +4387,21 @@ describe("Technology products (#131)", () => {
       ["a", "product_launch", BODY_A],
       ["b", "opinion_analysis", BODY_B],
     ] as const) {
-      const sha = `sha-tech131-${name}`;
-      const url = `https://tech131.test/${name}`;
+      const sha = `sha-tech131-${tag}-${name}`;
+      const url = `https://tech131.test/${tag}/${name}`;
       const art = await env.DB.prepare(
         `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, published_at, fetched_at, stage, stage_updated_at)
-         VALUES (?1, ?2, ?3, ?3, 'Orion-2 report', 'Summary', ?4, ?5, 1000, 'grouped', 1000)
+         VALUES (?1, ?2, ?3, ?3, 'Orion-2 report', ?6, ?4, ?5, 1000, 'grouped', 1000)
          RETURNING id`,
       )
-        .bind(src!.id, ind!.id, url, sha, Date.UTC(2026, 9, 20))
+        .bind(
+          src!.id,
+          ind!.id,
+          url,
+          sha,
+          Date.UTC(2026, 9, 20),
+          summaryIsBody ? body : "Summary",
+        )
         .first<{ id: number }>();
       await env.DB.prepare(
         "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'auto', 1000)",
@@ -4474,6 +4482,12 @@ describe("Technology products (#131)", () => {
       };
     });
 
+    return { eventId: event!.id, transport };
+  }
+
+  it("generates both Technology products for a two-article product_launch event (#131)", async () => {
+    const { eventId, transport } = await seedTechEvent("both");
+    const event = { id: eventId };
     await generateEventArtifacts(testEnv, event!.id, 1000, { transport });
 
     const rows = await env.DB.prepare(
@@ -4515,5 +4529,31 @@ describe("Technology products (#131)", () => {
       ),
     );
     expect(calls.results.map((c) => c.tier)).toEqual([4, 4]);
+  });
+
+  it("writes neither Technology product when R2 has no body, even if the summary has the quotes (#131)", async () => {
+    const { eventId, transport } = await seedTechEvent("no-body", true);
+
+    await generateEventArtifacts(testEnv, eventId, 1000, {
+      bodies: { get: async () => null } as unknown as R2Bucket,
+      transport,
+    });
+
+    const rows = await env.DB.prepare(
+      "SELECT type FROM event_artifacts WHERE event_id = ?1 AND type IN ('launch_reality_check', 'technology_evolution_timeline')",
+    )
+      .bind(eventId)
+      .all();
+    expect(rows.results).toEqual([]);
+    // The model was called: the parser, not eligibility, rejected the output.
+    const calls = await env.DB.prepare(
+      "SELECT count(*) AS n FROM llm_calls WHERE substr(logical_key, 1, length(?1)) = ?1 OR substr(logical_key, 1, length(?2)) = ?2",
+    )
+      .bind(
+        `artifact:${eventId}:launch_reality_check:default:`,
+        `artifact:${eventId}:technology_evolution_timeline:default:`,
+      )
+      .first<{ n: number }>();
+    expect(calls?.n).toBe(2);
   });
 });

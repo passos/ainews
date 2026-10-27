@@ -9,6 +9,7 @@ import {
   buildLaunchRealityCheckRequest,
   parseEvolutionTimelineOutput,
   parseLaunchRealityCheckOutput,
+  type ArtifactArticleMaterial,
   type ArtifactEventMaterial,
 } from "../../src/pipeline/artifacts/prompts";
 import {
@@ -37,6 +38,7 @@ const MATERIAL: ArtifactEventMaterial = {
       publishedAt: Date.UTC(2026, 9, 20),
       summary: "S1",
       bodyText: BODY_A,
+      sourceBodyText: BODY_A,
     },
     {
       id: 2,
@@ -46,6 +48,7 @@ const MATERIAL: ArtifactEventMaterial = {
       publishedAt: null,
       summary: "S2",
       bodyText: BODY_B,
+      sourceBodyText: BODY_B,
     },
   ],
   verifiedClaims: [],
@@ -97,6 +100,22 @@ const EVAL_ENTRY = entry({
   description: "The Open Eval Lab measured Orion-2 at 81 percent.",
   source: EVIDENCE_QUOTE,
 });
+
+/** MATERIAL with each article edited, plus extra articles. */
+function withArticles(
+  extra: ArtifactArticleMaterial[] = [],
+  edit: (
+    a: ArtifactArticleMaterial,
+  ) => Partial<ArtifactArticleMaterial> = () => ({}),
+): ArtifactEventMaterial {
+  return {
+    ...MATERIAL,
+    articles: [
+      ...MATERIAL.articles.map((a) => ({ ...a, ...edit(a) })),
+      ...extra,
+    ],
+  };
+}
 
 function parseCheck(value: unknown) {
   return parseLaunchRealityCheckOutput(JSON.stringify(value), MATERIAL);
@@ -187,20 +206,37 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
   });
 
   it("drops evidence that repeats the claim quote", () => {
-    const out = parseCheck(
-      check({
-        claims: [
-          claim({
-            verdict: "independent_support",
-            independentEvidence: [
-              {
-                articleId: 1,
-                quote: "  SCORES 92 percent on the\n  CodeBench suite ",
-              },
-            ],
-          }),
-        ],
-      }),
+    // A different source repeats the vendor sentence word for word.
+    const wire = withArticles([
+      {
+        id: 3,
+        title: "Wire copy",
+        sourceName: "Wire",
+        sourceDomain: "wire.test",
+        publishedAt: null,
+        summary: "S3",
+        bodyText: "Acme said Orion-2 scores 92 percent on the CodeBench suite.",
+        sourceBodyText:
+          "Acme said Orion-2 scores 92 percent on the CodeBench suite.",
+      },
+    ]);
+    const out = parseLaunchRealityCheckOutput(
+      JSON.stringify(
+        check({
+          claims: [
+            claim({
+              verdict: "independent_support",
+              independentEvidence: [
+                {
+                  articleId: 3,
+                  quote: "  scores 92 percent on the\n  CodeBench suite ",
+                },
+              ],
+            }),
+          ],
+        }),
+      ),
+      wire,
     );
     expect(out?.claims[0].verdict).toBe("no_independent_evidence");
     expect(out?.claims[0].independentEvidence).toEqual([]);
@@ -296,6 +332,128 @@ describe("parseEvolutionTimelineOutput (#131)", () => {
           },
         ],
       }),
+    ).toBeNull();
+  });
+});
+
+describe("Technology product grounding (#131 review)", () => {
+  const UNIT_BODY = BODY_A + " The Orion-2 chip draws 50 mW of power at idle.";
+  const units = withArticles([], (a) =>
+    a.id === 1 ? { bodyText: UNIT_BODY, sourceBodyText: UNIT_BODY } : {},
+  );
+
+  it("matches quotes case-sensitively: a changed unit is rejected", () => {
+    const quote = (q: string) =>
+      check({
+        claims: [claim({ claimQuote: { articleId: 1, quote: q } })],
+      });
+    const exact = "The Orion-2 chip draws 50 mW of power at idle";
+    expect(
+      parseLaunchRealityCheckOutput(JSON.stringify(quote(exact)), units),
+    ).not.toBeNull();
+    expect(
+      parseLaunchRealityCheckOutput(
+        JSON.stringify(quote(exact.replace("50 mW", "50 MW"))),
+        units,
+      ),
+    ).toBeNull();
+
+    const timeline = (q: string) =>
+      parseEvolutionTimelineOutput(
+        JSON.stringify({
+          entries: [entry({ source: { articleId: 1, quote: q } }), EVAL_ENTRY],
+        }),
+        units,
+      );
+    expect(timeline(exact)).not.toBeNull();
+    expect(timeline(exact.replace("50 mW", "50 MW"))).toBeNull();
+  });
+
+  it("matches names and stated dates case-sensitively", () => {
+    const out = parseCheck(check({ subject: "orion-2", claimant: "ACME" }));
+    expect(out?.subject).toBe(NOT_STATED_IN_SOURCES);
+    expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
+    const timeline = parseTimeline({
+      entries: [entry({ date: "march 2026" }), EVAL_ENTRY],
+    });
+    expect(timeline?.entries[0].date).toBe(NOT_STATED_IN_SOURCES);
+  });
+
+  it("drops evidence from the claim's own article", () => {
+    const out = parseCheck(
+      check({
+        claims: [
+          claim({
+            verdict: "independent_support",
+            // One more full stop than the claim quote; still article 1.
+            independentEvidence: [
+              {
+                articleId: 1,
+                quote: "scores 92 percent on the CodeBench suite.",
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+    expect(out?.claims[0].independentEvidence).toEqual([]);
+  });
+
+  it("drops evidence from another article of the claim's domain", () => {
+    const sameDomain = withArticles([], () => ({ sourceDomain: "acme.test" }));
+    const out = parseLaunchRealityCheckOutput(
+      JSON.stringify(check()),
+      sameDomain,
+    );
+    expect(out?.claims).toHaveLength(1);
+    expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+    expect(out?.claims[0].independentEvidence).toEqual([]);
+  });
+
+  it("produces nothing when no article has a source body, only a summary", () => {
+    // build.ts sends the summary as bodyText when R2 has no body.
+    const summaryOnly = withArticles([], () => ({ sourceBodyText: null }));
+    expect(
+      parseLaunchRealityCheckOutput(JSON.stringify(check()), summaryOnly),
+    ).toBeNull();
+    expect(
+      parseEvolutionTimelineOutput(
+        JSON.stringify({ entries: [entry(), EVAL_ENTRY] }),
+        summaryOnly,
+      ),
+    ).toBeNull();
+  });
+
+  it("checks names and stated dates against the source body, not the summary", () => {
+    // Article 2's bodyText carries extra text that its source body lacks.
+    const extra = withArticles([], (a) =>
+      a.id === 2 ? { bodyText: `Globex, April 2025. ${BODY_B}` } : {},
+    );
+    const out = parseLaunchRealityCheckOutput(
+      JSON.stringify(check({ claimant: "Globex" })),
+      extra,
+    );
+    expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
+    const timeline = parseEvolutionTimelineOutput(
+      JSON.stringify({
+        entries: [
+          entry(),
+          { ...EVAL_ENTRY, date: "April 2025", dateSource: "stated_in_text" },
+        ],
+      }),
+      extra,
+    );
+    expect(timeline?.entries[1].date).toBe(NOT_STATED_IN_SOURCES);
+  });
+
+  it("drops a quote bound to article A that exists only in article B", () => {
+    const misbound = { articleId: 1, quote: EVIDENCE_QUOTE.quote };
+    expect(
+      parseCheck(check({ claims: [claim({ claimQuote: misbound })] })),
+    ).toBeNull();
+    expect(
+      parseTimeline({ entries: [entry({ source: misbound }), EVAL_ENTRY] }),
     ).toBeNull();
   });
 });

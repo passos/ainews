@@ -31,6 +31,7 @@ const MATERIAL: ArtifactEventMaterial = {
       publishedAt: 1000,
       summary: "Fixture summary.",
       bodyText: "Fixture body.",
+      sourceBodyText: "Fixture body.",
     },
   ],
   verifiedClaims: [
@@ -115,7 +116,9 @@ describe("artifact request bytes (#126)", () => {
   });
 
   it("the #131 request sites serialise to the bytes pinned from the issue text", async () => {
-    // Computed from the prompt text in issue #131, not from src.
+    // Pinned after src was written, then checked independently: the
+    // requests were built again from the prompt text in issue #131 and
+    // hashed, and the hash matched the one from src.
     const sites = Object.values(ARTIFACT_REGISTRY)
       .filter(
         (def) =>

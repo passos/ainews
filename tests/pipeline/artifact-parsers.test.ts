@@ -368,6 +368,8 @@ describe("Artifact Output Parsers (Issue #20)", () => {
           summary: "Packaging delays impact shipment schedules.",
           bodyText:
             "Advanced packaging wait times grew to 24 weeks according to industry disclosures.",
+          sourceBodyText:
+            "Advanced packaging wait times grew to 24 weeks according to industry disclosures.",
         },
       ],
       verifiedClaims: [
