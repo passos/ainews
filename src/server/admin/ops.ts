@@ -17,7 +17,11 @@ import {
   type ContentDisplay,
 } from "../../lib/content-display";
 import { getDb } from "../db/client";
-import { APPROVED_ARTICLE_SQL } from "../publication/articles";
+import {
+  APPROVED_ARTICLE_SQL,
+  approvedArticleWhere,
+  NEWEST_FIRST,
+} from "../publication/articles";
 import { adminWatchSql } from "../publication/watches";
 import {
   conditionalReviewRevisionBumpStatement,
@@ -55,6 +59,17 @@ export interface PendingArticleView {
   publishedAt: number | null;
   fetchedAt: number;
 }
+
+export interface PublishedArticleView {
+  id: number;
+  industryName: string;
+  title: string;
+  bodySha: string;
+  publishedAt: number | null;
+  fetchedAt: number;
+}
+
+export const PUBLISHED_LIST_LIMIT = 100;
 
 export interface StuckArticleView {
   id: number;
@@ -549,6 +564,35 @@ export async function listPendingArticles(
     ORDER BY COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
   `);
   return rows;
+}
+
+/**
+ * The admin "Published" list (#87 A3b): what the public site shows now,
+ * newest first. "Approved" is the one public definition and the title is
+ * the public card title, so a row here is what a reader sees.
+ */
+export async function listPublishedArticles(
+  database: D1Database,
+): Promise<PublishedArticleView[]> {
+  const d = getDb(database);
+  return d.all<PublishedArticleView>(sql`
+    SELECT
+      a.id,
+      i.name AS industryName,
+      COALESCE(NULLIF(a.title_override, ''), NULLIF(an.title_en, ''), a.title) AS title,
+      a.body_sha AS bodySha,
+      a.published_at AS publishedAt,
+      a.fetched_at AS fetchedAt
+    FROM articles a
+    JOIN industries i ON i.id = a.industry_id
+    LEFT JOIN analyses an ON an.id = (
+      SELECT id FROM analyses WHERE article_id = a.id
+      ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE ${approvedArticleWhere}
+    ORDER BY ${NEWEST_FIRST}
+    LIMIT ${PUBLISHED_LIST_LIMIT}
+  `);
 }
 
 export async function decideReview(

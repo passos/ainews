@@ -5,24 +5,27 @@ import { listIndustries } from "../../server/admin/industries";
 import {
   decideReview,
   listPendingArticles,
+  listPublishedArticles,
   listStuckArticles,
 } from "../../server/admin/review";
+import { RemoveButton } from "../../components/admin/RemoveButton";
 
 export const Route = createFileRoute("/admin/review")({
   ssr: "data-only",
   loader: async () => {
-    const [pending, stuck, industries] = await Promise.all([
+    const [pending, published, stuck, industries] = await Promise.all([
       listPendingArticles(),
+      listPublishedArticles(),
       listStuckArticles(),
       listIndustries(),
     ]);
-    return { pending, stuck, industries };
+    return { pending, published, stuck, industries };
   },
   component: AdminReviewPage,
 });
 
 function AdminReviewPage() {
-  const { pending, stuck, industries } = Route.useLoaderData();
+  const { pending, published, stuck, industries } = Route.useLoaderData();
   const router = useRouter();
   const [selectedIndustry, setSelectedIndustry] = useState<number | "all">(
     "all",
@@ -224,6 +227,59 @@ function AdminReviewPage() {
                     body_sha: {art.bodySha?.slice(0, 12)}...
                   </span>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Published Articles (#87 A3b) */}
+      <div className="flex flex-col gap-4 border-t pt-8">
+        <div>
+          <h2 className="text-lg font-semibold">
+            Published ({published.length})
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Approved articles on the public site, newest first (up to 100).
+          </p>
+        </div>
+
+        {published.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            No published articles.
+          </div>
+        ) : (
+          <div className="flex flex-col divide-y rounded-md border">
+            {published.map((art) => (
+              <div
+                key={art.id}
+                className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm"
+              >
+                <div className="flex min-w-0 flex-col gap-1">
+                  <Link
+                    to="/admin/articles/$articleId"
+                    params={{ articleId: String(art.id) }}
+                    className="font-medium hover:underline"
+                  >
+                    {art.title}
+                  </Link>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="rounded bg-muted px-2 py-0.5 font-medium">
+                      {art.industryName}
+                    </span>
+                    <span className="font-mono">
+                      {new Date(
+                        art.publishedAt ?? art.fetchedAt,
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+                <RemoveButton
+                  working={submittingId === art.id}
+                  onConfirm={() =>
+                    handleDecision(art.id, art.bodySha, "rejected")
+                  }
+                />
               </div>
             ))}
           </div>
