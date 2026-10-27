@@ -27,6 +27,7 @@ import { CALL_TIERS } from "../../providers/tiers";
 import type { ModelClient } from "../../providers/models";
 import type { ModelTransport } from "../../providers/transport";
 import { sendGroup, type PipelineEnv } from "../messages";
+import { FINANCE_SLUG } from "../../lib/sections";
 import { parseAnalysisConfig } from "./config";
 import type { AnalysisConfig } from "./config";
 import { labelValue } from "./labels";
@@ -72,7 +73,7 @@ interface Row {
 }
 
 /** Slug of the Finance industry. #8's seed must import it, not repeat it. */
-export const FINANCE_SLUG = "finance";
+export { FINANCE_SLUG } from "../../lib/sections";
 
 /**
  * Finance is never approved automatically (architecture §7, N§4), whatever

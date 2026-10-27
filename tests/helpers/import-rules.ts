@@ -17,6 +17,7 @@ const ASSET =
 const ROUTE_TARGETS = [
   "src/server/publication/",
   "src/server/admin/",
+  "src/server/reader-watch/",
   "src/components/",
   "src/lib/",
   "src/routes/",
@@ -86,6 +87,21 @@ function localNames(
   return names;
 }
 
+// Names that call createServerFn in `source`. The plain name always counts;
+// aliases count from any import source.
+function serverFnNames(source: string): Set<string> {
+  return new Set([
+    "createServerFn",
+    ...localNames(source, "createServerFn", () => true),
+  ]);
+}
+
+// Start of a call by local name `fn`, not as a property of something else.
+const callOf = (fn: string) => `(?<![\\w$.])${escapeRe(fn)}\\s*\\(`;
+
+// A dynamic import() that specifiers() does not see.
+const NON_LITERAL_IMPORT = /(?<![\w$.])import\s*\((?!\s*["'][^"']+["']\s*\))/;
+
 // R4 for one admin file: counts server function calls that do not chain
 // `.middleware([accessMiddleware` directly, by the names the file imports.
 function unguardedServerFns(
@@ -93,11 +109,7 @@ function unguardedServerFns(
   source: string,
   files: Map<string, string>,
 ): number {
-  // The plain name always counts; aliases count from any import source.
-  const fnNames = new Set([
-    "createServerFn",
-    ...localNames(source, "createServerFn", () => true),
-  ]);
+  const fnNames = serverFnNames(source);
   const mwNames = localNames(
     source,
     "accessMiddleware",
@@ -107,7 +119,7 @@ function unguardedServerFns(
   if (file === ACCESS_FN_FILE) mwNames.push("accessMiddleware");
   let unguarded = 0;
   for (const fn of fnNames) {
-    const call = `(?<![\\w$.])${escapeRe(fn)}\\s*\\(`;
+    const call = callOf(fn);
     const total = source.match(new RegExp(call, "g"))?.length ?? 0;
     let guarded = 0;
     if (mwNames.length > 0) {
@@ -130,6 +142,7 @@ export function checkImportRules(files: Map<string, string>): string[] {
       (isRoute && !inDir(file, "src/routes/admin/")) ||
       inDir(file, "src/components/");
     const isAdminRoute = inDir(file, "src/routes/admin/");
+    const isReaderWatch = inDir(file, "src/server/reader-watch/");
 
     // R0: every relative code import resolves to a file, so R1/R2 cannot
     // miss one through a spelling the resolver does not understand.
@@ -139,11 +152,18 @@ export function checkImportRules(files: Map<string, string>): string[] {
         violations.push(`R0 ${file} cannot resolve ${spec}`);
       }
     }
+    if (NON_LITERAL_IMPORT.test(source)) {
+      violations.push(
+        `R0 ${file} has a dynamic import without a string literal`,
+      );
+    }
 
     // R1: public code cannot reach server/db/, pipeline/ or providers/.
     // Publication and admin routes cannot reach pipeline/ or providers/.
-    // Traversal stops at server/admin/ (Access-guarded) and server/publication/.
-    if (isPublicEntry || isPublication || isAdminRoute) {
+    // server/reader-watch/ cannot reach server/admin/ either.
+    // Traversal stops at server/admin/ (Access-guarded), server/publication/
+    // and server/reader-watch/.
+    if (isPublicEntry || isPublication || isAdminRoute || isReaderWatch) {
       const seen = new Set<string>([file]);
       const queue = [file];
       while (queue.length > 0) {
@@ -154,13 +174,16 @@ export function checkImportRules(files: Map<string, string>): string[] {
           const forbidden =
             inDir(next, "src/pipeline/") ||
             inDir(next, "src/providers/") ||
-            (isPublicEntry && inDir(next, "src/server/db/"));
+            (isPublicEntry && inDir(next, "src/server/db/")) ||
+            (isReaderWatch && inDir(next, "src/server/admin/"));
           if (forbidden) {
             violations.push(`R1 ${file} reaches ${next} via ${current}`);
             continue;
           }
           if (inDir(next, "src/server/admin/")) continue;
           if (isPublicEntry && inDir(next, "src/server/publication/")) continue;
+          if (isPublicEntry && inDir(next, "src/server/reader-watch/"))
+            continue;
           queue.push(next);
         }
       }
@@ -193,6 +216,21 @@ export function checkImportRules(files: Map<string, string>): string[] {
         violations.push(
           `R4 ${file} has ${unguarded} server function(s) without accessMiddleware`,
         );
+      }
+    }
+
+    // R5: every server function in server/reader-watch/ is POST.
+    if (isReaderWatch) {
+      let notPost = 0;
+      for (const fn of serverFnNames(source)) {
+        const call = callOf(fn);
+        const post = `${call}\\s*\\{\\s*method:\\s*"POST"\\s*\\}\\s*\\)`;
+        notPost +=
+          (source.match(new RegExp(call, "g"))?.length ?? 0) -
+          (source.match(new RegExp(post, "g"))?.length ?? 0);
+      }
+      if (notPost !== 0) {
+        violations.push(`R5 ${file} has a server function that is not POST`);
       }
     }
   }

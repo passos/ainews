@@ -250,6 +250,88 @@ export const f = c({ method: "GET" }).handler(async () => 1);
   });
 });
 
+describe("R1, R2, R5: server/reader-watch/ (#132)", () => {
+  const API = `import { createServerFn } from "@tanstack/react-start";
+import { getDb } from "../db/client";
+export const createReaderWatch = createServerFn({ method: "POST" }).handler(
+  async () => getDb,
+);
+`;
+
+  it("lets a route import reader-watch/, which reads server/db/", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/follow.tsx": `import { createReaderWatch } from "../server/reader-watch/api";`,
+        "src/server/reader-watch/api.ts": API,
+        "src/server/db/client.ts": "export const getDb = 1;",
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+
+  it("reports reader-watch/ that imports providers/", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { m } from "../../providers/models";`,
+        "src/providers/models.ts": "export const m = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-watch/x.ts reaches src/providers/models.ts via src/server/reader-watch/x.ts",
+    ]);
+  });
+
+  it("reports reader-watch/ that imports server/admin/", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { FINANCE_SLUG } from "../admin/ops";`,
+        "src/server/admin/ops.ts": "export const FINANCE_SLUG = 1;",
+      }),
+    );
+    expect(v).toEqual([
+      "R1 src/server/reader-watch/x.ts reaches src/server/admin/ops.ts via src/server/reader-watch/x.ts",
+    ]);
+  });
+
+  it("reports a reader-watch/ server function that is not POST", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { createServerFn } from "@tanstack/react-start";
+export const a = createServerFn({ method: "POST" }).handler(async () => 1);
+export const b = createServerFn({ method: "GET" }).handler(async () => 2);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R5 src/server/reader-watch/x.ts has a server function that is not POST",
+    ]);
+  });
+
+  it("reports an aliased reader-watch/ server function that is not POST", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const a = c({ method: "GET" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([
+      "R5 src/server/reader-watch/x.ts has a server function that is not POST",
+    ]);
+  });
+
+  it("does not report an aliased reader-watch/ POST server function", () => {
+    const v = checkImportRules(
+      files({
+        "src/server/reader-watch/x.ts": `import { createServerFn as c } from "@tanstack/react-start";
+export const a = c({ method: "POST" }).handler(async () => 1);
+`,
+      }),
+    );
+    expect(v).toEqual([]);
+  });
+});
+
 describe("R0: relative code imports resolve", () => {
   it("resolves a .js specifier to the .ts file and reports the route", () => {
     const v = checkImportRules(
@@ -273,6 +355,28 @@ describe("R0: relative code imports resolve", () => {
     expect(v).toEqual([
       "R0 src/routes/index.tsx cannot resolve ../pipeline/gone",
     ]);
+  });
+
+  it("reports a dynamic import whose argument is not a string literal", () => {
+    const v = checkImportRules(
+      files({
+        "src/routes/a.tsx": "const m = () => import(`../providers/models`);",
+        "src/providers/models.ts": "",
+      }),
+    );
+    expect(v).toEqual([
+      "R0 src/routes/a.tsx has a dynamic import without a string literal",
+    ]);
+  });
+
+  it("does not report a dynamic import of a string literal", () => {
+    const v = checkImportRules(
+      files({
+        "src/lib/y.ts": `const m = () => import("./x");`,
+        "src/lib/x.ts": "export const x = 1;",
+      }),
+    );
+    expect(v).toEqual([]);
   });
 
   it("does not report asset imports", () => {

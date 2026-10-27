@@ -8,7 +8,11 @@ import {
 } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { adminOr403, requireAdmin } from "../src/server/admin/access";
-import { handleFetch, type EdgeEnv } from "../src/server/edge";
+import {
+  handleFetch,
+  SERVER_FN_MAX_BODY_BYTES,
+  type EdgeEnv,
+} from "../src/server/edge";
 
 const ENV: EdgeEnv = {
   SITE_URL: "https://news.ioenv.com",
@@ -435,5 +439,173 @@ describe("adminOr403", () => {
     await expect(adminOr403(request, ENV, getKey)).resolves.toEqual({
       email: ENV.ADMIN_EMAIL,
     });
+  });
+});
+
+describe("server function body cap (#132)", () => {
+  const CAP = 65536;
+
+  // A body in 1 KB chunks with no Content-Length; records a cancel.
+  function streamed(size: number) {
+    let sent = 0;
+    const state = { cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= size) {
+          controller.close();
+          return;
+        }
+        const n = Math.min(1024, size - sent);
+        controller.enqueue(new Uint8Array(n).fill((sent / 1024) % 251));
+        sent += n;
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { body, state };
+  }
+
+  function bodyRequest(
+    path: string,
+    body: BodyInit | null,
+    headers: Record<string, string> = {},
+  ) {
+    return new Request(`${SITE}${path}`, {
+      method: "POST",
+      body,
+      headers: { Origin: SITE, ...headers },
+      duplex: "half",
+    } as RequestInit);
+  }
+
+  // Records each request the handler sees, with its body bytes.
+  function recorder(status = 200) {
+    const seen: Uint8Array[] = [];
+    const handler = async (request: Request) => {
+      seen.push(new Uint8Array(await request.arrayBuffer()));
+      return new Response("ok", { status });
+    };
+    return { seen, handler };
+  }
+
+  it("rejects a Content-Length over the cap", async () => {
+    const { seen, handler } = recorder();
+    const request = bodyRequest("/_serverFn/x", "{}", {
+      "Content-Length": String(CAP + 1),
+    });
+    expect(request.headers.get("Content-Length")).toBe(String(CAP + 1));
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(413);
+    expect(await res.text()).toBe("payload_too_large");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expectSecurityHeaders(res);
+    expect(seen).toHaveLength(0);
+    expect(SERVER_FN_MAX_BODY_BYTES).toBe(CAP);
+  });
+
+  it("rejects a streamed body over the cap without Content-Length", async () => {
+    const { seen, handler } = recorder();
+    const { body, state } = streamed(CAP + 1);
+    const request = bodyRequest("/_serverFn/x", body);
+    expect(request.headers.get("Content-Length")).toBeNull();
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(413);
+    expect(await res.text()).toBe("payload_too_large");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expectSecurityHeaders(res);
+    expect(seen).toHaveLength(0);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("passes a small streamed body through unchanged", async () => {
+    const { seen, handler } = recorder();
+    const sent = new Uint8Array(100).map((_, i) => (i * 7) % 256);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(sent.slice(0, 40));
+        controller.enqueue(sent.slice(40));
+        controller.close();
+      },
+    });
+    const request = bodyRequest("/_serverFn/x", body);
+    expect(request.headers.get("Content-Length")).toBeNull();
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect([...seen[0]]).toEqual([...sent]);
+  });
+
+  it("passes a body of exactly the cap with Content-Length", async () => {
+    const { seen, handler } = recorder();
+    const sent = new Uint8Array(CAP).map((_, i) => (i * 7) % 256);
+    const request = bodyRequest("/_serverFn/x", sent, {
+      "Content-Length": String(CAP),
+    });
+    expect(request.headers.get("Content-Length")).toBe(String(CAP));
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect([...seen[0]]).toEqual([...sent]);
+  });
+
+  it("passes a streamed body of exactly the cap without Content-Length", async () => {
+    const { seen, handler } = recorder();
+    const sent = new Uint8Array(CAP).map((_, i) => (i * 7) % 256);
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= CAP) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(sent.slice(offset, offset + 1024));
+        offset += 1024;
+      },
+    });
+    const request = bodyRequest("/_serverFn/x", body);
+    expect(request.headers.get("Content-Length")).toBeNull();
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect([...seen[0]]).toEqual([...sent]);
+  });
+
+  it("rejects an invalid Content-Length", async () => {
+    for (const value of ["abc", "-1", "1e3", "12, 12", ""]) {
+      const { seen, handler } = recorder();
+      const request = bodyRequest("/_serverFn/x", "{}", {
+        "Content-Length": value,
+      });
+      expect(request.headers.get("Content-Length"), value).toBe(value);
+      const res = await handleFetch(request, ENV, { handler, getKey });
+      expect(res.status, value).toBe(400);
+      expect(await res.text()).toBe("bad_content_length");
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expectSecurityHeaders(res);
+      expect(seen).toHaveLength(0);
+    }
+  });
+
+  it("does not cap GET /_serverFn", async () => {
+    const { seen, handler } = recorder(202);
+    const request = new Request(`${SITE}/_serverFn/x`, {
+      headers: { "Content-Length": String(CAP * 10) },
+    });
+    const res = await handleFetch(request, ENV, { handler, getKey });
+    expect(res.status).toBe(202);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("does not cap a POST outside /_serverFn", async () => {
+    const { seen, handler } = recorder(202);
+    const { body } = streamed(CAP + 1);
+    const res = await handleFetch(bodyRequest("/x", body), ENV, {
+      handler,
+      getKey,
+    });
+    expect(res.status).toBe(202);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].byteLength).toBe(CAP + 1);
   });
 });

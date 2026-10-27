@@ -1,5 +1,6 @@
 // Edge checks for every request, in a fixed order:
-// admin path auth -> Origin check on writes -> TanStack -> response headers.
+// admin path auth -> Origin check on writes -> server function body cap ->
+// TanStack -> response headers.
 // No TanStack runtime here, so tests call handleFetch directly.
 import type { JWTVerifyGetKey } from "jose";
 import { isAdminPath, normalizePath, requireAdmin } from "./admin/access";
@@ -16,6 +17,12 @@ export interface EdgeDeps {
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Body size cap for every /_serverFn/* write, checked before TanStack parses
+ * the body (architecture §3 "公开写入口" rule 1).
+ */
+export const SERVER_FN_MAX_BODY_BYTES = 65536;
 
 const SECURITY_HEADERS: [string, string][] = [
   [
@@ -54,6 +61,44 @@ function forbidden(): Response {
   return withHeaders(new Response("Forbidden", { status: 403 }), true);
 }
 
+function refuse(status: number, text: string): Response {
+  return withHeaders(new Response(text, { status }), true);
+}
+
+// The request to pass on (the original, or one rebuilt from the bytes read),
+// or a 400/413 refusal. Without Content-Length, counts the body bytes and
+// stops reading at the cap.
+async function capBody(request: Request): Promise<Request | Response> {
+  const length = request.headers.get("Content-Length");
+  if (length !== null) {
+    if (!/^\d+$/.test(length)) return refuse(400, "bad_content_length");
+    return Number(length) > SERVER_FN_MAX_BODY_BYTES
+      ? refuse(413, "payload_too_large")
+      : request;
+  }
+  if (request.body === null) return request;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > SERVER_FN_MAX_BODY_BYTES) {
+      await reader.cancel();
+      return refuse(413, "payload_too_large");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new Request(request, { body: bytes });
+}
+
 export async function handleFetch(
   request: Request,
   env: EdgeEnv,
@@ -73,9 +118,16 @@ export async function handleFetch(
   }
 
   const serverFn = (normalizePath(pathname) ?? "").startsWith("/_serverfn");
+  let forwarded = request;
+  if (serverFn && !SAFE_METHODS.has(request.method)) {
+    const capped = await capBody(request);
+    if (capped instanceof Response) return capped;
+    forwarded = capped;
+  }
+
   let res: Response;
   try {
-    res = await deps.handler(request);
+    res = await deps.handler(forwarded);
   } catch (error) {
     console.error("handler failed", error);
     res = new Response("Internal Server Error", { status: 500 });
