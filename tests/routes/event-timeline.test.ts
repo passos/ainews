@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { generateEventArtifacts } from "../../src/pipeline/artifacts/build";
+import { trackEventPrimarySources } from "../../src/pipeline/evidence/primary";
 import { getEvent } from "../../src/server/publication/events";
 import {
   db,
@@ -272,10 +274,9 @@ it("independent review: withdrawal removes changed claims whose own text contain
 });
 
 it("independent review: creates a diff for each revision when two primary sources are tracked before the queue drains", async () => {
-  const { trackEventPrimarySources } =
-    await import("../../src/pipeline/evidence/primary");
-  const { generateEventArtifacts } =
-    await import("../../src/pipeline/artifacts/build");
+  // The heavy pipeline modules are imported statically (top of file). Their
+  // cold load takes ~250ms of this test's ~300ms; as a dynamic import it counts
+  // against the 5000ms test timeout and blows it when CPU is contended.
   const { syncRevisionDiff } = await import("../../src/pipeline/evidence/diff");
   type PipelineEnv = import("../../src/pipeline/messages").PipelineEnv;
   type ModelClient = import("../../src/providers/models").ModelClient;
