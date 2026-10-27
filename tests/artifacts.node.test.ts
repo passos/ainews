@@ -785,7 +785,7 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain("Launch Reality Check");
     expect(html).toContain("Orion-2 · Claims by Acme");
     expect(html).toContain(
-      "1 of 1 claim has independent evidence in these sources.",
+      "1 of 1 claim has evidence from other outlets in these sources.",
     );
     expect(html).toContain("Other outlets report contrary evidence");
     expect(html).not.toContain("Independent evidence disputes this claim");
