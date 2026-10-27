@@ -12,6 +12,7 @@ import {
   type ArtifactArticleMaterial,
   type ArtifactEventMaterial,
 } from "../../src/pipeline/artifacts/prompts";
+import { groundedSentences } from "../../src/lib/artifacts/grounding";
 import {
   ARTIFACT_REGISTRY,
   type ArtifactEligibilityContext,
@@ -35,6 +36,7 @@ const MATERIAL: ArtifactEventMaterial = {
       title: "Acme releases Orion-2",
       sourceName: "Acme",
       sourceDomain: "acme.test",
+      canonicalUrl: "https://acme.test/orion-2",
       publishedAt: Date.UTC(2026, 9, 20),
       summary: "S1",
       bodyText: BODY_A,
@@ -45,6 +47,7 @@ const MATERIAL: ArtifactEventMaterial = {
       title: "Lab tests Orion-2",
       sourceName: "Open Eval Lab",
       sourceDomain: "openeval.test",
+      canonicalUrl: "https://openeval.test/orion-2",
       publishedAt: null,
       summary: "S2",
       bodyText: BODY_B,
@@ -63,6 +66,15 @@ const EVIDENCE_QUOTE = {
   quote: "Orion-2 scored 81 percent on CodeBench",
 };
 
+// #144 B: a quote that passes the gate is stored as every body sentence it
+// touches, so the card shows the source's own sentence, not a substring.
+const CLAIM_SENTENCE = {
+  articleId: 1,
+  quote:
+    "Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite.",
+};
+const EVIDENCE_SENTENCE = { articleId: 2, quote: BODY_B };
+
 function claim(overrides: Record<string, unknown> = {}) {
   return {
     claim: "Orion-2 scores 92 percent on CodeBench.",
@@ -71,6 +83,15 @@ function claim(overrides: Record<string, unknown> = {}) {
     independentEvidence: [EVIDENCE_QUOTE],
     ...overrides,
   };
+}
+
+/** claim() as the parser stores it: quotes expanded to whole sentences. */
+function storedClaim(overrides: Record<string, unknown> = {}) {
+  return claim({
+    claimQuote: CLAIM_SENTENCE,
+    independentEvidence: [EVIDENCE_SENTENCE],
+    ...overrides,
+  });
 }
 
 function check(overrides: Record<string, unknown> = {}) {
@@ -169,7 +190,7 @@ describe("technologyEvolutionTimelineSchema (#131)", () => {
 
 describe("parseLaunchRealityCheckOutput (#131)", () => {
   it("keeps grounded quotes and the verdict", () => {
-    expect(parseCheck(check())).toEqual(check());
+    expect(parseCheck(check())).toEqual(check({ claims: [storedClaim()] }));
   });
 
   it("drops a claim whose quote is not in the article, and returns null when none is left", () => {
@@ -179,7 +200,7 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
     expect(parseCheck(check({ claims: [ungrounded] }))).toBeNull();
 
     const out = parseCheck(check({ claims: [ungrounded, claim()] }));
-    expect(out?.claims).toEqual([claim()]);
+    expect(out?.claims).toEqual([storedClaim()]);
   });
 
   it("drops a quote cited from an article outside the material", () => {
@@ -213,6 +234,7 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
         title: "Wire copy",
         sourceName: "Wire",
         sourceDomain: "wire.test",
+        canonicalUrl: "https://wire.test/orion-2",
         publishedAt: null,
         summary: "S3",
         bodyText: "Acme said Orion-2 scores 92 percent on the CodeBench suite.",
@@ -261,10 +283,6 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
     const out = parseCheck(check({ subject: " ", claimant: "   " }));
     expect(out?.subject).toBe(NOT_STATED_IN_SOURCES);
     expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
-    const timeline = parseTimeline({
-      entries: [entry({ date: "  " }), EVAL_ENTRY],
-    });
-    expect(timeline?.entries[0].date).toBe(NOT_STATED_IN_SOURCES);
   });
 
   it("returns null without material, on invalid JSON, and on a schema violation", () => {
@@ -275,39 +293,22 @@ describe("parseLaunchRealityCheckOutput (#131)", () => {
 });
 
 describe("parseEvolutionTimelineOutput (#131)", () => {
-  it("rewrites report_published dates from publishedAt", () => {
+  it("stores whole-sentence quotes and keeps the model's dates unchanged and in order", () => {
+    // The model's date and dateSource stay in the JSON; the card never shows
+    // them (#144 B): it shows the cited article's publish date instead.
     const out = parseTimeline({
       entries: [
-        entry({
-          date: "yesterday",
-          dateSource: "report_published",
-          source: {
-            articleId: 1,
-            quote: "Acme today released Orion-2, a model",
-          },
-        }),
         { ...EVAL_ENTRY, date: "yesterday" },
+        entry({ date: "May 2026", dateSource: "report_published" }),
       ],
     });
-    expect(out?.entries.map((e) => e.date)).toEqual([
-      "2026-10-20",
-      NOT_STATED_IN_SOURCES,
+    expect(out?.entries.map((e) => [e.date, e.dateSource])).toEqual([
+      ["yesterday", "report_published"],
+      ["May 2026", "report_published"],
     ]);
-  });
-
-  it("keeps a stated date only when the article text contains it", () => {
-    const out = parseTimeline({
-      entries: [
-        entry(),
-        entry({ date: "April 2025" }),
-        // "March 2026" is in article 1, not in the cited article 2.
-        { ...EVAL_ENTRY, date: "March 2026", dateSource: "stated_in_text" },
-      ],
-    });
-    expect(out?.entries.map((e) => e.date)).toEqual([
-      "March 2026",
-      NOT_STATED_IN_SOURCES,
-      NOT_STATED_IN_SOURCES,
+    expect(out?.entries.map((e) => e.source)).toEqual([
+      EVIDENCE_SENTENCE,
+      { articleId: 1, quote: "In March 2026 Acme shipped Orion-1." },
     ]);
   });
 
@@ -369,14 +370,10 @@ describe("Technology product grounding (#131 review)", () => {
     expect(timeline(exact.replace("50 mW", "50 MW"))).toBeNull();
   });
 
-  it("matches names and stated dates case-sensitively", () => {
+  it("matches names case-sensitively", () => {
     const out = parseCheck(check({ subject: "orion-2", claimant: "ACME" }));
     expect(out?.subject).toBe(NOT_STATED_IN_SOURCES);
     expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
-    const timeline = parseTimeline({
-      entries: [entry({ date: "march 2026" }), EVAL_ENTRY],
-    });
-    expect(timeline?.entries[0].date).toBe(NOT_STATED_IN_SOURCES);
   });
 
   it("drops evidence from the claim's own article", () => {
@@ -401,7 +398,9 @@ describe("Technology product grounding (#131 review)", () => {
   });
 
   it("drops evidence from another article of the claim's domain", () => {
-    const sameDomain = withArticles([], () => ({ sourceDomain: "acme.test" }));
+    const sameDomain = withArticles([], (a) => ({
+      canonicalUrl: `https://acme.test/story-${a.id}`,
+    }));
     const out = parseLaunchRealityCheckOutput(
       JSON.stringify(check()),
       sameDomain,
@@ -425,7 +424,7 @@ describe("Technology product grounding (#131 review)", () => {
     ).toBeNull();
   });
 
-  it("checks names and stated dates against the source body, not the summary", () => {
+  it("checks names against the source body, not the summary", () => {
     // Article 2's bodyText carries extra text that its source body lacks.
     const extra = withArticles([], (a) =>
       a.id === 2 ? { bodyText: `Globex, April 2025. ${BODY_B}` } : {},
@@ -435,16 +434,6 @@ describe("Technology product grounding (#131 review)", () => {
       extra,
     );
     expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
-    const timeline = parseEvolutionTimelineOutput(
-      JSON.stringify({
-        entries: [
-          entry(),
-          { ...EVAL_ENTRY, date: "April 2025", dateSource: "stated_in_text" },
-        ],
-      }),
-      extra,
-    );
-    expect(timeline?.entries[1].date).toBe(NOT_STATED_IN_SOURCES);
   });
 
   it("drops a quote bound to article A that exists only in article B", () => {
@@ -550,19 +539,27 @@ describe("Technology product grounding (#144 review)", () => {
     expect(timelineQuote(q, withBody(body))).not.toBeNull();
   });
 
-  // #144 round 3: a quote edge that is punctuation needs no word boundary.
-  it("accepts a quote that ends with punctuation directly before a word", () => {
+  // #144 B: a punctuation edge gets no exemption from the word boundary;
+  // the quote without that mark passes and expands to the whole sentence.
+  it("rejects a quote that ends with punctuation directly before a word", () => {
     const body = `${BODY_A} The chip draws 50 mW.Next comes Orion-3.`;
-    const q = "The chip draws 50 mW.";
-    expect(checkQuote(q, withBody(body))).not.toBeNull();
-    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+    expect(checkQuote("The chip draws 50 mW.", withBody(body))).toBeNull();
+    expect(timelineQuote("The chip draws 50 mW.", withBody(body))).toBeNull();
+    const out = checkQuote("The chip draws 50 mW", withBody(body));
+    expect(out?.claims[0].claimQuote.quote).toBe(
+      "The chip draws 50 mW.Next comes Orion-3.",
+    );
   });
 
-  it("accepts a quote that starts with an opening quote mark directly after a word", () => {
+  it("rejects a quote that starts with an opening quote mark directly after a word", () => {
     const body = `${BODY_A} Acme said\u201cOrion-2 is the fastest model we have built\u201d today.`;
     const q = "\u201cOrion-2 is the fastest model we have built";
-    expect(checkQuote(q, withBody(body))).not.toBeNull();
-    expect(timelineQuote(q, withBody(body))).not.toBeNull();
+    expect(checkQuote(q, withBody(body))).toBeNull();
+    expect(timelineQuote(q, withBody(body))).toBeNull();
+    const out = timelineQuote(q.slice(1), withBody(body));
+    expect(out?.entries[0].source.quote).toBe(
+      "Acme said\u201cOrion-2 is the fastest model we have built\u201d today.",
+    );
   });
 
   it("accepts a valid later occurrence after a non-boundary one", () => {
@@ -572,22 +569,23 @@ describe("Technology product grounding (#144 review)", () => {
     expect(timelineQuote(q, withBody(body))).not.toBeNull();
   });
 
-  it("matches names and stated dates at word boundaries", () => {
+  it("matches names at word boundaries", () => {
     const out = parseCheck(check({ subject: "Orion-2", claimant: "Acm" }));
     expect(out?.subject).toBe("Orion-2");
     expect(out?.claimant).toBe(NOT_STATED_IN_SOURCES);
-    const timeline = parseTimeline({
-      entries: [entry({ date: "March 202" }), EVAL_ENTRY],
-    });
-    expect(timeline?.entries[0].date).toBe(NOT_STATED_IN_SOURCES);
   });
+
+  /** A canonical URL on `host`; "" stays "", which the URL parser rejects. */
+  function urlOn(host: string): string {
+    return host === "" ? "" : `https://${host}/story`;
+  }
 
   /** The default check with article 1 on `claim` and article 2 on `evidence`. */
   function domains(claimDomain: string, evidenceDomain: string) {
     return parseLaunchRealityCheckOutput(
       JSON.stringify(check()),
       withArticles([], (a) => ({
-        sourceDomain: a.id === 1 ? claimDomain : evidenceDomain,
+        canonicalUrl: urlOn(a.id === 1 ? claimDomain : evidenceDomain),
       })),
     );
   }
@@ -633,7 +631,7 @@ describe("Technology product grounding (#144 review)", () => {
   ])("keeps evidence from %j against %j", (claimDomain, evidenceDomain) => {
     const out = domains(claimDomain, evidenceDomain);
     expect(out?.claims[0].verdict).toBe("independent_dispute");
-    expect(out?.claims[0].independentEvidence).toEqual([EVIDENCE_QUOTE]);
+    expect(out?.claims[0].independentEvidence).toEqual([EVIDENCE_SENTENCE]);
   });
 
   it("drops a quote bound to article B that exists only in article A", () => {
@@ -665,6 +663,7 @@ describe("Technology product grounding (#144 review)", () => {
         title: "Third lab",
         sourceName: "Third Lab",
         sourceDomain: "thirdlab.test",
+        canonicalUrl: "https://thirdlab.test/orion-2",
         publishedAt: null,
         summary: "S3",
         bodyText: BODY_C,
@@ -692,6 +691,261 @@ describe("Technology product grounding (#144 review)", () => {
       expect(out?.claims[0].verdict).toBe("no_independent_evidence");
       expect(out?.claims[0].independentEvidence).toEqual([]);
     }
+  });
+});
+
+describe("Technology product quotes are whole sentences (#144 B)", () => {
+  /** MATERIAL with article 1's source body replaced. */
+  function withBody(body: string): ArtifactEventMaterial {
+    return withArticles([], (a) =>
+      a.id === 1 ? { bodyText: body, sourceBodyText: body } : {},
+    );
+  }
+  /** The stored claim quote, or null when the claim is dropped. */
+  function storedQuote(q: string, body: string): string | null {
+    const out = parseLaunchRealityCheckOutput(
+      JSON.stringify(
+        check({ claims: [claim({ claimQuote: { articleId: 1, quote: q } })] }),
+      ),
+      withBody(body),
+    );
+    return out?.claims[0].claimQuote.quote ?? null;
+  }
+  /** The stored timeline quote of the first entry, or null. */
+  function storedEntryQuote(q: string, body: string): string | null {
+    const out = parseEvolutionTimelineOutput(
+      JSON.stringify({
+        entries: [entry({ source: { articleId: 1, quote: q } }), EVAL_ENTRY],
+      }),
+      withBody(body),
+    );
+    return out?.entries[0].source.quote ?? null;
+  }
+
+  // Codex repros of #144 rounds 2-4. Each quote passes the gate on a
+  // substring; the stored text is the whole sentence, so nothing is cut.
+  it.each([
+    [
+      "a minus sign",
+      "The sensor works at -50 degrees Celsius in the field test.",
+      "50 degrees Celsius in the field test",
+    ],
+    [
+      "a leading decimal point",
+      "The chip draws .50 mW of power at idle.",
+      "50 mW of power at idle",
+    ],
+    [
+      "a range",
+      "The chip draws 10-20 mW of power at idle.",
+      "20 mW of power at idle",
+    ],
+    [
+      "a percent sign",
+      "Accuracy rose from 81% to 92% on CodeBench.",
+      "Accuracy rose from 81% to 92",
+    ],
+    [
+      "a footnote marker",
+      "The Orion-2 chip draws 50 mW.\u00b9 Next comes Orion-3.",
+      "The Orion-2 chip draws 50 mW",
+    ],
+  ])("stores the whole sentence around %s", (_name, sentence, q) => {
+    const body = `${BODY_A} ${sentence}`;
+    expect(storedQuote(q, body)).toBe(sentence);
+    expect(storedEntryQuote(q, body)).toBe(sentence);
+  });
+
+  it.each([
+    [
+      "50 mW in 150 mW",
+      "The chip draws 150 mW of power at idle.",
+      "50 mW of power at idle",
+    ],
+    [
+      "50 mW in 150.50 mW",
+      "The chip draws 150.50 mW of power at idle.",
+      "50 mW of power at idle",
+    ],
+    [
+      "50 MW in 50 MWh",
+      "The new plant stores 50 MWh of energy.",
+      "The new plant stores 50 MW",
+    ],
+  ])("still drops a quote that fails the gate: %s", (_name, sentence, q) => {
+    expect(storedQuote(q, `${BODY_A} ${sentence}`)).toBeNull();
+    expect(storedEntryQuote(q, `${BODY_A} ${sentence}`)).toBeNull();
+  });
+
+  it("stores the rival's whole sentence, so the card can name who scored", () => {
+    const body = `${BODY_A} Rival Vega-1 scores 95 percent on the CodeBench suite.`;
+    expect(storedQuote("scores 95 percent on the CodeBench suite", body)).toBe(
+      "Rival Vega-1 scores 95 percent on the CodeBench suite.",
+    );
+  });
+
+  it("expands to every sentence a quote touches, with original whitespace collapsed", () => {
+    const body = `${BODY_A} The chip draws 50 mW  of power\tat idle. Then it\n sleeps for an hour. Last line.`;
+    expect(storedQuote("of power at idle. Then it", body)).toBe(
+      "The chip draws 50 mW of power at idle. Then it",
+    );
+    expect(storedQuote("power at idle. Then it sleeps", body)).toBe(
+      "The chip draws 50 mW of power at idle. Then it sleeps for an hour.",
+    );
+  });
+
+  it("keeps the 20-character minimum on the model's quote, not on the sentence", () => {
+    const body = `${BODY_A} It draws 50 mW of power at idle.`;
+    expect(storedQuote("draws 50 mW of power", body)).toBe(
+      "It draws 50 mW of power at idle.",
+    );
+    expect(storedQuote("mW of power at idle", body)).toBeNull();
+  });
+
+  it("follows canonical_url, not the source's site domain, for independence", () => {
+    const run = (site: (id: number) => string, url: (id: number) => string) =>
+      parseLaunchRealityCheckOutput(
+        JSON.stringify(check()),
+        withArticles([], (a) => ({
+          sourceDomain: site(a.id),
+          canonicalUrl: url(a.id),
+        })),
+      )?.claims[0].independentEvidence;
+    // Site domains differ, but both articles live on vendor.com: dropped.
+    expect(
+      run(
+        (id) => (id === 1 ? "https://vendor.com" : "https://lab.org"),
+        (id) =>
+          id === 1 ? "https://www.vendor.com/a" : "https://news.vendor.com/b",
+      ),
+    ).toEqual([]);
+    // Site domains are equal, but the articles live on different hosts: kept.
+    expect(
+      run(
+        () => "vendor.com",
+        (id) => (id === 1 ? "https://vendor.com/a" : "https://lab.org/b"),
+      ),
+    ).toEqual([EVIDENCE_SENTENCE]);
+  });
+
+  it.each([["mailto:press@vendor.com"], ["not a url"], ["https://./x"]])(
+    "drops evidence when a canonical_url gives an empty key: %j",
+    (url) => {
+      for (const id of [1, 2]) {
+        const out = parseLaunchRealityCheckOutput(
+          JSON.stringify(check()),
+          withArticles([], (a) => (a.id === id ? { canonicalUrl: url } : {})),
+        );
+        expect(out?.claims[0].verdict).toBe("no_independent_evidence");
+        expect(out?.claims[0].independentEvidence).toEqual([]);
+      }
+    },
+  );
+});
+
+describe("groundedSentences (#144 B)", () => {
+  const LEAD = "First part ends here.";
+  const QUOTE = "Smith said the model scores 92 percent";
+  const TAIL = "on the suite.";
+
+  it.each([
+    "Mr",
+    "Mrs",
+    "Ms",
+    "Dr",
+    "Prof",
+    "St",
+    "Inc",
+    "Corp",
+    "Ltd",
+    "Co",
+    "vs",
+    "etc",
+    "e.g",
+    "i.e",
+    "U.S",
+    "U.K",
+    "No",
+  ])("does not split after the abbreviation %s.", (abbr) => {
+    const sentence = `Then ${abbr}. ${QUOTE} ${TAIL}`;
+    expect(groundedSentences(`${LEAD} ${sentence}`, QUOTE)).toBe(sentence);
+  });
+
+  it("splits after a word that is not in the abbreviation list", () => {
+    expect(
+      groundedSentences(`${LEAD} Then Acme. ${QUOTE} ${TAIL}`, QUOTE),
+    ).toBe(`${QUOTE} ${TAIL}`);
+    expect(groundedSentences(`${LEAD} Then Jo. ${QUOTE} ${TAIL}`, QUOTE)).toBe(
+      `${QUOTE} ${TAIL}`,
+    );
+  });
+
+  it("does not split after a single capital letter", () => {
+    const sentence = `Then J. ${QUOTE} ${TAIL}`;
+    expect(groundedSentences(`${LEAD} ${sentence}`, QUOTE)).toBe(sentence);
+    // A single lowercase letter is not an initial.
+    expect(groundedSentences(`${LEAD} Then j. ${QUOTE} ${TAIL}`, QUOTE)).toBe(
+      `${QUOTE} ${TAIL}`,
+    );
+  });
+
+  it("does not split at a period between digits", () => {
+    const sentence = "The chip costs 1.5 million dollars at launch.";
+    expect(
+      groundedSentences(`${LEAD} ${sentence}`, "million dollars at launch"),
+    ).toBe(sentence);
+  });
+
+  it("splits after ! and ?, and after a closing quote or bracket", () => {
+    for (const end of ["!", "?", '."', ".\u201d", ".)", ".]", ".'"]) {
+      expect(
+        groundedSentences(`Lead ends here${end} ${QUOTE} ${TAIL}`, QUOTE),
+      ).toBe(`${QUOTE} ${TAIL}`);
+    }
+    // The closing mark belongs to the sentence it closes.
+    expect(
+      groundedSentences(`He said "${QUOTE} ${TAIL}" Then more.`, QUOTE),
+    ).toBe(`He said "${QUOTE} ${TAIL}"`);
+  });
+
+  it("does not split at punctuation that is not followed by whitespace", () => {
+    expect(groundedSentences(`Lead ends here.${QUOTE} ${TAIL}`, QUOTE)).toBe(
+      `Lead ends here.${QUOTE} ${TAIL}`,
+    );
+  });
+
+  it("always splits at a newline, with or without a full stop", () => {
+    expect(groundedSentences(`A heading\n${QUOTE} ${TAIL}`, QUOTE)).toBe(
+      `${QUOTE} ${TAIL}`,
+    );
+    expect(groundedSentences(`${QUOTE} with no stop\nNext line.`, QUOTE)).toBe(
+      `${QUOTE} with no stop`,
+    );
+    expect(groundedSentences(`Lead\r\n${QUOTE}\r\nNext`, QUOTE)).toBe(QUOTE);
+    // A quote across a newline matches after whitespace normalising and
+    // takes both lines.
+    expect(
+      groundedSentences(
+        `Smith said the model\nscores 92 percent ${TAIL}`,
+        QUOTE,
+      ),
+    ).toBe(`${QUOTE} ${TAIL}`);
+  });
+
+  it("expands from the body start and to the body end", () => {
+    expect(groundedSentences(`${QUOTE} ${TAIL} Next one.`, QUOTE)).toBe(
+      `${QUOTE} ${TAIL}`,
+    );
+    expect(groundedSentences(`${LEAD} Then ${QUOTE}`, QUOTE)).toBe(
+      `Then ${QUOTE}`,
+    );
+    expect(groundedSentences(`  \n${QUOTE}  `, QUOTE)).toBe(QUOTE);
+  });
+
+  it("returns null when the gate rejects the quote", () => {
+    expect(groundedSentences(`${LEAD} ${QUOTE}s ${TAIL}`, QUOTE)).toBeNull();
+    expect(groundedSentences(null, QUOTE)).toBeNull();
+    expect(groundedSentences(`${LEAD} ${QUOTE}`, "   ")).toBeNull();
   });
 });
 

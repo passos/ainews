@@ -760,13 +760,19 @@ describe("Technology product cards (#131)", () => {
     claims: [
       {
         claim: "Orion-2 scores 92 percent on CodeBench.",
+        // #144 B: stored quotes are whole body sentences.
         claimQuote: {
           articleId: 1,
-          quote: "scores 92 percent on the CodeBench suite",
+          quote:
+            "Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite.",
         },
         verdict: "independent_dispute",
         independentEvidence: [
-          { articleId: 2, quote: "Orion-2 scored 81 percent on CodeBench" },
+          {
+            articleId: 2,
+            quote:
+              "An independent evaluation by the Open Eval Lab found that Orion-2 scored 81 percent on CodeBench, below the vendor figure.",
+          },
         ],
       },
     ],
@@ -800,8 +806,9 @@ describe("Technology product cards (#131)", () => {
       createElement(LaunchRealityCheckCard, { check, sources: TECH_SOURCES }),
     );
     expect(html).toContain("Launch Reality Check");
-    // The subject is a grounded name; the claimant is not shown (#144 round 3).
-    expect(html).toContain('<p class="wrap-anywhere text-sm">Orion-2</p>');
+    // The subject heads a claim whose sentence names it (#144 B); the
+    // claimant is not shown (#144 round 3).
+    expect(html).toContain('<h4 class="wrap-anywhere text-sm">Orion-2</h4>');
     expect(html).not.toContain("Claims by");
     expect(html).not.toContain("Acme Holdings");
     expect(html).toContain(
@@ -826,7 +833,7 @@ describe("Technology product cards (#131)", () => {
     expect(html).toContain('<p class="wrap-anywhere text-sm font-bold">');
     // The claim's source is named by its article title from the database.
     expect(html).toContain(
-      "&quot;scores 92 percent on the CodeBench suite&quot; \u2014 quoted in Acme releases Orion-2",
+      "&quot;Acme today released Orion-2, a model it says scores 92 percent on the CodeBench suite.&quot; \u2014 quoted in Acme releases Orion-2",
     );
     expect(html).toContain("flex-wrap");
     // ArtifactSources is the last child of the section.
@@ -840,7 +847,7 @@ describe("Technology product cards (#131)", () => {
       createElement(EvolutionTimelineCard, { timeline, sources: TECH_SOURCES }),
     );
     expect(html).toContain("Technology Evolution Timeline");
-    // Neither model date is in its quote: the article's publish date is shown.
+    // Model dates are never shown: the cited article's publish date is.
     expect(html).toContain("Reported 2026-10-20");
     expect(html).toContain("Date not stated");
     expect(html).not.toContain("March 2026");
@@ -985,44 +992,36 @@ describe("Technology product cards (#131)", () => {
     expect(html).not.toContain("quoted in");
   });
 
-  it("EvolutionTimelineCard shows a model date only when its quote states it in a date form", async () => {
+  it("EvolutionTimelineCard never shows a model date, even one its quote states", async () => {
     const { EvolutionTimelineCard } =
       await import("../src/components/artifacts/EvolutionTimelineCard");
     const base = timeline.entries[0];
     const at = (articleId: number, quote: string) => ({ articleId, quote });
     const dates: [string, { articleId: number; quote: string }][] = [
-      ["March 2026", at(1, "In March 2026 Acme shipped Orion-1")],
-      ["October 3, 2026", at(1, "On October 3, 2026 Acme shipped Orion-2")],
-      ["2026-03", at(1, "The 2026-03 build of Orion-1 shipped")],
-      // Date form, but not in the quote.
-      ["2025", at(1, "Acme today released Orion-2, a model")],
-      // In the quote, but not a date form.
-      ["RivalCo", at(1, "RivalCo shipped a rival model to Orion-2")],
-      // In the quote only inside a longer number.
-      ["2026", at(1, "The 12026 build of Orion-1 shipped")],
-      ["Not stated in sources", at(1, "Acme today released Orion-2, a model")],
+      ["March 2026", at(1, "In March 2026 Acme shipped Orion-1.")],
+      // #144 round 4: a number that is not a date, and a verb "May".
+      ["2026", at(1, "Orion-2 scored 2026 points on the long test.")],
+      ["May 2026", at(1, "May 2026 bring a new release of Orion-2?")],
+      ["2026-03", at(1, "The 2026-03 build of Orion-1 shipped.")],
+      ["Not stated in sources", at(1, "Acme today released Orion-2, a model.")],
       // The article has no publish date; then it is not a source at all.
-      ["2025", at(2, "Orion-2 scored 81 percent on CodeBench")],
+      ["2025", at(2, "Orion-2 scored 81 percent on CodeBench.")],
+      ["2025", at(99, "Acme today released Orion-2, a model.")],
     ];
     const html = renderToStaticMarkup(
       createElement(EvolutionTimelineCard, {
         timeline: {
-          entries: [
-            ...dates.map(([date, source]) => ({ ...base, date, source })),
-            { ...base, date: "2025", source: at(99, base.source.quote) },
-          ],
+          entries: dates.map(([date, source]) => ({ ...base, date, source })),
         },
         sources: TECH_SOURCES,
       }),
     );
     // Entries only: the Source articles list after </ol> has its own <li>.
     const items = html.slice(0, html.indexOf("</ol>")).split("<li ").slice(1);
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(7);
     const shown = items.map((li) => /<span>([^<]*)<\/span>/.exec(li)?.[1]);
     expect(shown).toEqual([
-      "March 2026",
-      "October 3, 2026",
-      "2026-03",
+      "Reported 2026-10-20",
       "Reported 2026-10-20",
       "Reported 2026-10-20",
       "Reported 2026-10-20",
@@ -1031,6 +1030,90 @@ describe("Technology product cards (#131)", () => {
       "Date not stated",
     ]);
     expect(html).not.toMatch(KIND_LABEL);
+    expect(html).not.toContain("report_published");
+  });
+
+  it("EvolutionTimelineCard sorts entries by publish day, undated last, stable", async () => {
+    const { EvolutionTimelineCard } =
+      await import("../src/components/artifacts/EvolutionTimelineCard");
+    const base = timeline.entries[0];
+    const sources: ArtifactSourceView[] = [
+      ...TECH_SOURCES,
+      {
+        id: 3,
+        title: "Earlier report",
+        publishedAt: Date.UTC(2026, 9, 1, 12),
+        fetchedAt: FETCHED_AT,
+      },
+      {
+        id: 4,
+        title: "Same-day report",
+        publishedAt: Date.UTC(2026, 9, 20, 1),
+        fetchedAt: FETCHED_AT,
+      },
+    ];
+    const ids = [2, 99, 1, 4, 3];
+    const html = renderToStaticMarkup(
+      createElement(EvolutionTimelineCard, {
+        timeline: {
+          entries: ids.map((id) => ({
+            ...base,
+            source: { articleId: id, quote: `Entry quote for article ${id}.` },
+          })),
+        },
+        sources,
+      }),
+    );
+    const items = html.slice(0, html.indexOf("</ol>")).split("<li ").slice(1);
+    expect(
+      items.map((li) => /Entry quote for article (\d+)/.exec(li)?.[1]),
+    ).toEqual(["3", "1", "4", "2", "99"]);
+    expect(items.map((li) => /<span>([^<]*)<\/span>/.exec(li)?.[1])).toEqual([
+      "Reported 2026-10-01",
+      "Reported 2026-10-20",
+      "Reported 2026-10-20",
+      "Date not stated",
+      "Date not stated",
+    ]);
+  });
+
+  it("LaunchRealityCheckCard heads each claim with the subject only when its sentence names it", async () => {
+    const { LaunchRealityCheckCard } =
+      await import("../src/components/artifacts/LaunchRealityCheckCard");
+    const base = check.claims[0];
+    // #144 round 4: Vega-1's score quoted under the subject Orion-2.
+    const vega = {
+      ...base,
+      claimQuote: {
+        articleId: 1,
+        quote: "Rival Vega-1 scores 95 percent on the CodeBench suite.",
+      },
+    };
+    const render = (subject: string, claims: (typeof base)[]) =>
+      renderToStaticMarkup(
+        createElement(LaunchRealityCheckCard, {
+          check: { ...check, subject, claims },
+          sources: TECH_SOURCES,
+        }),
+      );
+    const headings = (html: string) =>
+      [
+        ...html.matchAll(/<h4 class="wrap-anywhere text-sm">([^<]*)<\/h4>/g),
+      ].map((m) => m[1]);
+    // Per claim, never carried over from another claim in either order.
+    const html = render("Orion-2", [base, vega]);
+    expect(headings(html)).toEqual(["Orion-2", "Claim"]);
+    expect(html).toContain("Rival Vega-1 scores 95 percent");
+    expect(headings(render("Orion-2", [vega, base]))).toEqual([
+      "Claim",
+      "Orion-2",
+    ]);
+    // Word boundary and case, as for quotes; no grounded subject at all.
+    expect(headings(render("Orio", [base]))).toEqual(["Claim"]);
+    expect(headings(render("orion-2", [base]))).toEqual(["Claim"]);
+    expect(headings(render("Not stated in sources", [base]))).toEqual([
+      "Claim",
+    ]);
   });
 
   it("Technology product cards render nothing without sources", async () => {

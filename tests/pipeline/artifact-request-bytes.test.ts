@@ -28,6 +28,7 @@ const MATERIAL: ArtifactEventMaterial = {
       title: "Fixture article",
       sourceName: "Fixture Source",
       sourceDomain: "fixture.test",
+      canonicalUrl: "https://fixture.test/article",
       publishedAt: 1000,
       summary: "Fixture summary.",
       bodyText: "Fixture body.",

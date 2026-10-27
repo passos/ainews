@@ -364,6 +364,7 @@ describe("Artifact Output Parsers (Issue #20)", () => {
           title: "Semiconductor Supply Shifts",
           sourceName: "Tech Report",
           sourceDomain: "semianalysis.com",
+          canonicalUrl: "https://semianalysis.com/packaging",
           publishedAt: Date.now(),
           summary: "Packaging delays impact shipment schedules.",
           bodyText:
