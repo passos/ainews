@@ -2328,6 +2328,120 @@ describe("enqueueDueEvidence & handleGenerateBatch", () => {
     expect(count?.count).toBe(0);
   });
 
+  /** Runs the generator on an event whose model returns `text`; returns the parse-failure warnings and every console argument. */
+  async function logsForModelText(tag: string, text: string) {
+    await ensureBudget();
+    const ind = await env.DB.prepare(
+      "INSERT INTO industries (slug, name, publish_mode, created_at) VALUES (?1, ?1, 'auto', 1000) RETURNING id",
+    )
+      .bind(`p140-${tag}-ind`)
+      .first<{ id: number }>();
+    const src = await env.DB.prepare(
+      "INSERT INTO sources (industry_id, feed_url, site_domain, kind, created_at) VALUES (?1, ?2, ?3, 'rss', 1000) RETURNING id",
+    )
+      .bind(ind!.id, `https://p140-${tag}/feed`, `p140-${tag}.com`)
+      .first<{ id: number }>();
+    const art = await env.DB.prepare(
+      `INSERT INTO articles (source_id, industry_id, canonical_url, url, title, summary, body_sha, fetched_at, stage, stage_updated_at)
+       VALUES (?1, ?2, ?3, ?3, 'P140 Article', 'Summary', ?4, 1000, 'grouped', 1000)
+       RETURNING id`,
+    )
+      .bind(src!.id, ind!.id, `https://example.com/p140-${tag}`, `sha${tag}`)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO reviews (article_id, body_sha, decision, reviewer, created_at) VALUES (?1, ?2, 'approved', 'auto', 1000)",
+    )
+      .bind(art!.id, `sha${tag}`)
+      .run();
+    const fakeR2 = new FakeR2();
+    fakeR2.put(
+      `bodies/${art!.id}/sha${tag}.md`,
+      "Paragraph text here for testing.",
+    );
+    const event = await env.DB.prepare(
+      "INSERT INTO events (industry_id, title, revision, created_at, updated_at) VALUES (?1, 'P140 Event', 1, 1000, 1000) RETURNING id",
+    )
+      .bind(ind!.id)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO event_articles (event_id, article_id, created_at) VALUES (?1, ?2, 1000)",
+    )
+      .bind(event!.id, art!.id)
+      .run();
+    const queue = new FakeQueue();
+    const vectors = new FakeVectors();
+    const pipelineEnv: PipelineEnv = {
+      ...testEnv,
+      BODIES: fakeR2 as unknown as R2Bucket,
+      Q_GENERATE: queue as unknown as PipelineEnv["Q_GENERATE"],
+      V_CHUNKS: vectors as unknown as PipelineEnv["V_CHUNKS"],
+    };
+    // The real client rejects unparseable text inside generateText (the
+    // validate callback), so this branch of build.ts needs a client that
+    // hands the text back unvalidated.
+    const models = {
+      embed: async (_key: string, texts: string[]) =>
+        texts.map(() => [0.1, 0.2, 0.3]),
+      generateText: async () => ({ text, finishReason: "STOP" }),
+    } as unknown as ModelClient;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const res = await generateEventEvidence(pipelineEnv, event!.id, 1000, {
+        models,
+        bodies: fakeR2 as unknown as R2Bucket,
+        vectors: vectors as unknown as Pick<VectorizeIndex, "upsert">,
+      });
+      const rejections = warn.mock.calls
+        .map((c) => c[0])
+        .filter(
+          (o) => o?.warning === "failed to parse claims output against schema",
+        );
+      const everything = JSON.stringify(
+        [warn, error, log, info].flatMap((spy) => spy.mock.calls),
+      );
+      return { res, eventId: event!.id, rejections, everything };
+    } finally {
+      vi.restoreAllMocks();
+    }
+  }
+
+  it("a schema rejection logs path and code, never the model text (#140)", async () => {
+    const { res, eventId, rejections, everything } = await logsForModelText(
+      "a",
+      JSON.stringify({ SENTINEL_K_7f3a: "SENTINEL_V_7f3a", claims: [] }),
+    );
+    expect(res.status).toBe("skipped");
+    expect(rejections).toEqual([
+      {
+        warning: "failed to parse claims output against schema",
+        eventId,
+        finishReason: "STOP",
+        issues: [{ path: [], code: "unrecognized_keys" }],
+      },
+    ]);
+    expect(everything).not.toContain("7f3a");
+  });
+
+  it("a non-JSON output logs invalid_json, never the model text (#140)", async () => {
+    const { res, eventId, rejections, everything } = await logsForModelText(
+      "b",
+      "SENTINEL_RAW_7f3a{{{",
+    );
+    expect(res.status).toBe("skipped");
+    expect(rejections).toEqual([
+      {
+        warning: "failed to parse claims output against schema",
+        eventId,
+        finishReason: "STOP",
+        issues: "invalid_json",
+      },
+    ]);
+    expect(everything).not.toContain("7f3a");
+  });
+
   it("merges duplicate claims and combines citations before evaluating consensus", async () => {
     await ensureBudget();
     const ind = await env.DB.prepare(
