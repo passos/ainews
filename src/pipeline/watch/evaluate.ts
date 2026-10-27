@@ -331,9 +331,11 @@ export async function evaluateEventWatches(
 
   let evaluatedCount = 0;
   let hitCount = 0;
-  // Set when today's reader judge attempts are used up: the remaining reader
-  // watches of this event are skipped and the revision stays unmarked.
-  let readerCapped = false;
+  // Set when a reader judge cannot run now (today's attempts are used up, or
+  // the call failed with a retryable error such as a tier 5 refusal): the
+  // remaining reader watches of this event are skipped, admin watches still
+  // run, and the revision stays unmarked.
+  let readerDeferred = false;
 
   for (const watch of activeWatches) {
     // Rule 1: Scope filter
@@ -453,7 +455,7 @@ export async function evaluateEventWatches(
 
     const isReader = watch.owner_kind === "reader";
     if (isReader) {
-      if (readerCapped) continue;
+      if (readerDeferred) continue;
       if (
         !(await admitReaderJudge(
           db,
@@ -463,7 +465,7 @@ export async function evaluateEventWatches(
           READER_WATCH_LIMITS.judgeCallsPerDay,
         ))
       ) {
-        readerCapped = true;
+        readerDeferred = true;
         continue;
       }
     }
@@ -477,9 +479,23 @@ export async function evaluateEventWatches(
       )) as { progress?: { noul: number } } | undefined;
     } catch (e) {
       // Out of attempts is a settled outcome for this watch only. Every
-      // other error is retryable and leaves the revision unmarked.
-      if (!(e instanceof CallFailedError)) throw e;
-      console.error({ watchId: watch.id, eventId: event.id, error: e.message });
+      // other error is retryable and leaves the revision unmarked: an admin
+      // watch throws, a reader watch defers the event's reader watches.
+      if (e instanceof CallFailedError) {
+        console.error({
+          watchId: watch.id,
+          eventId: event.id,
+          error: e.message,
+        });
+        continue;
+      }
+      if (!isReader) throw e;
+      console.error({
+        watchId: watch.id,
+        eventId: event.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      readerDeferred = true;
       continue;
     }
 
@@ -574,9 +590,9 @@ export async function evaluateEventWatches(
     }
   }
 
-  // At the reader cap the revision stays unmarked: the due-event scan
+  // A deferred reader watch keeps the revision unmarked: the due-event scan
   // re-enqueues it, and watches already judged answer from the ledger.
-  if (!readerCapped) await markEvaluated(maxEffectiveAt);
+  if (!readerDeferred) await markEvaluated(maxEffectiveAt);
 
   return {
     eventId,

@@ -23,8 +23,8 @@ export async function runScheduled(
   const tracked = await trackDuePrimarySources(env, now);
   const evidence = await enqueueDueEvidence(env, now);
   const watches = await enqueueDueWatches(env, now);
-  const swept = await sweepReaderWatches(env, now);
   const edgar = await pollDueCompanies(env, now);
+  const swept = await sweepReaderWatches(env, now);
   console.log({
     cron: controller.cron,
     claimed: claimed.length,
