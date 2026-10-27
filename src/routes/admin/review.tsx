@@ -1,31 +1,29 @@
 import { useState } from "react";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { reanalyzeArticle } from "../../server/admin/articles";
 import { listIndustries } from "../../server/admin/industries";
 import {
   decideReview,
   listPendingArticles,
-  listPublishedArticles,
   listStuckArticles,
 } from "../../server/admin/review";
-import { RemoveButton } from "../../components/admin/RemoveButton";
+import { PendingRow } from "../../components/admin/ReviewRows";
 
 export const Route = createFileRoute("/admin/review")({
   ssr: "data-only",
   loader: async () => {
-    const [pending, published, stuck, industries] = await Promise.all([
+    const [pending, stuck, industries] = await Promise.all([
       listPendingArticles(),
-      listPublishedArticles(),
       listStuckArticles(),
       listIndustries(),
     ]);
-    return { pending, published, stuck, industries };
+    return { pending, stuck, industries };
   },
   component: AdminReviewPage,
 });
 
 function AdminReviewPage() {
-  const { pending, published, stuck, industries } = Route.useLoaderData();
+  const { pending, stuck, industries } = Route.useLoaderData();
   const router = useRouter();
   const [selectedIndustry, setSelectedIndustry] = useState<number | "all">(
     "all",
@@ -95,7 +93,7 @@ function AdminReviewPage() {
     <div className="flex flex-col gap-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Review Queue</h1>
+          <h1 className="text-xl font-bold tracking-tight">Review</h1>
           <p className="text-sm text-muted-foreground">
             Approve or reject candidate articles before publication. Decisions
             bind strictly to the body hash.
@@ -152,135 +150,12 @@ function AdminReviewPage() {
         ) : (
           <div className="flex flex-col gap-4">
             {filteredPending.map((art) => (
-              <div
+              <PendingRow
                 key={art.id}
-                className="flex flex-col gap-3 rounded-lg border bg-card p-4 transition-colors hover:border-foreground/30"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
-                        {art.industryName}
-                      </span>
-                      {art.score !== null && (
-                        <span className="text-xs font-mono text-muted-foreground">
-                          Score: {art.score}
-                        </span>
-                      )}
-                      <span className="text-xs font-mono text-muted-foreground">
-                        ID: #{art.id}
-                      </span>
-                    </div>
-                    <Link
-                      to="/admin/articles/$articleId"
-                      params={{ articleId: String(art.id) }}
-                      className="font-serif text-base font-bold hover:underline"
-                    >
-                      {art.title}
-                    </Link>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={submittingId === art.id || !art.bodySha}
-                      onClick={() =>
-                        art.bodySha &&
-                        handleDecision(art.id, art.bodySha, "approved")
-                      }
-                      className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      disabled={submittingId === art.id || !art.bodySha}
-                      onClick={() =>
-                        art.bodySha &&
-                        handleDecision(art.id, art.bodySha, "rejected")
-                      }
-                      className="rounded border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-
-                {art.summary && (
-                  <p className="text-sm text-muted-foreground line-clamp-3">
-                    {art.summary}
-                  </p>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-4">
-                    <a
-                      href={art.canonicalUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:underline"
-                    >
-                      Source Link &rarr;
-                    </a>
-                    {art.tags && <span>Tags: {art.tags}</span>}
-                  </div>
-                  <span className="font-mono text-[0.7rem]">
-                    body_sha: {art.bodySha?.slice(0, 12)}...
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Published Articles (#87 A3b) */}
-      <div className="flex flex-col gap-4 border-t pt-8">
-        <div>
-          <h2 className="text-lg font-semibold">
-            Published ({published.length})
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Approved articles on the public site, newest first (up to 100).
-          </p>
-        </div>
-
-        {published.length === 0 ? (
-          <div className="text-sm text-muted-foreground">
-            No published articles.
-          </div>
-        ) : (
-          <div className="flex flex-col divide-y rounded-md border">
-            {published.map((art) => (
-              <div
-                key={art.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm"
-              >
-                <div className="flex min-w-0 flex-col gap-1">
-                  <Link
-                    to="/admin/articles/$articleId"
-                    params={{ articleId: String(art.id) }}
-                    className="font-medium hover:underline"
-                  >
-                    {art.title}
-                  </Link>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="rounded bg-muted px-2 py-0.5 font-medium">
-                      {art.industryName}
-                    </span>
-                    <span className="font-mono">
-                      {new Date(
-                        art.publishedAt ?? art.fetchedAt,
-                      ).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-                <RemoveButton
-                  working={submittingId === art.id}
-                  onConfirm={() =>
-                    handleDecision(art.id, art.bodySha, "rejected")
-                  }
-                />
-              </div>
+                art={art}
+                working={submittingId === art.id}
+                onDecide={handleDecision}
+              />
             ))}
           </div>
         )}

@@ -303,11 +303,15 @@ describe("Admin Discover & Source Operations", () => {
       feed_url: "https://normal2.example/rss",
     });
     await deleteSource(env.DB, normal!.id);
+    // #87 A4: delete keeps the row (articles reference it) and hides it.
     expect(
-      await env.DB.prepare("SELECT 1 FROM sources WHERE id = ?1")
+      await env.DB.prepare("SELECT feed_url, status FROM sources WHERE id = ?1")
         .bind(normal!.id)
         .first(),
-    ).toBeNull();
+    ).toEqual({
+      feed_url: `deleted:${normal!.id}:https://normal2.example/rss`,
+      status: "paused",
+    });
   });
 
   it("create, update, and approve store a trimmed feed_url and refuse a padded system: URL", async () => {

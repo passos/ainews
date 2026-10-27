@@ -1,5 +1,17 @@
 import { useState } from "react";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import {
+  DeleteSourceDialog,
+  SourcesTable,
+  type DeleteTarget,
+} from "../../../components/admin/SourcesTable";
+import { describeError } from "../../../components/admin/errors";
+import {
+  ADMIN_TABLE,
+  ADMIN_TABLE_WRAP,
+  ADMIN_URL_CELL,
+  ADMIN_WRAP_CELL,
+} from "../../../components/admin/table";
 import { listIndustries } from "../../../server/admin/industries";
 import {
   approveCandidate,
@@ -40,6 +52,8 @@ function AdminSourcesPage() {
     useState<string>("all");
   const [actingId, setActingId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [triggeringIndustryId, setTriggeringIndustryId] = useState<
     number | null
   >(null);
@@ -94,19 +108,27 @@ function AdminSourcesPage() {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm(`Are you sure you want to delete source #${id}?`)) return;
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const { id } = deleteTarget;
     setActingId(id);
-    setMessage(null);
+    setDeleteError(null);
     try {
       await deleteSource({ data: id });
+      setDeleteTarget(null);
       setMessage(`Source #${id} deleted.`);
       await router.invalidate();
     } catch (err) {
-      setMessage(`Failed to delete source: ${String(err)}`);
+      // Shown inside the dialog, which stays open.
+      setDeleteError(await describeError(err));
     } finally {
       setActingId(null);
     }
+  }
+
+  function askDelete(target: DeleteTarget) {
+    setDeleteError(null);
+    setDeleteTarget(target);
   }
 
   async function handleApproveCandidate(id: number) {
@@ -262,125 +284,14 @@ function AdminSourcesPage() {
             </select>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b bg-muted/50 uppercase text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2.5">ID</th>
-                  <th className="px-3 py-2.5">Name / URL</th>
-                  <th className="px-3 py-2.5">Section</th>
-                  <th className="px-3 py-2.5">Kind</th>
-                  <th className="px-3 py-2.5">Status</th>
-                  <th className="px-3 py-2.5">Rung</th>
-                  <th className="px-3 py-2.5">Fails</th>
-                  <th className="px-3 py-2.5">Last OK</th>
-                  <th className="px-3 py-2.5">Jina</th>
-                  <th className="px-3 py-2.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredSources.map((s) => (
-                  <tr key={s.id} className="hover:bg-muted/30">
-                    <td className="px-3 py-2.5 font-mono text-[0.7rem] text-muted-foreground">
-                      {s.id}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="font-semibold text-foreground">
-                        {s.name || "(unnamed)"}
-                      </div>
-                      <div className="font-mono text-[0.7rem] text-muted-foreground truncate max-w-xs">
-                        {s.feedUrl}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {industries.find((i) => i.id === s.industryId)?.name ??
-                        `#${s.industryId}`}
-                    </td>
-                    <td className="px-3 py-2.5 uppercase font-mono text-[0.7rem]">
-                      {s.kind}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span
-                        className={`inline-block rounded px-1.5 py-0.5 text-[0.7rem] font-semibold ${
-                          s.status === "active"
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                            : s.status === "paused"
-                              ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                              : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                        }`}
-                      >
-                        {s.status}
-                        {s.pausedReason ? ` (${s.pausedReason})` : ""}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-[0.7rem]">
-                      {s.fetchRung ?? "—"}
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-[0.7rem]">
-                      {s.failCount > 0 ? (
-                        <span className="text-destructive font-semibold">
-                          {s.failCount}
-                        </span>
-                      ) : (
-                        "0"
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      {s.lastOkAt
-                        ? new Date(s.lastOkAt).toLocaleDateString()
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {s.jinaEnabled ? (
-                        <span className="text-emerald-500 font-semibold">
-                          ON
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">OFF</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {s.status === "paused" && (
-                          <button
-                            type="button"
-                            disabled={actingId === s.id}
-                            onClick={() => handleResume(s.id)}
-                            className="rounded bg-emerald-600 px-2 py-0.5 text-[0.7rem] font-semibold text-white hover:bg-emerald-700"
-                          >
-                            Resume
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          disabled={actingId === s.id}
-                          onClick={() => handleTrigger(s.id)}
-                          className="rounded border px-2 py-0.5 text-[0.7rem] hover:bg-muted"
-                        >
-                          Fetch Now
-                        </button>
-                        <Link
-                          to="/admin/sources/$sourceId"
-                          params={{ sourceId: String(s.id) }}
-                          className="rounded border px-2 py-0.5 text-[0.7rem] hover:bg-muted"
-                        >
-                          Edit
-                        </Link>
-                        <button
-                          type="button"
-                          disabled={actingId === s.id}
-                          onClick={() => handleDelete(s.id)}
-                          className="rounded border border-destructive/40 px-2 py-0.5 text-[0.7rem] text-destructive hover:bg-destructive/10"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SourcesTable
+            sources={filteredSources}
+            industries={industries}
+            actingId={actingId}
+            onResume={handleResume}
+            onTrigger={handleTrigger}
+            onDelete={askDelete}
+          />
         </div>
       )}
 
@@ -417,8 +328,8 @@ function AdminSourcesPage() {
             </select>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-left text-xs">
+          <div className={ADMIN_TABLE_WRAP}>
+            <table className={`w-full text-left text-xs ${ADMIN_TABLE}`}>
               <thead className="border-b bg-muted/50 uppercase text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2.5">ID</th>
@@ -440,10 +351,14 @@ function AdminSourcesPage() {
                       {c.id}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="font-semibold text-foreground">
+                      <div
+                        className={`${ADMIN_WRAP_CELL} min-w-40 font-semibold text-foreground`}
+                      >
                         {c.name || c.siteDomain || "(unnamed)"}
                       </div>
-                      <div className="font-mono text-[0.7rem] text-muted-foreground truncate max-w-xs">
+                      <div
+                        className={`${ADMIN_URL_CELL} min-w-40 max-w-xs font-mono text-[0.7rem] text-muted-foreground`}
+                      >
                         {c.feedUrl}
                       </div>
                     </td>
@@ -528,6 +443,14 @@ function AdminSourcesPage() {
           </div>
         </div>
       )}
+
+      <DeleteSourceDialog
+        target={deleteTarget}
+        error={deleteError}
+        working={actingId !== null && actingId === deleteTarget?.id}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

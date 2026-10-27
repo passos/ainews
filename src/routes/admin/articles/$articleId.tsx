@@ -13,6 +13,7 @@ import {
   TakedownPanel,
   currentDecision,
 } from "../../../components/admin/RemoveButton";
+import { ADMIN_TABLE } from "../../../components/admin/table";
 
 export const Route = createFileRoute("/admin/articles/$articleId")({
   ssr: "data-only",
@@ -367,7 +368,7 @@ function AdminArticleDetailPage() {
           </p>
         ) : (
           <div className="overflow-x-auto text-xs">
-            <table className="w-full text-left">
+            <table className={`w-full text-left ${ADMIN_TABLE}`}>
               <thead className="border-b uppercase text-muted-foreground">
                 <tr>
                   <th className="py-2">Decision</th>
@@ -404,7 +405,7 @@ function AdminArticleDetailPage() {
           </p>
         ) : (
           <div className="overflow-x-auto text-xs">
-            <table className="w-full text-left">
+            <table className={`w-full text-left ${ADMIN_TABLE}`}>
               <thead className="border-b uppercase text-muted-foreground">
                 <tr>
                   <th className="py-2">Score</th>

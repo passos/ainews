@@ -5,6 +5,7 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
+  useRouterState,
 } from "@tanstack/react-router";
 import { Beacon } from "../components/Beacon";
 import { SectionNav, WatchesNavLink } from "../components/SectionNav";
@@ -97,23 +98,54 @@ export function SiteHeader({
   );
 }
 
-function RootLayout() {
-  const { name, sections, hasWatches, readerWatchEnabled } =
-    Route.useLoaderData();
+/** /admin and /admin/... have their own header (src/routes/admin/route.tsx). */
+export function isAdminPath(pathname: string): boolean {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+export function RootLayoutView({
+  isAdmin,
+  shell,
+  children,
+}: {
+  isAdmin: boolean;
+  shell: {
+    name: string;
+    sections: { slug: string; name: string }[];
+    hasWatches: boolean;
+    readerWatchEnabled: boolean;
+  };
+  children?: ReactNode;
+}) {
   return (
     <div className="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-5">
-      <SiteHeader
-        name={name}
-        sections={sections}
-        hasWatches={hasWatches}
-        readerWatchEnabled={readerWatchEnabled}
-      />
-      <main className="flex-1 pb-8">
-        <Outlet />
-      </main>
-      <footer className="border-t py-5 text-sm text-muted-foreground">
-        Every story links to its original source.
-      </footer>
+      {!isAdmin && (
+        <SiteHeader
+          name={shell.name}
+          sections={shell.sections}
+          hasWatches={shell.hasWatches}
+          readerWatchEnabled={shell.readerWatchEnabled}
+        />
+      )}
+      <main className="flex-1 pb-8">{children}</main>
+      {!isAdmin && (
+        <footer className="border-t py-5 text-sm text-muted-foreground">
+          Every story links to its original source.
+        </footer>
+      )}
     </div>
+  );
+}
+
+function RootLayout() {
+  const shell = Route.useLoaderData();
+  // The pathname is known on the server, so SSR and hydration agree.
+  const isAdmin = useRouterState({
+    select: (state) => isAdminPath(state.location.pathname),
+  });
+  return (
+    <RootLayoutView isAdmin={isAdmin} shell={shell}>
+      <Outlet />
+    </RootLayoutView>
   );
 }

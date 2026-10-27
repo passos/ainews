@@ -61,7 +61,9 @@ export const resumeSource = createServerFn({ method: "POST" })
 export const triggerCollect = createServerFn({ method: "POST" })
   .middleware([accessMiddleware])
   .validator((id: number) => id)
-  .handler(async ({ data: id }) => ops.triggerCollect(env.Q_INGEST, id));
+  .handler(async ({ data: id }) =>
+    ops.triggerCollect(env.DB, env.Q_INGEST, id),
+  );
 
 export const listSourceCandidates = createServerFn({ method: "GET" })
   .middleware([accessMiddleware])

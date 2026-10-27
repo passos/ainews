@@ -21,6 +21,7 @@ import { Route as AdminDigestsRouteImport } from './routes/admin/digests'
 import { Route as AdminDlqRouteImport } from './routes/admin/dlq'
 import { Route as AdminEvidenceRouteImport } from './routes/admin/evidence'
 import { Route as AdminLedgerRouteImport } from './routes/admin/ledger'
+import { Route as AdminPublishedRouteImport } from './routes/admin/published'
 import { Route as AdminReviewRouteImport } from './routes/admin/review'
 import { Route as AdminWatchesRouteImport } from './routes/admin/watches'
 import { Route as EEventIdRouteImport } from './routes/e/$eventId'
@@ -96,6 +97,11 @@ const AdminEvidenceRoute = AdminEvidenceRouteImport.update({
 const AdminLedgerRoute = AdminLedgerRouteImport.update({
   id: '/ledger',
   path: '/ledger',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminPublishedRoute = AdminPublishedRouteImport.update({
+  id: '/published',
+  path: '/published',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminReviewRoute = AdminReviewRouteImport.update({
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
   '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/published': typeof AdminPublishedRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
   '/e/$eventId': typeof EEventIdRoute
@@ -225,6 +232,7 @@ export interface FileRoutesByTo {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
   '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/published': typeof AdminPublishedRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
   '/e/$eventId': typeof EEventIdRoute
@@ -256,6 +264,7 @@ export interface FileRoutesById {
   '/admin/dlq': typeof AdminDlqRoute
   '/admin/evidence': typeof AdminEvidenceRoute
   '/admin/ledger': typeof AdminLedgerRoute
+  '/admin/published': typeof AdminPublishedRoute
   '/admin/review': typeof AdminReviewRoute
   '/admin/watches': typeof AdminWatchesRoute
   '/e/$eventId': typeof EEventIdRoute
@@ -288,6 +297,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/evidence'
     | '/admin/ledger'
+    | '/admin/published'
     | '/admin/review'
     | '/admin/watches'
     | '/e/$eventId'
@@ -317,6 +327,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/evidence'
     | '/admin/ledger'
+    | '/admin/published'
     | '/admin/review'
     | '/admin/watches'
     | '/e/$eventId'
@@ -347,6 +358,7 @@ export interface FileRouteTypes {
     | '/admin/dlq'
     | '/admin/evidence'
     | '/admin/ledger'
+    | '/admin/published'
     | '/admin/review'
     | '/admin/watches'
     | '/e/$eventId'
@@ -466,6 +478,13 @@ declare module '@tanstack/react-router' {
       path: '/ledger'
       fullPath: '/admin/ledger'
       preLoaderRoute: typeof AdminLedgerRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/published': {
+      id: '/admin/published'
+      path: '/published'
+      fullPath: '/admin/published'
+      preLoaderRoute: typeof AdminPublishedRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/review': {
@@ -591,6 +610,7 @@ interface AdminRouteRouteChildren {
   AdminDlqRoute: typeof AdminDlqRoute
   AdminEvidenceRoute: typeof AdminEvidenceRoute
   AdminLedgerRoute: typeof AdminLedgerRoute
+  AdminPublishedRoute: typeof AdminPublishedRoute
   AdminReviewRoute: typeof AdminReviewRoute
   AdminWatchesRoute: typeof AdminWatchesRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -609,6 +629,7 @@ const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminDlqRoute: AdminDlqRoute,
   AdminEvidenceRoute: AdminEvidenceRoute,
   AdminLedgerRoute: AdminLedgerRoute,
+  AdminPublishedRoute: AdminPublishedRoute,
   AdminReviewRoute: AdminReviewRoute,
   AdminWatchesRoute: AdminWatchesRoute,
   AdminIndexRoute: AdminIndexRoute,

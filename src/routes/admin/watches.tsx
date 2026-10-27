@@ -10,6 +10,7 @@ import {
   updateWatch,
 } from "../../server/admin/watches";
 import type { AdminWatchItem, WatchHitStatus } from "../../server/admin/ops";
+import { ADMIN_TABLE } from "../../components/admin/table";
 
 export const Route = createFileRoute("/admin/watches")({
   ssr: "data-only",
@@ -313,7 +314,7 @@ function AdminWatchesPage() {
 
       {/* Watches List */}
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-left text-xs">
+        <table className={`w-full text-left text-xs ${ADMIN_TABLE}`}>
           <thead className="border-b bg-muted/50 font-mono uppercase text-muted-foreground">
             <tr>
               <th className="p-3">ID / Slug</th>

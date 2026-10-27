@@ -6,6 +6,7 @@ import {
   reconcileUnknownCall,
   updateDailyCap,
 } from "../../server/admin/ledger";
+import { ADMIN_TABLE } from "../../components/admin/table";
 
 export const Route = createFileRoute("/admin/ledger")({
   ssr: "data-only",
@@ -257,7 +258,7 @@ function AdminLedgerPage() {
           </p>
         </div>
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-left text-xs">
+          <table className={`w-full text-left text-xs ${ADMIN_TABLE}`}>
             <thead className="border-b bg-muted/50 uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">Tier</th>
@@ -345,7 +346,7 @@ function AdminLedgerPage() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-left text-xs">
+          <table className={`w-full text-left text-xs ${ADMIN_TABLE}`}>
             <thead className="border-b bg-muted/50 uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">ID</th>

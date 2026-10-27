@@ -6,6 +6,7 @@ import {
   listIndustries,
   type DraftIndustryResult,
 } from "../../../server/admin/industries";
+import { ADMIN_TABLE } from "../../../components/admin/table";
 
 export const Route = createFileRoute("/admin/industries/")({
   ssr: "data-only",
@@ -269,7 +270,7 @@ function AdminIndustriesPage() {
       )}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-left text-sm">
+        <table className={`w-full text-left text-sm ${ADMIN_TABLE}`}>
           <thead className="border-b bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-4 py-3">ID</th>
