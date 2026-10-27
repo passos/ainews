@@ -4,13 +4,17 @@ import {
   type AudienceExplain,
   ARTIFACT_AUDIENCES,
 } from "../../lib/artifacts/types";
+import type { ArtifactSourceView } from "../../server/publication/events";
+import { ArtifactSources } from "./ArtifactSources";
 
 export function AudienceExplainCard({
   explanations,
   initialAudience,
+  sources,
 }: {
   explanations: Partial<Record<ArtifactAudience, AudienceExplain>>;
   initialAudience?: ArtifactAudience;
+  sources: ArtifactSourceView[];
 }) {
   const availableAudiences = useMemo(
     () => ARTIFACT_AUDIENCES.filter((aud) => !!explanations[aud]),
@@ -34,7 +38,7 @@ export function AudienceExplainCard({
     }
   }, [initialAudience, availableAudiences]);
 
-  if (availableAudiences.length === 0) {
+  if (availableAudiences.length === 0 || sources.length === 0) {
     return null;
   }
 
@@ -136,6 +140,7 @@ export function AudienceExplainCard({
           </div>
         )}
       </div>
+      <ArtifactSources sources={sources} />
     </section>
   );
 }

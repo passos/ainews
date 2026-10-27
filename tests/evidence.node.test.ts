@@ -5,6 +5,11 @@ import { StoryBriefCard } from "../src/components/artifacts/StoryBriefCard";
 import { InspectEvidencePanel } from "../src/components/evidence/InspectEvidencePanel";
 import type { StoryBrief } from "../src/lib/artifacts/types";
 import type { ClaimView, EventEvidenceView } from "../src/lib/evidence/types";
+import type { ArtifactSourceView } from "../src/server/publication/events";
+
+const SOURCES: ArtifactSourceView[] = [
+  { id: 1, title: "Source article", publishedAt: 1000, fetchedAt: 2000 },
+];
 
 describe("InspectEvidencePanel", () => {
   it("renders null when evidence has no claims", () => {
@@ -181,6 +186,7 @@ describe("StoryBriefCard with verifiedClaims", () => {
       createElement(StoryBriefCard, {
         brief,
         verifiedClaims,
+        sources: SOURCES,
       }),
     );
 

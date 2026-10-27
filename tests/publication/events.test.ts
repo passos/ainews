@@ -1,12 +1,17 @@
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getHome, getSection } from "../../src/server/publication/articles";
-import { getEvent, getEventSources } from "../../src/server/publication/events";
+import {
+  getEvent,
+  getEventArtifactSources,
+  getEventSources,
+} from "../../src/server/publication/events";
 import { computeRevisionDiff } from "../../src/pipeline/evidence/diff";
 import { attributeSource } from "../../src/lib/source-attribution";
 import {
   db,
   resetPublication,
+  seedAnalysis,
   seedArticle,
   seedCorrection,
   seedEvent,
@@ -265,5 +270,95 @@ describe("getEvent and getEventSources", () => {
     expect(pipeline).toEqual(expected);
     expect(cards).toEqual(expected);
     expect(publicNames).toEqual([...expected].sort());
+  });
+});
+
+describe("getEventArtifactSources", () => {
+  it("getEventArtifactSources lists approved articles only", async () => {
+    const eventId = await seedEvent(tech.industryId, "Sources Event", 0);
+    const approved = await seedArticle({ ...tech, title: "Approved" });
+    const pending = await seedArticle({ ...tech, title: "Pending" });
+    const rejected = await seedArticle({ ...tech, title: "Rejected" });
+    const older = await seedArticle({ ...tech, title: "Old body only" });
+    for (const [i, id] of [approved, pending, rejected, older].entries()) {
+      await seedEventArticle(eventId, id, 1000 + i);
+    }
+    await seedReview(approved, "approved");
+    await seedReview(rejected, "rejected");
+    await seedReview(older, "approved", "sha-older");
+
+    const sources = await getEventArtifactSources(db(), eventId);
+    expect(sources.map((s) => s.id)).toEqual([approved]);
+  });
+
+  it("getEventArtifactSources reads titles from articles, not analyses", async () => {
+    const eventId = await seedEvent(tech.industryId, "Titles Event", 0);
+    const a = await seedArticle({ ...tech, title: "Feed title" });
+    const b = await seedArticle({
+      ...tech,
+      title: "Feed title B",
+      titleOverride: "Editor title",
+    });
+    await seedAnalysis(a, { titleEn: "Analysis title" });
+    await seedAnalysis(b, { titleEn: "Analysis title B" });
+    for (const [i, id] of [a, b].entries()) {
+      await seedEventArticle(eventId, id, 1000 + i);
+      await seedReview(id, "approved");
+    }
+
+    const byId = new Map(
+      (await getEventArtifactSources(db(), eventId)).map((s) => [s.id, s]),
+    );
+    expect(byId.get(a)?.title).toBe("Feed title");
+    expect(byId.get(b)?.title).toBe("Editor title");
+  });
+
+  it("getEventArtifactSources orders by published time and keeps both times", async () => {
+    const eventId = await seedEvent(tech.industryId, "Order Event", 0);
+    const published = await seedArticle({
+      ...tech,
+      title: "Published late",
+      publishedAt: 3000,
+      fetchedAt: 4000,
+    });
+    const unstated = await seedArticle({
+      ...tech,
+      title: "No published time",
+      publishedAt: null,
+      fetchedAt: 2000,
+    });
+    for (const [i, id] of [published, unstated].entries()) {
+      await seedEventArticle(eventId, id, 1000 + i);
+      await seedReview(id, "approved");
+    }
+
+    expect(await getEventArtifactSources(db(), eventId)).toEqual([
+      {
+        id: unstated,
+        title: "No published time",
+        publishedAt: null,
+        fetchedAt: 2000,
+      },
+      {
+        id: published,
+        title: "Published late",
+        publishedAt: 3000,
+        fetchedAt: 4000,
+      },
+    ]);
+  });
+
+  it("getEventArtifactSources ignores other events", async () => {
+    const eventId = await seedEvent(tech.industryId, "This Event", 0);
+    const otherId = await seedEvent(tech.industryId, "Other Event", 0);
+    const mine = await seedArticle({ ...tech, title: "Mine" });
+    const theirs = await seedArticle({ ...tech, title: "Theirs" });
+    await seedEventArticle(eventId, mine, 1000);
+    await seedEventArticle(otherId, theirs, 1001);
+    await seedReview(mine, "approved");
+    await seedReview(theirs, "approved");
+
+    const sources = await getEventArtifactSources(db(), eventId);
+    expect(sources.map((s) => s.id)).toEqual([mine]);
   });
 });

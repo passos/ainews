@@ -4,13 +4,17 @@ import {
   type LearningMaterial,
   ARTIFACT_AUDIENCES,
 } from "../../lib/artifacts/types";
+import type { ArtifactSourceView } from "../../server/publication/events";
+import { ArtifactSources } from "./ArtifactSources";
 
 export function LearningMaterialCard({
   materials,
   initialAudience,
+  sources,
 }: {
   materials: Partial<Record<ArtifactAudience, LearningMaterial>>;
   initialAudience?: ArtifactAudience;
+  sources: ArtifactSourceView[];
 }) {
   const availableAudiences = useMemo(
     () => ARTIFACT_AUDIENCES.filter((aud) => !!materials[aud]),
@@ -38,7 +42,7 @@ export function LearningMaterialCard({
     }
   }, [initialAudience, availableAudiences]);
 
-  if (availableAudiences.length === 0) {
+  if (availableAudiences.length === 0 || sources.length === 0) {
     return null;
   }
 
@@ -224,6 +228,7 @@ export function LearningMaterialCard({
           </div>
         )}
       </div>
+      <ArtifactSources sources={sources} />
     </section>
   );
 }

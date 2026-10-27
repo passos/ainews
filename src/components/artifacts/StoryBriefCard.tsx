@@ -1,12 +1,17 @@
 import type { StoryBrief } from "../../lib/artifacts/types";
+import type { ArtifactSourceView } from "../../server/publication/events";
+import { ArtifactSources } from "./ArtifactSources";
 
 export function StoryBriefCard({
   brief,
   verifiedClaims,
+  sources,
 }: {
   brief: StoryBrief;
   verifiedClaims?: string[];
+  sources: ArtifactSourceView[];
 }) {
+  if (sources.length === 0) return null;
   return (
     <section
       aria-label="Story Brief"
@@ -67,6 +72,7 @@ export function StoryBriefCard({
           </p>
         </div>
       </div>
+      <ArtifactSources sources={sources} />
     </section>
   );
 }

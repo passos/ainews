@@ -32,6 +32,35 @@ import type {
   SupplyChainRippleMap,
 } from "../src/lib/artifacts/types";
 import { quizQuestionSchema } from "../src/lib/artifacts/types";
+import { ArtifactSources } from "../src/components/artifacts/ArtifactSources";
+import { formatUtc } from "../src/lib/time";
+import type { ArtifactSourceView } from "../src/server/publication/events";
+
+const PUBLISHED_AT = Date.UTC(2026, 9, 22, 2, 5);
+const FETCHED_AT = Date.UTC(2026, 9, 22, 3, 40);
+const SOURCES: ArtifactSourceView[] = [
+  {
+    id: 7,
+    title: "Agent handshakes cost more than the work they start",
+    publishedAt: PUBLISHED_AT,
+    fetchedAt: FETCHED_AT,
+  },
+];
+
+/** The three facts every artifact shows for its source articles. */
+function expectSourceInfo(html: string): void {
+  expect(html).toContain('href="/a/7"');
+  expect(html).toContain("Agent handshakes cost more than the work they start");
+  expect(html).toContain("Published");
+  expect(html).toContain(formatUtc(PUBLISHED_AT));
+  expect(html).toContain(`dateTime="${new Date(PUBLISHED_AT).toISOString()}"`);
+  expect(html).toContain("Fetched");
+  expect(html).toContain(formatUtc(FETCHED_AT));
+  expect(html).toContain(`dateTime="${new Date(FETCHED_AT).toISOString()}"`);
+  // 375px guards: long titles break anywhere, the two times wrap.
+  expect(html).toContain("wrap-anywhere");
+  expect(html).toContain("flex-wrap");
+}
 
 describe("StoryBriefCard", () => {
   it("renders the 4 key sections", () => {
@@ -42,7 +71,9 @@ describe("StoryBriefCard", () => {
       whatToWatchNext: "Watch next text",
     };
 
-    const html = renderToStaticMarkup(createElement(StoryBriefCard, { brief }));
+    const html = renderToStaticMarkup(
+      createElement(StoryBriefCard, { brief, sources: SOURCES }),
+    );
     expect(html).toContain("AI Story Brief");
     expect(html).toContain("What Happened");
     expect(html).toContain("What happened text");
@@ -68,6 +99,7 @@ describe("AudienceExplainCard", () => {
     const html = renderToStaticMarkup(
       createElement(AudienceExplainCard, {
         explanations: { student },
+        sources: SOURCES,
       }),
     );
 
@@ -99,6 +131,7 @@ describe("AudienceExplainCard", () => {
     const html = renderToStaticMarkup(
       createElement(AudienceExplainCard, {
         explanations: { student, professional },
+        sources: SOURCES,
         initialAudience: "professional",
       }),
     );
@@ -111,6 +144,7 @@ describe("AudienceExplainCard", () => {
     const html = renderToStaticMarkup(
       createElement(AudienceExplainCard, {
         explanations: {},
+        sources: SOURCES,
       }),
     );
     expect(html).toBe("");
@@ -165,6 +199,7 @@ describe("LearningMaterialCard", () => {
     const html = renderToStaticMarkup(
       createElement(LearningMaterialCard, {
         materials: { student },
+        sources: SOURCES,
       }),
     );
 
@@ -182,6 +217,7 @@ describe("LearningMaterialCard", () => {
     const html = renderToStaticMarkup(
       createElement(LearningMaterialCard, {
         materials: {},
+        sources: SOURCES,
       }),
     );
     expect(html).toBe("");
@@ -598,5 +634,98 @@ describe("EarningsDecoderCard (Issue #83)", () => {
     );
     expect(html).toContain(`href="${url}"`);
     expect(html).toContain("View Official SEC Filing");
+  });
+});
+
+describe("artifact sources (#115)", () => {
+  const brief: StoryBrief = {
+    whatHappened: "What happened text",
+    whatIsNew: "What is new text",
+    whatEvidenceExists: "Evidence text",
+    whatToWatchNext: "Watch next text",
+  };
+  const student: AudienceExplain = {
+    audience: "student",
+    overview: "Student overview text",
+    keyPoints: ["Point A"],
+    implications: ["Takeaway 1"],
+    glossary: [],
+  };
+  const material: LearningMaterial = {
+    audience: "student",
+    conceptExplainer: "Learning via trial, error, and feedback loops.",
+    glossary: [],
+    quiz: [],
+    discussionQuestions: [],
+    activities: [],
+  };
+
+  it("StoryBriefCard shows source title, link, published and fetched time", () => {
+    const html = renderToStaticMarkup(
+      createElement(StoryBriefCard, { brief, sources: SOURCES }),
+    );
+    expectSourceInfo(html);
+  });
+
+  it("AudienceExplainCard shows source title, link, published and fetched time", () => {
+    const html = renderToStaticMarkup(
+      createElement(AudienceExplainCard, {
+        explanations: { student },
+        sources: SOURCES,
+      }),
+    );
+    expectSourceInfo(html);
+  });
+
+  it("LearningMaterialCard shows source title, link, published and fetched time", () => {
+    const html = renderToStaticMarkup(
+      createElement(LearningMaterialCard, {
+        materials: { student: material },
+        sources: SOURCES,
+      }),
+    );
+    expectSourceInfo(html);
+  });
+
+  it('ArtifactSources shows "Published not stated" when publishedAt is null', () => {
+    const html = renderToStaticMarkup(
+      createElement(ArtifactSources, {
+        sources: [{ ...SOURCES[0], publishedAt: null }],
+      }),
+    );
+    expect(html).toContain("Published not stated");
+    expect(html).toContain("Fetched");
+    expect(html).toContain(formatUtc(FETCHED_AT));
+    expect(html.match(/<time/g)).toHaveLength(1);
+  });
+
+  it("ArtifactSources renders nothing for an empty sources array", () => {
+    expect(
+      renderToStaticMarkup(createElement(ArtifactSources, { sources: [] })),
+    ).toBe("");
+  });
+
+  it("artifact cards render nothing without sources", () => {
+    expect(
+      renderToStaticMarkup(
+        createElement(StoryBriefCard, { brief, sources: [] }),
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        createElement(AudienceExplainCard, {
+          explanations: { student },
+          sources: [],
+        }),
+      ),
+    ).toBe("");
+    expect(
+      renderToStaticMarkup(
+        createElement(LearningMaterialCard, {
+          materials: { student: material },
+          sources: [],
+        }),
+      ),
+    ).toBe("");
   });
 });

@@ -17,6 +17,7 @@ import {
 } from "./digests";
 import {
   getEvent as readEvent,
+  getEventArtifactSources as readEventArtifactSources,
   getEventSources as readEventSources,
 } from "./events";
 import {
@@ -90,3 +91,7 @@ export const getWatch = createServerFn({ method: "GET" })
 export const getPublicWatches = createServerFn({ method: "GET" }).handler(() =>
   readActiveWatches(getDb(env.DB)),
 );
+
+export const getEventArtifactSources = createServerFn({ method: "GET" })
+  .validator(eventInput)
+  .handler(({ data }) => readEventArtifactSources(getDb(env.DB), data.eventId));
