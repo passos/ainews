@@ -24,6 +24,12 @@ import {
   getEventArtifactSources,
   getEventSources,
 } from "../../server/publication/api";
+import type {
+  ArtifactSourceView,
+  EventSourceView,
+  EventView,
+} from "../../server/publication/events";
+import type { Audience } from "../../lib/reader-prefs";
 import { SITE_NAME } from "../../lib/site";
 
 export async function loadEvent(
@@ -79,6 +85,27 @@ export const Route = createFileRoute("/e/$eventId")({
 function EventPage() {
   const { data, artifactSources, sources } = Route.useLoaderData();
   const { audience } = Route.useSearch();
+  return (
+    <EventPageView
+      data={data}
+      artifactSources={artifactSources}
+      sources={sources}
+      audience={audience}
+    />
+  );
+}
+
+export function EventPageView({
+  data,
+  artifactSources,
+  sources,
+  audience,
+}: {
+  data: EventView;
+  artifactSources: ArtifactSourceView[];
+  sources: Promise<EventSourceView[]>;
+  audience: Audience | undefined;
+}) {
   const {
     section,
     articles,

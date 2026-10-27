@@ -343,3 +343,28 @@ describe("getEventEvidence inArticle", () => {
     });
   }
 });
+
+describe("getArticlePage event link", () => {
+  it("returns eventId for an approved article in an event, null otherwise", async () => {
+    const inEvent = await approvedFull();
+    const alone = await approvedFull();
+    const eventId = await seedEvent(tech.industryId, "An event");
+    await seedEventArticle(eventId, inEvent);
+
+    const linked = await getArticlePage(db(), env.BODIES, inEvent);
+    expect(linked!.article.eventId).toBe(eventId);
+    const unlinked = await getArticlePage(db(), env.BODIES, alone);
+    expect(unlinked!.article.eventId).toBeNull();
+  });
+
+  it("an unapproved article in an event stays a 404, event link or not", async () => {
+    const pending = await seedArticle({ ...tech, title: "Pending" });
+    const rejected = await seedArticle({ ...tech, title: "Rejected" });
+    await seedReview(rejected, "rejected");
+    const eventId = await seedEvent(tech.industryId, "An event");
+    await seedEventArticle(eventId, pending);
+    await seedEventArticle(eventId, rejected);
+    expect(await getArticlePage(db(), env.BODIES, pending)).toBeNull();
+    expect(await getArticlePage(db(), env.BODIES, rejected)).toBeNull();
+  });
+});

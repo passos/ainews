@@ -66,6 +66,16 @@ export function ArticleReader({ page }: { page: ArticlePage }) {
         )}
         <Time ms={a.fetchedAt} label="Fetched" />
       </p>
+      {a.eventId !== null && (
+        <p className="font-mono text-xs font-bold">
+          <a
+            href={`/e/${a.eventId}`}
+            className="text-sec-ink underline decoration-sec decoration-2"
+          >
+            This story on Daily: brief, explanations, evidence →
+          </a>
+        </p>
+      )}
       {a.url && <OriginalLink url={a.url} sourceName={a.sourceName} />}
       {a.sectionDisclaimer && <Disclaimer text={a.sectionDisclaimer} />}
       {a.correction && (

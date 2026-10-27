@@ -50,12 +50,35 @@ describe("ArticleCard link", () => {
     expect(html).toContain('href="/e/42"');
   });
 
-  it("does not render story link when eventReportCount < 2", () => {
+  it("single-report event: links the story page with the brief text", () => {
+    for (const eventReportCount of [1, 0]) {
+      const html = renderToStaticMarkup(
+        ArticleCard({
+          article: { ...article, eventId: 42, eventReportCount },
+        }),
+      );
+      expect(html).toContain('href="/e/42"');
+      expect(html).toContain("Story brief &amp; explainers →");
+      expect(html).not.toContain("View story");
+    }
+  });
+
+  it("two or more reports keep the report-count text", () => {
     const html = renderToStaticMarkup(
       ArticleCard({
-        article: { ...article, eventId: 42, eventReportCount: 1 },
+        article: { ...article, eventId: 42, eventReportCount: 2 },
       }),
     );
+    expect(html).toContain("View story · 2 reports →");
+    expect(html).not.toContain("Story brief");
+  });
+
+  it("no event: no story link at all", () => {
+    const html = renderToStaticMarkup(
+      ArticleCard({ article: { ...article, eventId: null } }),
+    );
+    expect(html).not.toContain('href="/e/');
     expect(html).not.toContain("View story");
+    expect(html).not.toContain("Story brief");
   });
 });
