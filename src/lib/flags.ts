@@ -5,6 +5,7 @@ export const SAFETY_FLAGS = [
   "THIRD_PARTY_READER_ENABLED",
   "DISCOVERY_ENABLED",
   "READER_WATCH_ENABLED",
+  "ASK_PUBLIC_ENABLED",
 ] as const;
 
 export type SafetyFlag = (typeof SAFETY_FLAGS)[number];
