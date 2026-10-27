@@ -1,5 +1,5 @@
-import { timelineDisplayDate } from "../../lib/artifacts/grounding";
 import type { TechnologyEvolutionTimeline } from "../../lib/artifacts/types";
+import { localDate } from "../../lib/time";
 import type { ArtifactSourceView } from "../../server/publication/events";
 import { ArtifactSources } from "./ArtifactSources";
 
@@ -11,6 +11,20 @@ export function EvolutionTimelineCard({
   sources: ArtifactSourceView[];
 }) {
   if (sources.length === 0) return null;
+  // Each entry is dated by its cited article's publish day (UTC) from the
+  // database; the model's date is not shown. Undated entries go last; the
+  // sort is stable, so one day keeps the model's order.
+  const entries = timeline.entries
+    .map((e) => {
+      const at = sources.find((s) => s.id === e.source.articleId)?.publishedAt;
+      return { e, day: at == null ? null : localDate(at, "UTC") };
+    })
+    .sort((a, b) => {
+      if (a.day === b.day) return 0;
+      if (a.day === null) return 1;
+      if (b.day === null) return -1;
+      return a.day < b.day ? -1 : 1;
+    });
   return (
     <section
       aria-label="Technology Evolution Timeline"
@@ -26,17 +40,12 @@ export function EvolutionTimelineCard({
         </p>
       </header>
       <ol className="flex flex-col gap-3">
-        {timeline.entries.map((e, i) => (
+        {entries.map(({ e, day }, i) => (
           <li key={i} className="min-w-0 border-l-2 border-border pl-3">
-            {/* The kind and dateSource are model judgments and are not shown;
-                the date is checked against the quote or comes from the DB. */}
+            {/* The model's kind, date and dateSource are not shown. */}
             <p className="flex flex-wrap gap-x-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
               <span>
-                {timelineDisplayDate(
-                  e.date,
-                  e.source.quote,
-                  sources.find((s) => s.id === e.source.articleId)?.publishedAt,
-                )}
+                {day === null ? "Date not stated" : `Reported ${day}`}
               </span>
             </p>
             {/* The verified quote, not the model's paraphrase in e.description. */}

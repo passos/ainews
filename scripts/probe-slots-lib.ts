@@ -246,6 +246,7 @@ function artifactMaterial(
         summary: fixture.summary,
         bodyText: body(fixture),
         sourceBodyText: body(fixture),
+        canonicalUrl: fixture.url,
       },
     ],
     verifiedClaims: [

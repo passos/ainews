@@ -40,6 +40,7 @@ import type { TextRequest } from "../../providers/adapters";
 import { WRITE_THINKING } from "../analyze/prompts";
 import { localDate } from "../../lib/time";
 import {
+  groundedSentences,
   normalizeSourceText,
   sourceTextContains,
 } from "../../lib/artifacts/grounding";
@@ -83,6 +84,11 @@ export interface ArtifactArticleMaterial {
    * Prompts do not read it, so request bytes do not depend on it.
    */
   sourceBodyText: string | null;
+  /**
+   * articles.canonical_url. Its host decides whether two articles come from
+   * the same outlet. Prompts and inputSha do not read it.
+   */
+  canonicalUrl: string;
 }
 
 export interface ArtifactVerifiedClaim {
@@ -1311,19 +1317,25 @@ export function parseEarningsDecoderOutput(
 // Technology products: Launch Reality Check, Technology Evolution Timeline (N§3)
 // -----------------------------------------------------------------------------
 
-/** The quote is copied from the cited article of this material. */
-function quoteIsGrounded(
+/**
+ * The quote as stored: every sentence of the cited article's source body
+ * that the model's quote touches. Null when the model's quote is not copied
+ * from that article of this material.
+ */
+function groundedQuote(
   material: ArtifactEventMaterial,
   q: SourceQuote,
-): boolean {
+): SourceQuote | null {
   // The schema's 20-character minimum applies to the text, not to padding.
-  if (normalizeSourceText(q.quote).length < 20) return false;
+  if (normalizeSourceText(q.quote).length < 20) return null;
   const article = material.articles.find((a) => a.id === q.articleId);
-  return sourceTextContains(article?.sourceBodyText, q.quote);
+  const quote = groundedSentences(article?.sourceBodyText, q.quote);
+  return quote === null ? null : { articleId: q.articleId, quote };
 }
 
 /**
- * The domain key of an article. The host is read by the URL parser, which
+ * The domain key of an article, from the host of its canonical URL, not
+ * from the source's site domain. The URL parser
  * drops a port, lowercases, turns an IDN into punycode and writes IP
  * addresses in one form ("0x7f.1" -> "127.0.0.1", "[0:0::1]" -> "[::1]").
  * Trailing dots are removed. An IP literal is its own key; for a name, a
@@ -1332,17 +1344,17 @@ function quoteIsGrounded(
  * There is no public-suffix list, so multi-part suffixes collapse:
  * "x.co.uk" and "y.co.uk" both give "co.uk". That errs toward dropping
  * evidence, which is the safe direction. "" when the article is missing or
- * the domain is not a host name.
+ * its URL does not parse or has no host name ("mailto:x@y.com").
  */
 function articleDomain(
   material: ArtifactEventMaterial,
   articleId: number,
 ): string {
   const raw =
-    material.articles.find((a) => a.id === articleId)?.sourceDomain ?? "";
+    material.articles.find((a) => a.id === articleId)?.canonicalUrl ?? "";
   let host: string;
   try {
-    host = new URL(`https://${raw}`).hostname.replace(/\.+$/, "");
+    host = new URL(raw).hostname.replace(/\.+$/, "");
   } catch {
     return "";
   }
@@ -1428,7 +1440,8 @@ export function parseLaunchRealityCheckOutput(
   if (!raw.success) return null;
 
   const claims = raw.data.claims.flatMap((c) => {
-    if (!quoteIsGrounded(material, c.claimQuote)) return [];
+    const claimQuote = groundedQuote(material, c.claimQuote);
+    if (!claimQuote) return [];
     const claimText = normalizeSourceText(c.claimQuote.quote);
     const claimDomain = articleDomain(material, c.claimQuote.articleId);
     // Evidence is independent only when it comes from another article on
@@ -1437,20 +1450,21 @@ export function parseLaunchRealityCheckOutput(
     const evidence =
       c.verdict === "no_independent_evidence"
         ? []
-        : c.independentEvidence.filter((e) => {
+        : c.independentEvidence.flatMap((e) => {
             const evidenceDomain = articleDomain(material, e.articleId);
-            return (
-              quoteIsGrounded(material, e) &&
+            const quote = groundedQuote(material, e);
+            return quote &&
               e.articleId !== c.claimQuote.articleId &&
               claimDomain !== "" &&
               evidenceDomain !== "" &&
               evidenceDomain !== claimDomain &&
               normalizeSourceText(e.quote) !== claimText
-            );
+              ? [quote]
+              : [];
           });
     const verdict =
       evidence.length === 0 ? ("no_independent_evidence" as const) : c.verdict;
-    return [{ ...c, verdict, independentEvidence: evidence }];
+    return [{ ...c, claimQuote, verdict, independentEvidence: evidence }];
   });
 
   const out = launchRealityCheckSchema.safeParse({
@@ -1512,10 +1526,10 @@ export function buildEvolutionTimelineRequest(
 }
 
 /**
- * Keeps only entries whose quotes are copied from an article of `material`.
- * Dates come from the cited article: its publish date for
- * "report_published", or the stated date only when that article contains it.
- * Order is kept: the dates are free text and cannot be compared reliably.
+ * Keeps only entries whose quotes are copied from an article of `material`,
+ * each quote stored as its whole sentences. The model's date fields are kept
+ * as written and never shown: the card shows and sorts by the cited
+ * article's publish date.
  */
 export function parseEvolutionTimelineOutput(
   rawText: string,
@@ -1532,15 +1546,8 @@ export function parseEvolutionTimelineOutput(
   if (!raw.success) return null;
 
   const entries = raw.data.entries.flatMap((e) => {
-    if (!quoteIsGrounded(material, e.source)) return [];
-    const art = material.articles.find((a) => a.id === e.source.articleId);
-    let date: string = NOT_STATED_IN_SOURCES;
-    if (e.dateSource === "report_published") {
-      if (art?.publishedAt != null) date = localDate(art.publishedAt, "UTC");
-    } else if (sourceTextContains(art?.sourceBodyText, e.date)) {
-      date = e.date;
-    }
-    return [{ ...e, date }];
+    const source = groundedQuote(material, e.source);
+    return source ? [{ ...e, source }] : [];
   });
 
   const out = technologyEvolutionTimelineSchema.safeParse({ entries });

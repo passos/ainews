@@ -348,6 +348,7 @@ export async function generateEventArtifacts(
         summary: r.summary,
         bodyText: bodyText || r.summary,
         sourceBodyText: bodyText || null,
+        canonicalUrl: r.canonical_url,
       };
     }),
   );

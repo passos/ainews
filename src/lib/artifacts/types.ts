@@ -463,10 +463,14 @@ export type EarningsDecoder = z.infer<typeof earningsDecoderSchema>;
 
 export const NOT_STATED_IN_SOURCES = "Not stated in sources";
 
-/** A passage copied from one approved source article of the event. */
+/**
+ * A passage of one approved source article of the event. The model copies
+ * 20 to 300 characters; the parser stores every body sentence that copy
+ * touches (#144), so the stored text has no upper limit.
+ */
 export const sourceQuoteSchema = z.strictObject({
   articleId: z.number().int().positive(),
-  quote: z.string().min(20).max(300),
+  quote: z.string().min(20),
 });
 export type SourceQuote = z.infer<typeof sourceQuoteSchema>;
 

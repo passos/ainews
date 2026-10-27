@@ -1,3 +1,4 @@
+import { sourceTextContains } from "../../lib/artifacts/grounding";
 import type {
   LaunchRealityCheck,
   LaunchVerdict,
@@ -34,9 +35,6 @@ export function LaunchRealityCheckCard({
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
           Launch Reality Check
         </h3>
-        {/* The subject is a grounded name. The claimant is not shown: the
-            quote and its source article stand for who made the claim. */}
-        <p className="wrap-anywhere text-sm">{check.subject}</p>
         <p className="text-sm text-muted-foreground">
           {k} of {n} {n === 1 ? "claim has" : "claims have"} evidence from other
           outlets in these sources.
@@ -49,6 +47,14 @@ export function LaunchRealityCheckCard({
           )?.title;
           return (
             <li key={i} className="min-w-0 border-l-2 border-border pl-3">
+              {/* The subject heads only a claim whose own sentence names it;
+                  the claimant is not shown: the sentence and its source
+                  article stand for who made the claim. */}
+              <h4 className="wrap-anywhere text-sm">
+                {sourceTextContains(c.claimQuote.quote, check.subject)
+                  ? check.subject
+                  : "Claim"}
+              </h4>
               {/* The verified quote, not the model's paraphrase in c.claim. */}
               <p className="wrap-anywhere text-sm font-bold">
                 &quot;{c.claimQuote.quote}&quot;
