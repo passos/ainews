@@ -100,7 +100,7 @@ describe("InspectEvidencePanel", () => {
 
     // Claim 1 assertions
     expect(html).toContain("fact");
-    expect(html).toContain("Verified");
+    expect(html).toContain(">Supported · model assessment<");
     expect(html).toContain("Model assessment: vendor claim only");
     expect(html).toContain("Vendor · model assessment");
     expect(html).toContain("Primary source cited");
@@ -114,7 +114,7 @@ describe("InspectEvidencePanel", () => {
 
     // Claim 2 assertions
     expect(html).toContain("prediction");
-    expect(html).toContain("Disputed");
+    expect(html).toContain(">Disputed · model assessment<");
     expect(html).toContain("Model assessment: disputed by independent source");
     expect(html).toContain(
       "Analyst predicts commercial availability by late 2027",
@@ -240,11 +240,19 @@ describe("InspectEvidencePanel model-output labels", () => {
     );
   });
 
-  it("keeps the consensus badge text for the code-computed status", () => {
-    const html = render(claim("unspecified", "independent"));
-    expect(html).toContain(">Verified<");
-    expect(html).not.toContain("Model assessment: supported");
-    expect(html).not.toContain("Model assessment: Verified");
+  it("labels the consensus badge as a model assessment", () => {
+    const withStatus = (status: ClaimView["consensusStatus"]) =>
+      render({
+        ...claim("unspecified", "independent"),
+        consensusStatus: status,
+      });
+    const verified = withStatus("verified");
+    expect(verified).toContain(">Supported · model assessment<");
+    expect(verified).not.toContain(">Verified<");
+    expect(withStatus("disputed")).toContain(">Disputed · model assessment<");
+    const unverified = withStatus("unverified");
+    expect(unverified).toContain(">Unverified<");
+    expect(unverified).not.toContain("Unverified ·");
   });
 
   it("shows markdown links in a quote as plain text but links from the raw quote", () => {
