@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import { Await, Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { ArticleCard } from "../../components/ArticleCard";
-import { AudienceSelector } from "../../components/AudienceSelector";
 import { AudienceExplainCard } from "../../components/artifacts/AudienceExplainCard";
 import { ClassroomDiscussionCard } from "../../components/artifacts/ClassroomDiscussionCard";
 import { EducationEvidenceCard } from "../../components/artifacts/EducationEvidenceCard";
@@ -160,14 +159,11 @@ export function EventPageView({
       )}
 
       {hasExplanations && (
-        <>
-          <AudienceSelector current={audience} />
-          <AudienceExplainCard
-            explanations={artifacts.explanations}
-            initialAudience={audience}
-            sources={artifactSources}
-          />
-        </>
+        <AudienceExplainCard
+          explanations={artifacts.explanations}
+          initialAudience={audience}
+          sources={artifactSources}
+        />
       )}
 
       {artifacts?.decoder && <PaperDecoderCard decoder={artifacts.decoder} />}

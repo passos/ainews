@@ -63,7 +63,10 @@ export function AudienceExplainCard({
           </p>
         </div>
 
-        <nav aria-label="Audience tiers" className="flex items-center gap-1">
+        <nav aria-label="Explain for" className="flex items-center gap-1">
+          <span className="mr-1 font-mono text-xs font-bold uppercase tracking-widest text-sec-ink">
+            Explain for
+          </span>
           {availableAudiences.map((aud) => {
             const isSelected = aud === selectedAudience;
             return (
