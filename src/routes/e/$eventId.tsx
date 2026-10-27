@@ -507,7 +507,7 @@ export function EventPageView({
                                 <span>Original source</span>
                               </div>
                             )}
-                          <ArticleCard article={a} />
+                          <ArticleCard article={a} hideEventLink />
                         </div>
                       ))}
                     </div>
@@ -521,7 +521,7 @@ export function EventPageView({
                       <span>First seen</span>
                     </div>
                   )}
-                  <ArticleCard article={a} />
+                  <ArticleCard article={a} hideEventLink />
                 </div>
               ))}
         </div>
