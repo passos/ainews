@@ -670,11 +670,8 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    // Pins current behavior of the recovery path (ANY_BODY_APPROVED_SQL, #84):
-    // with no body_sha, the review is written for sha256(canonical), which is
-    // not the article's current body, and the article is still linked.
-    // Tightening this path is tracked in #103.
-    it("auto section: recovering an orphan with no body_sha links it on an any-body approval", async () => {
+    // #103 (ruling B): recovery needs an approval of the current body; with no body_sha nothing is written.
+    it("auto section: an orphan with no body_sha is not recovered and gets no system approval (#103)", async () => {
       const orphan = await env.DB.prepare(
         `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
          VALUES (1, ?1, 'https://arxiv.org/abs/orphan-null', 'https://arxiv.org/abs/orphan-null', 'Orphan', NULL, 'grouped', 1000, 1000)
@@ -704,12 +701,63 @@ Consolidated balance sheets, income statements, and cash flows are presented her
       );
 
       const review = await env.DB.prepare(
-        `SELECT decision, body_sha FROM reviews WHERE article_id = ?1`,
+        `SELECT 1 FROM reviews WHERE article_id = ?1`,
       )
         .bind(orphan!.id)
-        .first<{ decision: string; body_sha: string }>();
+        .first();
+      expect(review).toBeNull();
+      const linked = await env.DB.prepare(
+        `SELECT 1 FROM event_articles WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first();
+      expect(linked).toBeNull();
+      const ev = await env.DB.prepare(
+        `SELECT revision FROM events WHERE id = ?1`,
+      )
+        .bind(eventId)
+        .first<{ revision: number }>();
+      expect(ev!.revision).toBe(1);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("auto section: recovering an orphan with a body_sha approves its current body and links it", async () => {
+      const orphan = await env.DB.prepare(
+        `INSERT INTO articles (industry_id, source_id, canonical_url, url, title, body_sha, stage, stage_updated_at, fetched_at)
+         VALUES (1, ?1, 'https://arxiv.org/abs/orphan-body', 'https://arxiv.org/abs/orphan-body', 'Orphan', 'sha_orphan_body', 'grouped', 1000, 1000)
+         RETURNING id`,
+      )
+        .bind(arxivSourceId)
+        .first<{ id: number }>();
+      await seedApprovedReport(
+        eventId,
+        1,
+        "sha_orphan_body_link",
+        "Preprint at [arXiv](https://arxiv.org/abs/orphan-body).",
+      );
+      const mockFetch = vi.fn();
+
+      await trackEventPrimarySources(
+        {
+          db: env.DB,
+          bodies: env.BODIES,
+          fetch: mockFetch as unknown as typeof fetch,
+          now: () => 2000,
+        },
+        env,
+        eventId,
+        ["arxiv.org"],
+        2000,
+      );
+
+      const review = await env.DB.prepare(
+        `SELECT decision, body_sha, reviewer FROM reviews WHERE article_id = ?1`,
+      )
+        .bind(orphan!.id)
+        .first<{ decision: string; body_sha: string; reviewer: string }>();
       expect(review?.decision).toBe("approved");
-      expect(review?.body_sha).not.toBeNull();
+      expect(review?.body_sha).toBe("sha_orphan_body");
+      expect(review?.reviewer).toBe("system:primary_tracker");
       const linked = await env.DB.prepare(
         `SELECT input_revision FROM event_articles WHERE article_id = ?1`,
       )
