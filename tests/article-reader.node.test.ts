@@ -34,7 +34,13 @@ const base: ArticlePage = {
   bodyHtml: "<p>BODY</p>",
   excerpted: false,
   bodyIsAbstract: false,
+  event: null,
 };
+
+const asideOf = (html: string) =>
+  /<aside\b[^>]*aria-label="About this story"[\s\S]*?<\/aside>/.exec(
+    html,
+  )?.[0] ?? "";
 
 const render = (page: Partial<ArticlePage>, a: Partial<ArticleView> = {}) =>
   renderToStaticMarkup(
@@ -44,19 +50,20 @@ const render = (page: Partial<ArticlePage>, a: Partial<ArticleView> = {}) =>
   );
 
 describe("ArticleReader", () => {
-  it("orders title, original link, AI summary, body, bottom original link", () => {
+  it("orders kicker, title, summary and body; the original link is in the sidebar once", () => {
     const html = render({});
     const steps = [
+      html.indexOf('href="/s/technology"'),
       html.indexOf("A title"),
-      html.indexOf("Read the original at Wire ↗"),
       html.indexOf("AI summary"),
       html.indexOf("article-body"),
-      html.lastIndexOf("Read the original at Wire ↗"),
     ];
     expect(steps.every((n) => n >= 0)).toBe(true);
     expect([...steps].sort((x, y) => x - y)).toEqual(steps);
-    expect(steps[4]).toBeGreaterThan(steps[1]);
-    expect(html).toContain('href="https://news.example/a"');
+    expect(html.split("Read the original at Wire ↗").length - 1).toBe(1);
+    const aside = asideOf(html);
+    expect(aside).toContain('href="https://news.example/a"');
+    expect(aside).toContain("Read the original at Wire ↗");
     expect(html).toContain("<p>BODY</p>");
   });
 
@@ -122,53 +129,116 @@ describe("ArticleReader", () => {
     );
   });
 
-  it("links the story page when the article belongs to an event", () => {
+  it("links the story page from the sidebar when the article belongs to an event", () => {
     const html = render({}, { eventId: 42 });
-    expect(html).toContain('href="/e/42"');
-    expect(html).toContain("Story brief, explanations and evidence →");
+    const aside = asideOf(html);
+    expect(aside).toContain('href="/e/42"');
+    expect(aside).toContain("Story brief, explanations and evidence →");
     expect(html).not.toContain("This story on Daily");
-    // Near the top: after the meta line, before the original link, the
-    // summary and the body.
-    const link = html.indexOf('href="/e/42"');
-    expect(link).toBeGreaterThan(html.indexOf("Fetched"));
-    expect(link).toBeLessThan(html.indexOf("Read the original at Wire ↗"));
-    expect(link).toBeLessThan(html.indexOf("AI summary"));
-    expect(link).toBeLessThan(html.indexOf("article-body"));
+    // The only story link on the page.
+    expect(html.split('href="/e/42"').length - 1).toBe(1);
   });
 
-  it("the story link is one clickable block with a label and a heading link", () => {
-    const html = render({}, { eventId: 42 });
-    const m = /<a [^>]*href="\/e\/42"[^>]*>([\s\S]*?)<\/a>/.exec(html);
-    expect(m).not.toBeNull();
-    const [open, inner] = [m![0], m![1]];
-    // The anchor wraps the block: label and link text are both inside it.
-    expect(inner).toContain("On Daily");
-    expect(inner).toContain("Story brief, explanations and evidence →");
-    expect(open).toMatch(/class="[^"]*\bborder-y\b/);
-    expect(open).toMatch(/class="[^"]*\bpy-3\b/);
-    expect(inner).toMatch(
+  it("sidebar block 1 is On Daily: 3px top rule, label, large serif link", () => {
+    const aside = asideOf(render({}, { eventId: 42 }));
+    const block =
+      /<div [^>]*class="([^"]*)"[^>]*>(?:(?!<\/div>)[\s\S])*On Daily/.exec(
+        aside,
+      );
+    expect(block).not.toBeNull();
+    expect(block![1]).toContain("border-t-[3px]");
+    expect(block![1]).toContain("border-foreground");
+    expect(aside).toMatch(
       /class="[^"]*\btext-xs\b[^"]*\btext-muted-foreground\b[^"]*">On Daily/,
     );
-    expect(inner).toMatch(
-      /class="[^"]*\bfont-heading\b[^"]*\btext-lg\b[^"]*\bfont-semibold\b[^"]*">Story brief/,
-    );
-    // Quiet: no fill, no shadow.
-    expect(open).not.toMatch(/\b(bg-|shadow)/);
+    const link = /<a [^>]*href="\/e\/42"[^>]*class="([^"]*)"/.exec(aside)?.[1];
+    expect(link).toMatch(/\bfont-heading\b/);
+    expect(link).toMatch(/\btext-\[1\.375rem\]/);
+    expect(link).toMatch(/\bfont-semibold\b/);
+    expect(aside).not.toMatch(/\b(bg-|shadow)/);
   });
 
-  it("uses one centred reading column for the whole article", () => {
+  it("sidebar block 2 is Source: hairline top rule, From / Published / Fetched in a dl", () => {
+    const aside = asideOf(render({}));
+    const block =
+      /<div [^>]*class="([^"]*)"[^>]*>(?:(?!<\/div>)[\s\S])*Source</.exec(
+        aside,
+      );
+    expect(block).not.toBeNull();
+    expect(block![1]).toMatch(/\bborder-t\b/);
+    expect(block![1]).not.toContain("border-t-[3px]");
+    const dl = /<dl\b[\s\S]*?<\/dl>/.exec(aside)?.[0] ?? "";
+    expect(dl).toMatch(/<dt[^>]*>From<\/dt>\s*<dd[^>]*>Wire<\/dd>/);
+    expect(dl).toMatch(/<dt[^>]*>Published<\/dt>\s*<dd[^>]*><time /);
+    expect(dl).toMatch(/<dt[^>]*>Fetched<\/dt>\s*<dd[^>]*><time /);
+    // Source is the second block, after On Daily.
+    const withEvent = asideOf(render({}, { eventId: 42 }));
+    expect(withEvent.indexOf("On Daily")).toBeLessThan(
+      withEvent.indexOf("Source<"),
+    );
+  });
+
+  it("omits Published when the source gave no date", () => {
+    const dl = /<dl\b[\s\S]*?<\/dl>/.exec(
+      render({}, { publishedAt: null }),
+    )?.[0];
+    expect(dl).toContain("Fetched");
+    expect(dl).not.toContain("Published");
+  });
+
+  it("shows no original link without a url", () => {
+    expect(asideOf(render({}, { url: null }))).not.toContain(
+      "Read the original",
+    );
+  });
+
+  it("an article without an event has only the Source block", () => {
+    const aside = asideOf(render({}, { eventId: null }));
+    expect(aside).toContain("Source");
+    expect(aside).not.toContain("On Daily");
+    expect(aside).not.toContain('href="/e/');
+  });
+
+  it("title block: kicker links the section, title spans the page, one hairline", () => {
+    const html = render({}, { eventId: 42 });
+    const header = /<header\b[\s\S]*?<\/header>/.exec(html)?.[0] ?? "";
+    expect(header).toMatch(
+      /<a [^>]*href="\/s\/technology"[^>]*>Technology<\/a>/,
+    );
+    expect(header).toContain("<h1");
+    expect(header).toMatch(/^<header [^>]*class="[^"]*\bborder-b\b/);
+    // Nothing under the meta line any more: no other horizontal rule.
+    const rest = html.replace(header, "");
+    const rules = rest.match(/class="[^"]*\bborder-(?:b|y)\b[^"]*"/g) ?? [];
+    expect(rules).toEqual([]);
+  });
+
+  it("is full width: no centred column, two-column grid at 860px, sidebar sticky", () => {
     const html = render({ bodyIsAbstract: true }, { eventId: 42 });
     const article = /<article\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? "";
-    expect(article).toMatch(/\bmx-auto\b/);
-    expect(article).toMatch(/\bw-full\b/);
-    expect(article).toContain("max-w-[40rem]");
-    // No inner width caps: every part uses the column width.
+    expect(article).not.toMatch(/\bmx-auto\b/);
+    expect(article).not.toContain("max-w-[40rem]");
+    expect(html).not.toContain("max-w-[40rem]");
     expect(html).not.toContain("max-w-[20em]");
     expect(html).not.toContain("max-w-[36em]");
+    const grid = /<div [^>]*class="([^"]*grid[^"]*)"/.exec(html)?.[1] ?? "";
+    expect(grid).toContain(
+      "min-[860px]:grid-cols-[minmax(0,42rem)_minmax(0,1fr)]",
+    );
+    const aside =
+      /<aside\b[^>]*aria-label="About this story"[^>]*class="([^"]*)"/.exec(
+        html,
+      )?.[1] ?? "";
+    // Stacked above the body below 860px, sticky from 860px.
+    expect(aside).toMatch(/(^| )order-first( |$)/);
+    expect(aside).toContain("min-[860px]:order-none");
+    expect(aside).toContain("min-[860px]:sticky");
+    expect(aside).not.toMatch(/(^| )sticky( |$)/);
     const h1 = /<h1\b[^>]*class="([^"]*)"/.exec(html)?.[1] ?? "";
     expect(h1).toMatch(/\btext-3xl\b/);
     expect(h1).toContain("sm:text-[2.75rem]");
     expect(h1).not.toContain("sm:text-5xl");
+    expect(h1).not.toMatch(/max-w-/);
   });
 
   it(".article-body has no max-width of its own", () => {
@@ -184,5 +254,94 @@ describe("ArticleReader", () => {
     const html = render({}, { eventId: null });
     expect(html).not.toContain('href="/e/');
     expect(html).not.toContain("This story on Daily");
+  });
+
+  it("keeps the disclaimer and correction in the body column, not the sidebar", () => {
+    const html = render(
+      {},
+      { sectionDisclaimer: "Not advice.", correction: "Fixed." },
+    );
+    const aside = asideOf(html);
+    expect(aside).not.toContain("Not advice.");
+    expect(aside).not.toContain("Fixed.");
+    expect(html).toContain("Not advice.");
+    expect(html).toContain("Fixed.");
+  });
+
+  describe("On Daily block data", () => {
+    const event = {
+      whatHappened: "An audit found flaws.",
+      sections: { brief: true, evidenceClaims: 4, explain: true, ask: true },
+    };
+    const links = (aside: string) =>
+      [
+        ...aside.matchAll(/<a [^>]*href="(\/e\/42#[^"]+)"[^>]*>([^<]*)<\/a>/g),
+      ].map((m) => [m[1], m[2]]);
+
+    it("shows the What happened sentence and the anchor links", () => {
+      const aside = asideOf(render({ event }, { eventId: 42 }));
+      expect(aside).toContain("An audit found flaws.");
+      expect(links(aside)).toEqual([
+        ["/e/42#brief", "Brief"],
+        ["/e/42#evidence", "Evidence · 4 claims"],
+        ["/e/42#explain", "Explain"],
+        ["/e/42#ask", "Ask"],
+      ]);
+      // Between the story link and the Source block.
+      expect(aside.indexOf("An audit found flaws.")).toBeGreaterThan(
+        aside.indexOf("Story brief, explanations and evidence →"),
+      );
+      expect(aside.indexOf("An audit found flaws.")).toBeLessThan(
+        aside.indexOf("Source<"),
+      );
+    });
+
+    it("omits the sentence when there is none", () => {
+      const aside = asideOf(
+        render({ event: { ...event, whatHappened: null } }, { eventId: 42 }),
+      );
+      expect(aside).not.toContain("An audit found flaws.");
+      // No empty paragraph left behind.
+      expect(aside).not.toContain("text-[0.9375rem]");
+      expect(links(aside).length).toBe(4);
+    });
+
+    it("lists only the sections that exist", () => {
+      const aside = asideOf(
+        render(
+          {
+            event: {
+              whatHappened: null,
+              sections: {
+                brief: false,
+                evidenceClaims: 1,
+                explain: false,
+                ask: false,
+              },
+            },
+          },
+          { eventId: 42 },
+        ),
+      );
+      expect(links(aside)).toEqual([["/e/42#evidence", "Evidence · 1 claim"]]);
+      const none = asideOf(
+        render(
+          {
+            event: {
+              whatHappened: null,
+              sections: {
+                brief: false,
+                evidenceClaims: 0,
+                explain: false,
+                ask: false,
+              },
+            },
+          },
+          { eventId: 42 },
+        ),
+      );
+      expect(links(none)).toEqual([]);
+      expect(none).toContain("Story brief, explanations and evidence →");
+    });
   });
 });

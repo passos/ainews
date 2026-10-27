@@ -65,6 +65,24 @@ describe("palette", () => {
   });
 });
 
+describe("headings and symbols (#87 A3a)", () => {
+  it("public sources have no pictograph, star or check mark", () => {
+    expect(
+      hits(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u),
+    ).toEqual([]);
+  });
+
+  it("public sources set no all-caps text", () => {
+    expect(hits(/\buppercase\b/)).toEqual([]);
+  });
+
+  it("h1 and h2 use text-wrap: pretty, never balance", () => {
+    expect(css).toMatch(/h1,\s*h2\s*{[^}]*text-wrap:\s*pretty/);
+    expect(css).not.toMatch(/text-wrap:\s*balance/);
+    expect(hits(/\btext-balance\b/)).toEqual([]);
+  });
+});
+
 describe("fonts", () => {
   const faces = [...css.matchAll(/@font-face\s*{([^}]*)}/g)].map((m) => m[1]);
 

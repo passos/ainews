@@ -95,8 +95,9 @@ describe("InspectEvidencePanel", () => {
     );
 
     // Section header
-    expect(html).toContain("Inspect Evidence");
-    expect(html).toContain("2 claims inspected");
+    expect(html).toMatch(/<h2 [^>]*>Evidence<\/h2>/);
+    expect(html).not.toContain("Inspect Evidence");
+    expect(html).toContain("2 claims, each traced to a quoted source passage");
 
     // Claim 1 assertions
     expect(html).toContain("fact");
@@ -106,7 +107,7 @@ describe("InspectEvidencePanel", () => {
     expect(html).toContain("Primary source cited");
     expect(html).toContain("National lab deployed 500-qubit quantum processor");
     expect(html).toContain("Supports");
-    expect(html).toContain("★ Original source");
+    expect(html).toContain("Original source");
     expect(html).toContain("energy.gov");
     expect(html).toContain(
       "The national lab completed deployment of its 500-qubit processor ahead of schedule.",
@@ -300,7 +301,8 @@ describe("StoryBriefCard with verifiedClaims", () => {
       }),
     );
 
-    expect(html).toContain("AI Story Brief");
+    expect(html).toMatch(/<h2 [^>]*>Story brief<\/h2>/);
+    expect(html).not.toContain("AI Story Brief");
     expect(html).toContain("What Evidence Exists");
     expect(html).toContain("Traced to primary lab report");
     expect(html).toContain("Verified high-throughput architecture benchmarked");
