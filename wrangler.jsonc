@@ -11,7 +11,8 @@
   "upload_source_maps": true,
   "observability": { "enabled": true },
   "routes": [{ "pattern": "news.ioenv.com", "custom_domain": true }],
-  "triggers": { "crons": ["*/10 * * * *"] },
+  // Paused: no scheduled collection or processing. Restore ["*/10 * * * *"] to resume.
+  "triggers": { "crons": [] },
   "d1_databases": [
     {
       "binding": "DB",
@@ -78,7 +79,7 @@
     "THIRD_PARTY_READER_ENABLED": "false",
     "DISCOVERY_ENABLED": "false",
     "READER_WATCH_ENABLED": "true",
-    "ASK_PUBLIC_ENABLED": "true",
+    "ASK_PUBLIC_ENABLED": "false",
   },
   "env": {
     // Local tests only (vitest, test:ssr). AI, Vectorize and send_email are
